@@ -78,8 +78,10 @@
     /* Tabellen auf dem Handy horizontal scrollbar statt gequetscht */
     .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     @media (max-width: 640px) {
-      #charge-log, #ev-list { table-layout: auto; min-width: 560px; }
-      #charge-log td, #ev-list td { white-space: nowrap; }
+      #charge-log, #ev-list { table-layout: auto; font-size: 12px; }
+      #charge-log { min-width: 0; }          /* passt meist ohne Scrollen */
+      #ev-list { min-width: 480px; }         /* hat zusätzlich den Löschen-Button */
+      #charge-log td, #ev-list td { white-space: nowrap; padding: 6px 4px; }
     }
     .banner { padding: 10px 14px; border-radius: 10px; margin-bottom: 14px; font-size: 14px; }
     .banner.warn { background: rgba(255,176,32,.12); color: var(--accent);
@@ -100,9 +102,12 @@
     .sw-exp { background: var(--exp); } .sw-vexp { background: var(--vexp); }
     .sw-plan { background: transparent; border: 2px solid var(--plan); }
     /* Kurve mit Scroll (schmale Ansicht) + Drag-Auswahl */
-    .chart-scroll { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; margin-top: 12px; }
-    .chart-inner { height: 300px; }
-    @media (max-width: 720px) { .chart-inner { height: 240px; } }
+    .chart-scroll { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch;
+      margin-top: 12px; max-width: 100%; }
+    .chart-inner { height: 300px; width: 100%; }
+    /* Handy: Kurve doppelt so breit -> ~12 h sichtbar, Rest seitlich scrollen.
+       Feste CSS-Breite statt JS verhindert das Aufschaukeln von Chart.js. */
+    @media (max-width: 720px) { .chart-inner { height: 250px; width: 200%; } }
     .chart-scroll canvas { cursor: crosshair; touch-action: pan-x; }
     body.selecting .chart-scroll canvas { touch-action: none; }
     .sel-btn[aria-pressed="true"] { background: var(--timer); color: #14171c; border-color: var(--timer); }

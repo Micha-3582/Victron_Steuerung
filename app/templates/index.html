@@ -262,16 +262,9 @@ function setSelectMode(on) {
 }
 $('btn-select').addEventListener('click', () => setSelectMode(!selectMode));
 
-/* Schmale Ansicht: nur ~12 h sichtbar, Rest seitlich scrollen */
-const HOURS_VISIBLE = 12;
+/* Breite kommt jetzt rein aus CSS (stabil). Hier nur ein sanftes resize,
+   ohne die Breite aus der eigenen Messung abzuleiten (kein Aufschaukeln). */
 function updateWidth() {
-  const inner = $('chart-inner'), scroll = $('chart-scroll');
-  if (isNarrow()) {
-    const hours = Math.max(HOURS_VISIBLE, (prices.length || 48) / 4);  // 15-Min-Slots -> Stunden
-    inner.style.width = Math.round(scroll.clientWidth * hours / HOURS_VISIBLE) + 'px';
-  } else {
-    inner.style.width = '100%';
-  }
   if (chart) chart.resize();
 }
 window.addEventListener('resize', () => { updateWidth(); });
