@@ -299,7 +299,7 @@ async function load() {
       (s.ev_active ? ` <span class="pill green">Ladetermin läuft</span>` : '');
     $('meta').textContent = `Bilanz ${s.balance} kWh · PV heute ${s.pv_today} / morgen ${s.pv_tom} kWh · Stand ${d.last_tick || '–'}`
       + (s.pv_note ? ` · ⚠ ${s.pv_note}` : '');
-    $('planline').textContent = s.plan_count ? `Geplante Ladefenster: ${s.plan_windows}` : 'Aktuell keine Netzladung geplant.';
+    // planline wird tag-genau in applyDay() gesetzt
     if (!overrideBusy) $('override').checked = !!s.override;
     const note = $('override-note');
     if (s.override && s.dry_run) note.innerHTML = '<span style="color:var(--exp)">Override aktiv – aber Dry-Run schreibt NICHT an den Cerbo. Zum echten Schalten Dry-Run in den Einstellungen ausschalten.</span>';
@@ -411,6 +411,27 @@ function dayStr(offset) {
   const dt = new Date(base + 'T00:00:00'); dt.setDate(dt.getDate() + offset);
   return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
 }
+const addQuarter = hm => {
+  let [h, m] = hm.split(':').map(Number);
+  m += 15; if (m >= 60) { m -= 60; h = (h + 1) % 24; }
+  return `${pad(h)}:${pad(m)}`;
+};
+// Geplante Ladefenster NUR für den angegebenen Tag, zusammenhängende
+// 15-Min-Slots zu Fenstern gemergt (z.B. "13:45-14:15").
+function plannedWindowsFor(dateStr) {
+  const ps = allPrices
+    .filter(p => p.planned && p.start.slice(0, 10) === dateStr)
+    .sort((a, b) => a.start.localeCompare(b.start));
+  if (!ps.length) return '';
+  const wins = [];
+  let start = ps[0].label, end = addQuarter(ps[0].label);
+  for (let k = 1; k < ps.length; k++) {
+    if (ps[k].label === end) { end = addQuarter(ps[k].label); }
+    else { wins.push(`${start}-${end}`); start = ps[k].label; end = addQuarter(ps[k].label); }
+  }
+  wins.push(`${start}-${end}`);
+  return wins.join(', ');
+}
 function applyDay() {
   const target = activeDay === 'today' ? dayStr(0) : dayStr(1);
   prices = allPrices.filter(p => p.start.slice(0, 10) === target);
@@ -418,6 +439,10 @@ function applyDay() {
   $('drag-hint').textContent = emptyTom
     ? 'Für morgen liegen noch keine Preise vor (Tibber veröffentlicht sie ~13 Uhr).'
     : 'In die Kurve klicken oder ziehen, um einen Ladetermin anzulegen.';
+  const win = plannedWindowsFor(target);
+  $('planline').textContent = win
+    ? `Geplante Ladefenster (${activeDay === 'today' ? 'heute' : 'morgen'}): ${win}`
+    : (activeDay === 'today' ? 'Heute keine Netzladung geplant.' : 'Morgen keine Netzladung geplant.');
   renderChart();
   updateWidth();
 }
