@@ -204,19 +204,27 @@ def _next15(iso):
 
 
 def _window_stats(start_iso, end_iso, price_at, power_kw):
-    """Slots zwischen start/end: Ø-Preis, kWh und Kosten (€)."""
+    """Kennzahlen für ein Ladefenster start–end: kWh, Kosten (€) und
+    (dauer­gewichteter) Ø-Preis. Rechnet über die tatsächliche Überlappung mit
+    den Viertelstunden-Preis-Slots – auch wenn start/end nicht aufs 15-Min-Raster
+    fallen (z.B. echter Ladebeginn 00:47)."""
     s = datetime.fromisoformat(start_iso)
     e = datetime.fromisoformat(end_iso)
-    ps, t = [], s
+    kwh = cost = wsum = wdur = 0.0
+    t = s
     while t < e:
-        p = price_at.get(t.strftime("%Y-%m-%dT%H:%M"))
+        slot_start = t.replace(minute=(t.minute // 15) * 15, second=0, microsecond=0)
+        seg_end = min(e, slot_start + timedelta(minutes=15))
+        dur_h = (seg_end - t).total_seconds() / 3600.0
+        kwh_seg = dur_h * power_kw
+        kwh += kwh_seg
+        p = price_at.get(slot_start.strftime("%Y-%m-%dT%H:%M"))
         if p is not None:
-            ps.append(p)
-        t += timedelta(minutes=15)
-    n = len(ps)
-    kwh = n * power_kw * 0.25
-    cost = sum(pr / 100 * power_kw * 0.25 for pr in ps)
-    return {"avg_price": round(sum(ps) / n, 1) if n else None,
+            cost += p / 100.0 * kwh_seg
+            wsum += p * dur_h
+            wdur += dur_h
+        t = seg_end
+    return {"avg_price": round(wsum / wdur, 1) if wdur else None,
             "kwh": round(kwh, 2), "cost": round(cost, 2)}
 
 
