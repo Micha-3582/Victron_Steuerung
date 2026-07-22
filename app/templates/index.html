@@ -136,8 +136,10 @@ const bandPlugin = {
       const a = Math.min(drag.from, drag.to), b = Math.max(drag.from, drag.to);
       band(a, b, 'rgba(77,163,255,.22)', 'rgba(77,163,255,.7)');
     }
-    // Jetzt-Linie
-    const ni = prices.findIndex(p => p.label.slice(0, 2) === nowSlot.slice(0, 2) && p.label.slice(3, 5) === nowSlot.slice(3, 5));
+    // Jetzt-Linie – nur in der HEUTE-Ansicht (im Morgen-Tab gibt es kein "jetzt")
+    const ni = activeDay === 'today'
+      ? prices.findIndex(p => p.label.slice(0, 2) === nowSlot.slice(0, 2) && p.label.slice(3, 5) === nowSlot.slice(3, 5))
+      : -1;
     if (ni >= 0) {
       const px = x.getPixelForValue(ni);
       ctx.strokeStyle = '#e6e9ef'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
