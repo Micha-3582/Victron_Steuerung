@@ -235,31 +235,31 @@ def decide(soc: float, price_entries: list, solar_today_raw: float,
         state.morning_bridge = False
         state.night_buffer = False
 
+    # --- Aktuellen Slot/Preis IMMER zuerst bestimmen (auch für Override-Anzeige) ---
+    now_q = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
+    now_slot_name = slot_name_from_date(now_q)
+    hour_now = now.hour
+    slots_all = build_slots(price_entries, now)
+    prices = [s.price for s in slots_all]
+    avg_price = sum(prices) / len(prices) if prices else 0.0
+    min_price = min(prices) if prices else 0.0
+    now_price = next((s.price for s in slots_all if s.name == now_slot_name), avg_price)
+
     # --- Harte Ladesperre: nie über das SOC-Limit laden, auch nicht manuell ---
     if manual_override:
         if soc >= p.max_charge_soc:
             limit_txt = f"Ladelimit {int(p.max_charge_soc)}% erreicht"
             return Decision(allow_now=False, ess_mode=ESS_IDLE,
-                            now_slot="", now_price=0.0, reason=limit_txt,
-                            strategy=limit_txt, balance=0.0)
+                            now_slot=now_slot_name, now_price=round(now_price, 3),
+                            reason=limit_txt, strategy=limit_txt, balance=0.0)
         return Decision(allow_now=True, ess_mode=ESS_CHARGE,
-                        now_slot="", now_price=0.0, reason=force_reason,
-                        strategy=force_reason, balance=0.0)
+                        now_slot=now_slot_name, now_price=round(now_price, 3),
+                        reason=force_reason, strategy=force_reason, balance=0.0)
 
-    slots_all = build_slots(price_entries, now)
     if not slots_all:
-        return Decision(allow_now=False, ess_mode=ESS_IDLE, now_slot="",
+        return Decision(allow_now=False, ess_mode=ESS_IDLE, now_slot=now_slot_name,
                         now_price=0.0, reason="Keine Preisdaten",
                         strategy="", balance=0.0)
-
-    now_q = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
-    now_slot_name = slot_name_from_date(now_q)
-    hour_now = now.hour
-
-    prices = [s.price for s in slots_all]
-    avg_price = sum(prices) / len(prices)
-    min_price = min(prices)
-    now_price = next((s.price for s in slots_all if s.name == now_slot_name), avg_price)
 
     solar_today = round(solar_today_raw * p.pv_korrektur_faktor, 2)
     solar_tom = round(solar_tom_raw * p.pv_korrektur_faktor, 2)

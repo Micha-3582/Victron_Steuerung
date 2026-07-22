@@ -291,7 +291,10 @@ async function load() {
   if (s.ok) {
     chargePowerW = s.charge_power_w || 3500;
     const priceEl = $('price'); priceEl.textContent = s.now_price;
-    const cur = prices.find(p => p.label.slice(0, 2) === (s.now_slot || '').slice(0, 2));
+    // exakt die aktuelle Viertelstunde matchen (HH:MM), nicht nur die Stunde,
+    // damit die Zahl dieselbe Ampelfarbe wie der aktuelle Balken hat
+    const nowLabel = (s.now_slot || '').slice(0, 5);
+    const cur = allPrices.find(p => p.label === nowLabel);
     priceEl.style.color = cur ? (LEVEL_COLORS[cur.level] || '') : '';
     $('mode').innerHTML = `<span class="pill ${s.ess_mode === 9 ? 'green' : 'grey'}">${s.ess_text}</span>`;
     $('strategy').innerHTML = `<span class="pill amber">${s.strategy}</span>` +
