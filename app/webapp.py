@@ -125,6 +125,7 @@ class Controller:
                 "ev_active": ev,
                 "pv_note": pv_note,
                 "system": system,
+                "override": bool(cfg.get("manual_override")),
             }
         self.last_tick = now.isoformat(timespec="seconds")
         self.last_error = None

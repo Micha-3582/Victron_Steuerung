@@ -29,6 +29,7 @@
       </label>
       <div class="muted">Erzwingt Netzladen, unabhängig vom Preis. Zum Beenden wieder ausschalten.</div>
     </div>
+    <div class="muted" id="override-note" style="margin-top:10px"></div>
   </div>
 
   <div class="card full">
@@ -87,7 +88,7 @@ const LEVEL_COLORS = {
   EXPENSIVE: '#f0a63c', VERY_EXPENSIVE: '#e5544a'
 };
 let chart, prices = [], allPrices = [], schedules = [], nowSlot = '', nowIso = '';
-let activeDay = 'today', chargePowerW = 3500;
+let activeDay = 'today', chargePowerW = 3500, overrideBusy = false;
 let drag = null;           // {from, to}
 let selectMode = false;    // Touch: ziehen markiert statt scrollen
 
@@ -298,7 +299,11 @@ async function load() {
     $('meta').textContent = `Bilanz ${s.balance} kWh · PV heute ${s.pv_today} / morgen ${s.pv_tom} kWh · Stand ${d.last_tick || '–'}`
       + (s.pv_note ? ` · ⚠ ${s.pv_note}` : '');
     $('planline').textContent = s.plan_count ? `Geplante Ladefenster: ${s.plan_windows}` : 'Aktuell keine Netzladung geplant.';
-    $('override').checked = !!(s.strategy === 'MANUELL');
+    if (!overrideBusy) $('override').checked = !!s.override;
+    const note = $('override-note');
+    if (s.override && s.dry_run) note.innerHTML = '<span style="color:var(--exp)">Override aktiv – aber Dry-Run schreibt NICHT an den Cerbo. Zum echten Schalten Dry-Run in den Einstellungen ausschalten.</span>';
+    else if (s.override) note.innerHTML = '<span style="color:var(--cheap)">Override aktiv – Cerbo lädt aus dem Netz.</span>';
+    else note.textContent = '';
   } else {
     $('strategy').innerHTML = `<span class="pill grey">${s.reason || '–'}</span>`;
   }
@@ -393,9 +398,11 @@ function renderEv() {
 async function delEv(id) { await fetch('/api/ev/' + id, { method: 'DELETE' }); load(); }
 
 $('override').addEventListener('change', async e => {
+  overrideBusy = true;
   await fetch('/api/override', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ value: e.target.checked }) });
-  setTimeout(load, 500);
+  // dem Regel-Durchlauf Zeit geben (Modbus + Tibber), dann Status neu holen
+  setTimeout(async () => { await load(); overrideBusy = false; }, 3000);
 });
 
 function dayStr(offset) {
