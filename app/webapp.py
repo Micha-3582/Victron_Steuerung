@@ -24,6 +24,7 @@ import store
 import updater
 from datasources import PvForecast, fetch_tibber_prices
 from logic import ESS_CHARGE, ESS_IDLE, Params, decide
+from logic import _parse_iso as logic_parse_iso
 from victron import Cerbo
 
 logging.basicConfig(level=logging.INFO,
@@ -133,11 +134,9 @@ class Controller:
         out = []
         for item in entries:
             try:
-                start = datetime.fromisoformat(item["startsAt"])
+                start = logic_parse_iso(item["startsAt"])
             except (KeyError, ValueError):
                 continue
-            if start.tzinfo is not None:
-                start = start.replace(tzinfo=None)
             # Slot-Name wie in logic.slot_name_from_date (15-Min-Raster),
             # damit die geplanten Fenster exakt markiert werden.
             end = start + timedelta(minutes=15)
@@ -341,10 +340,19 @@ def api_grid_adjust():
     return jsonify({"ok": True, "grid_today": result})
 
 
+def _under_process_manager():
+    """True, wenn ein Prozessmanager die App bei Beenden neu startet
+    (systemd Restart=always ODER pm2 autorestart). Dann kann sich die App
+    zum Update selbst beenden und wird automatisch neu gestartet."""
+    return bool(os.environ.get("INVOCATION_ID")      # systemd
+                or os.environ.get("pm_id")            # pm2
+                or os.environ.get("PM2_HOME"))
+
+
 @app.route("/api/version")
 def api_version():
     return jsonify({"version": updater.current_version(),
-                    "under_systemd": bool(os.environ.get("INVOCATION_ID"))})
+                    "under_systemd": _under_process_manager()})
 
 
 @app.route("/api/check-update")
@@ -356,8 +364,8 @@ def api_check_update():
 def api_update():
     result = updater.do_update()
     if result.get("ok"):
-        # Unter systemd: sauber beenden -> Dienst startet mit neuem Code neu.
-        if os.environ.get("INVOCATION_ID"):
+        # Unter systemd/pm2: sauber beenden -> Prozessmanager startet neu.
+        if _under_process_manager():
             result["restarting"] = True
 
             def _restart():
@@ -433,7 +441,8 @@ def api_test():
 def main():
     ctrl.start()
     cfg = store.load_config()
-    port = int(cfg.get("web_port", 5005))
+    # PORT-Umgebungsvariable hat Vorrang (pm2/systemd), sonst web_port aus Config
+    port = int(os.environ.get("PORT", cfg.get("web_port", 5005)))
     log.info("Web-App startet auf Port %s (dry_run=%s)", port, cfg.get("dry_run"))
     try:
         from waitress import serve

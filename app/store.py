@@ -2,6 +2,8 @@
 Persistenz: Config, interner State (PersistentState) und E-Auto-Ladetermine.
 Alles als JSON neben der App.
 """
+from __future__ import annotations
+
 import json
 import os
 import threading

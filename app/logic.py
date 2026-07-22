@@ -132,11 +132,33 @@ def build_slots(price_entries: list, now: datetime) -> list:
     return slots
 
 
+_ISO_FALLBACK = (
+    "%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z",
+    "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M",
+)
+
+
 def _parse_iso(s: str) -> datetime:
-    # Tibber liefert z.B. 2026-07-22T10:00:00.000+02:00 -> naive lokale Zeit nutzen
-    dt = datetime.fromisoformat(s)
+    """Tibber liefert z.B. 2026-07-22T10:00:00.000+02:00. Wir wollen die
+    lokale Wanduhrzeit (tz entfernen). Robust auch für Python 3.9, wo
+    fromisoformat weniger Formate versteht (Z-Suffix, krumme Bruchteile)."""
+    text = str(s).strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        dt = None
+        for fmt in _ISO_FALLBACK:
+            try:
+                dt = datetime.strptime(text, fmt)
+                break
+            except ValueError:
+                continue
+        if dt is None:
+            raise
     if dt.tzinfo is not None:
-        dt = dt.replace(tzinfo=None)
+        dt = dt.astimezone().replace(tzinfo=None)
     return dt
 
 
