@@ -5,7 +5,19 @@
   .card h2 { display: flex; align-items: center; gap: 8px; }
   .card h2 svg.h2i { width: 16px; height: 16px; flex: 0 0 auto;
     stroke: currentColor; stroke-width: 1.8; fill: none;
-    stroke-linecap: round; stroke-linejoin: round; opacity: .85; }
+    stroke-linecap: round; stroke-linejoin: round; }
+  /* Farbe pro Karte (Reihenfolge = Kartenreihenfolge) */
+  .card:nth-of-type(1)  h2 svg.h2i { color: var(--blue); }   /* Update   */
+  .card:nth-of-type(2)  h2 svg.h2i { color: var(--green); }  /* Betrieb  */
+  .card:nth-of-type(3)  h2 svg.h2i { color: var(--accent); } /* Cerbo    */
+  .card:nth-of-type(4)  h2 svg.h2i { color: var(--timer); }  /* Tibber   */
+  .card:nth-of-type(5)  h2 svg.h2i { color: var(--red); }    /* Standort */
+  .card:nth-of-type(6)  h2 svg.h2i { color: var(--exp); }    /* Solarflächen */
+  .card:nth-of-type(7)  h2 svg.h2i { color: var(--timer); }  /* PV-Prognose  */
+  .card:nth-of-type(8)  h2 svg.h2i { color: var(--green); }  /* Anlage & Speicher */
+  .card:nth-of-type(9)  h2 svg.h2i { color: var(--plan); }   /* Peak-Schutz  */
+  .card:nth-of-type(10) h2 svg.h2i { color: var(--blue); }   /* SOC-Strategie */
+  .card:nth-of-type(11) h2 svg.h2i { color: var(--red); }    /* Netz-Zähler  */
 </style>
 
 <div class="card">
