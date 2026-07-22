@@ -33,6 +33,7 @@ MIN_PEAK_SOC = 40
 PEAK_AVOID_PRICE = 37.0
 NIGHT_SAFETY_SOC = 30.0
 TARGET_SAFE_SOC = 35.0
+MAX_CHARGE_SOC = 90.0   # harte Ladesperre: nie über diesen SOC aus dem Netz laden
 
 ESS_CHARGE = 9
 ESS_IDLE = 10
@@ -57,6 +58,7 @@ class Params:
     peak_avoid_price: float = PEAK_AVOID_PRICE
     night_safety_soc: float = NIGHT_SAFETY_SOC
     target_safe_soc: float = TARGET_SAFE_SOC
+    max_charge_soc: float = MAX_CHARGE_SOC
 
     @classmethod
     def from_config(cls, cfg: dict) -> "Params":
@@ -233,8 +235,13 @@ def decide(soc: float, price_entries: list, solar_today_raw: float,
         state.morning_bridge = False
         state.night_buffer = False
 
-    # --- Manual Override / erzwungenes Laden (z.B. E-Auto-Termin) ---
+    # --- Harte Ladesperre: nie über das SOC-Limit laden, auch nicht manuell ---
     if manual_override:
+        if soc >= p.max_charge_soc:
+            limit_txt = f"Ladelimit {int(p.max_charge_soc)}% erreicht"
+            return Decision(allow_now=False, ess_mode=ESS_IDLE,
+                            now_slot="", now_price=0.0, reason=limit_txt,
+                            strategy=limit_txt, balance=0.0)
         return Decision(allow_now=True, ess_mode=ESS_CHARGE,
                         now_slot="", now_price=0.0, reason=force_reason,
                         strategy=force_reason, balance=0.0)
@@ -359,6 +366,11 @@ def decide(soc: float, price_entries: list, solar_today_raw: float,
         state.commit_slot = ""
     if committed == now_slot_name:
         allow_now = True
+
+    # --- Harte Ladesperre (Automatik): über dem SOC-Limit nie laden ---
+    if soc >= p.max_charge_soc:
+        allow_now = False
+        strategy = f"Ladelimit {int(p.max_charge_soc)}%"
 
     # Slot-Zähler
     if plan_says_yes and state.last_counted_slot != now_slot_name:

@@ -154,6 +154,8 @@
         <li><b>Tagesverbrauch</b> – dein durchschnittlicher Stromverbrauch pro Tag in kWh.</li>
         <li><b>Ladeleistung</b> – wie viel Leistung beim Netzladen im Akku ankommt (W). Begrenzt vom Lader/Wechselrichter.</li>
         <li><b>PV-Reserve</b> – Puffer in kWh, der für die Mittags-PV freigehalten wird (nicht aus dem Netz vollladen).</li>
+        <li><b>Ladelimit (max. SOC)</b> – harte Obergrenze: ab diesem Ladestand wird <b>nie</b> aus dem Netz geladen –
+          auch nicht bei manuellen Ladeterminen oder Sofort-Override. Schützt den Akku vor Überladung aus dem Netz.</li>
       </ol>
     </div>
   </details>
@@ -162,6 +164,7 @@
     <div><label>Tagesverbrauch (kWh)</label><input id="daily_usage_kwh" type="number" step="0.1"></div>
     <div><label>Ladeleistung (W)</label><input id="charge_power_w" type="number" step="100"></div>
     <div><label>PV-Reserve (kWh)</label><input id="pv_reserve_kwh" type="number" step="0.5"></div>
+    <div><label>Ladelimit / max. SOC (%)</label><input id="max_charge_soc" type="number" min="1" max="100"></div>
   </div>
 </div>
 
@@ -274,7 +277,7 @@ function planeRow(p = {}) {
 function addPlane(p) { document.getElementById('planes').appendChild(planeRow(p)); }
 
 const PARAM_KEYS = ['battery_usable_kwh','daily_usage_kwh','charge_power_w','pv_reserve_kwh',
-  'pv_korrektur_faktor','pv_tom_morning_factor','morning_peak_start','morning_peak_end',
+  'max_charge_soc','pv_korrektur_faktor','pv_tom_morning_factor','morning_peak_start','morning_peak_end',
   'evening_peak_start','evening_peak_end','min_peak_soc','peak_avoid_price',
   'night_safety_soc','target_safe_soc','hysterese_soc'];
 
