@@ -131,23 +131,22 @@ class Controller:
         self.last_error = None
 
     def _prep_prices(self, entries, decision):
-        planned = {p.name for p in decision.plan}
+        # Datums-genauer Abgleich: geplante Slots über den vollen Zeitstempel
+        # markieren, NICHT nur über die Uhrzeit - sonst würde z.B. 13:45 an
+        # heute UND morgen als geplant erscheinen.
+        planned = {p.start.isoformat(timespec="minutes") for p in decision.plan}
         out = []
         for item in entries:
             try:
                 start = logic_parse_iso(item["startsAt"])
             except (KeyError, ValueError):
                 continue
-            # Slot-Name wie in logic.slot_name_from_date (15-Min-Raster),
-            # damit die geplanten Fenster exakt markiert werden.
-            end = start + timedelta(minutes=15)
-            name = f"{start:%H:%M}-{end:%H:%M}"
             out.append({
                 "start": start.isoformat(timespec="seconds"),
                 "label": f"{start:%H:%M}",
                 "ct": round(item["total"] * 100, 2),
                 "level": item.get("level", "NORMAL"),
-                "planned": name in planned,
+                "planned": start.isoformat(timespec="minutes") in planned,
             })
         return out
 
@@ -232,8 +231,12 @@ def build_charge_overview(status, charge, prices):
                       "strategy": op.get("strategy", ""),
                       **_window_stats(op["start"], now_iso, price_at, power_kw)})
     # geplante (zukünftige) Fenster: zusammenhängende Plan-Slots mergen.
-    # Bereits laufende Slots (vom offenen Vorgang abgedeckt) ausblenden.
-    ps = [x for x in status.get("plan_slots", []) if not (op and x["start"] <= now_iso)]
+    # Nur HEUTE (die Karte zeigt nur den heutigen Tag) und bereits laufende
+    # Slots (vom offenen Vorgang abgedeckt) ausblenden. Sonst würden morgige
+    # Plan-Slots hier ohne Datum erscheinen und wie heute aussehen.
+    today = now_iso[:10]
+    ps = [x for x in status.get("plan_slots", [])
+          if x["start"][:10] == today and not (op and x["start"] <= now_iso)]
     ps = sorted(ps, key=lambda x: x["start"])
     i = 0
     while i < len(ps):
