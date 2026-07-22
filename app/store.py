@@ -9,7 +9,7 @@ import os
 import threading
 import uuid
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from logic import PersistentState
 
@@ -221,11 +221,18 @@ def list_charge_sessions(now=None):
     return {"sessions": data.get("sessions", []), "open": data.get("open")}
 
 
-# --- Energie-Verlauf (Stundenwerte, nur echte Messwerte) ------------------
-# history.json: {"hours": {"YYYY-MM-DDTHH": {verbrauch, solar, 7 Flüsse,
+# --- Energie-Verlauf (15-Min-Slots, nur echte Messwerte) ------------------
+# history.json: {"hours": {"YYYY-MM-DDTHH:MM": {verbrauch, solar, 7 Flüsse,
 #   soc_min, soc_max, soc_sum, soc_n}}, "last": {ts, pv, load, grid, bc, bd}}
-_HISTORY_KEEP_HOURS = 48          # rollierend, alte Stunden werden verworfen
+# (Schlüssel "hours" historisch beibehalten, enthält jetzt Viertelstunden-Slots.)
+_HISTORY_KEEP_HOURS = 48          # rollierend, alte Slots werden verworfen
 _MAX_SAMPLE_GAP_S = 900           # Lücken (z.B. nach Downtime) auf 15 min kappen
+
+
+def _slot_key(dt: datetime) -> str:
+    """Viertelstunden-Slot-Schlüssel, z.B. 2026-07-22T13:15."""
+    m = (dt.minute // 15) * 15
+    return f"{dt:%Y-%m-%dT%H}:{m:02d}"
 
 # Die 7 Energieflüsse (wie Victron VRM). Werte in W bzw. aufintegriert in kWh.
 _FLOW_KEYS = ("s_load", "s_batt", "s_grid", "b_load", "b_grid", "g_load", "g_batt")
@@ -304,9 +311,9 @@ def log_energy_sample(system: dict | None, now: datetime | None = None):
 
     data = _load_history()
     hours = data["hours"]
-    hour_key = now.strftime("%Y-%m-%dT%H")
-    b = hours.get(hour_key) or _new_bucket(soc)
-    hours[hour_key] = b
+    slot_key = _slot_key(now)
+    b = hours.get(slot_key) or _new_bucket(soc)
+    hours[slot_key] = b
 
     # Energie via Trapez zwischen letztem und aktuellem Sample
     last = data.get("last")
@@ -340,11 +347,11 @@ def log_energy_sample(system: dict | None, now: datetime | None = None):
                     "bc": power if state == 1 else 0.0,
                     "bd": power if state == 2 else 0.0}
 
-    # Rollierend alte Stunden verwerfen
+    # Rollierend alte Slots verwerfen
     keep_from = now.timestamp() - _HISTORY_KEEP_HOURS * 3600
     for k in list(hours.keys()):
         try:
-            if datetime.fromisoformat(k + ":00:00").timestamp() < keep_from:
+            if datetime.fromisoformat(k).timestamp() < keep_from:
                 del hours[k]
         except ValueError:
             del hours[k]
@@ -354,17 +361,18 @@ def log_energy_sample(system: dict | None, now: datetime | None = None):
 
 
 def energy_history_today(now: datetime | None = None) -> list:
-    """Stundenwerte des heutigen Tages (0 bis aktuelle Stunde) für die Charts."""
+    """15-Min-Werte des heutigen Tages (00:00 bis aktueller Slot) für die Charts."""
     now = now or datetime.now()
     hours = _load_history().get("hours", {})
-    today = now.strftime("%Y-%m-%d")
+    t = now.replace(hour=0, minute=0, second=0, microsecond=0)
     out = []
-    for h in range(0, now.hour + 1):
-        key = f"{today}T{h:02d}"
+    while t <= now:
+        key = _slot_key(t)
+        label = f"{t:%H:%M}"
         b = hours.get(key)
         if b and b.get("soc_n"):
             row = {
-                "hour": f"{h:02d}:00",
+                "hour": label,
                 "verbrauch": round(b["verbrauch"], 3),
                 "solar": round(b["solar"], 3),
                 "soc_avg": round(b["soc_sum"] / b["soc_n"], 1),
@@ -374,11 +382,12 @@ def energy_history_today(now: datetime | None = None) -> list:
             for k in _FLOW_KEYS:
                 row[k] = round(b.get(k, 0.0), 3)
         else:
-            row = {"hour": f"{h:02d}:00", "verbrauch": 0.0, "solar": 0.0,
+            row = {"hour": label, "verbrauch": 0.0, "solar": 0.0,
                    "soc_avg": None, "soc_min": None, "soc_max": None}
             for k in _FLOW_KEYS:
                 row[k] = 0.0
         out.append(row)
+        t += timedelta(minutes=15)
     return out
 
 

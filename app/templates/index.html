@@ -253,7 +253,7 @@ function buildEnergyChart() {
       },
       scales: {
         x: { grid: { display: false }, ticks: { color: '#8d96a8', autoSkip: false, maxRotation: 0,
-          callback(v, i) { const step = (energyChart && energyChart.width > 900) ? 2 : 4; return i % step === 0 ? this.getLabelForValue(v) : ''; } } },
+          callback(v) { const lab = this.getLabelForValue(v); if (!lab.endsWith(':00')) return ''; const hr = parseInt(lab, 10); const step = (energyChart && energyChart.width > 900) ? 2 : 3; return hr % step === 0 ? lab : ''; } } },
         y: { position: 'left', beginAtZero: true, title: { display: true, text: 'kWh', color: '#8d96a8' },
           grid: { color: '#2e3542' }, ticks: { color: '#8d96a8' } },
         y1: { position: 'right', min: 0, max: 100, title: { display: true, text: '%', color: '#8d96a8' },
@@ -311,7 +311,7 @@ function buildFlowChart() {
       },
       scales: {
         x: { stacked: true, grid: { display: false }, ticks: { color: '#8d96a8', autoSkip: false, maxRotation: 0,
-          callback(v, i) { const step = (flowChart && flowChart.width > 900) ? 2 : 4; return i % step === 0 ? this.getLabelForValue(v) : ''; } } },
+          callback(v) { const lab = this.getLabelForValue(v); if (!lab.endsWith(':00')) return ''; const hr = parseInt(lab, 10); const step = (flowChart && flowChart.width > 900) ? 2 : 3; return hr % step === 0 ? lab : ''; } } },
         y: { stacked: true, title: { display: true, text: 'kWh', color: '#8d96a8' },
           grid: { color: '#2e3542' }, ticks: { color: '#8d96a8' } }
       }
@@ -325,6 +325,16 @@ function renderFlowChart(hist) {
   FLOWS.forEach((f, i) => {
     flowChart.data.datasets[i].data = hist.map(h => (h[f.key] || 0) * f.sign);
   });
+  // Y-Achse symmetrisch um 0: 0 immer in der Mitte, Balken nach oben ODER unten
+  let mx = 0;
+  hist.forEach(h => {
+    let pos = 0, neg = 0;
+    FLOWS.forEach(f => { const val = h[f.key] || 0; if (f.sign > 0) pos += val; else neg += val; });
+    mx = Math.max(mx, pos, neg);
+  });
+  const M = Math.max(0.2, Math.ceil(mx * 10) / 10);
+  flowChart.options.scales.y.min = -M;
+  flowChart.options.scales.y.max = M;
   const hasData = hist.some(h => FLOWS.some(f => h[f.key]));
   $('flow-hint').textContent = hasData
     ? 'Woher der Strom kam und wohin er ging (echte Messwerte).'
