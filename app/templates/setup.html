@@ -131,12 +131,14 @@ if (coordsEl) coordsEl.addEventListener('input', () => {
   }
 });
 
+// Komma ODER Punkt als Dezimaltrenner akzeptieren (parseFloat("0,6") wäre sonst 0)
+const numDE = v => parseFloat(String(v).replace(',', '.'));
 function collectPlanes() {
   return [...document.querySelectorAll('.plane-row')].map(r => ({
     name: r.querySelector('.p-name').value,
-    azimuth: parseFloat(r.querySelector('.p-az').value),
-    declination: parseFloat(r.querySelector('.p-dec').value),
-    kwp: parseFloat(r.querySelector('.p-kwp').value),
+    azimuth: numDE(r.querySelector('.p-az').value),
+    declination: numDE(r.querySelector('.p-dec').value),
+    kwp: numDE(r.querySelector('.p-kwp').value),
   })).filter(p => p.kwp > 0);
 }
 function collect() {
@@ -144,8 +146,8 @@ function collect() {
     cerbo_host: document.getElementById('cerbo_host').value.trim(),
     cerbo_port: parseInt(document.getElementById('cerbo_port').value) || 502,
     tibber_token: document.getElementById('tibber_token').value.trim(),
-    pv_latitude: parseFloat(document.getElementById('pv_latitude').value),
-    pv_longitude: parseFloat(document.getElementById('pv_longitude').value),
+    pv_latitude: numDE(document.getElementById('pv_latitude').value),
+    pv_longitude: numDE(document.getElementById('pv_longitude').value),
     pv_planes: collectPlanes(),
   };
 }
