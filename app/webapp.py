@@ -182,7 +182,21 @@ class Controller:
     def run(self, interval):
         while not self._stop.is_set():
             self.safe_tick()
-            self._stop.wait(interval)
+            # Intervall bei jedem Durchlauf frisch lesen -> Änderung in den
+            # Einstellungen greift ohne Neustart.
+            try:
+                interval = max(10, int(store.load_config().get("poll_seconds", 300)))
+            except Exception:                            # noqa: BLE001
+                interval = 300
+            # Auf das Zeitraster ausrichten: der nächste Tick fällt genau auf ein
+            # Vielfaches des Intervalls seit voller Stunde. Bei Teilern von 900 s
+            # (z.B. 60, 300, 900) trifft das exakt die Viertelstunden :00/:15/:30/:45,
+            # sodass Tibber-Slots punktgenau geschaltet werden.
+            nowt = time.time()
+            sleep_s = interval - (nowt % interval)
+            if sleep_s < 1:                              # schon auf dem Raster
+                sleep_s += interval
+            self._stop.wait(sleep_s)
 
     def start(self):
         cfg = store.load_config()
