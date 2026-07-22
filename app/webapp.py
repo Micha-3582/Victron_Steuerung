@@ -127,6 +127,12 @@ class Controller:
                 "system": system,
                 "override": bool(cfg.get("manual_override")),
             }
+        # Energie-Verlauf mitschreiben (echte Messwerte, für das Verlaufs-Chart)
+        try:
+            store.log_energy_sample(system, now)
+        except Exception as e:                           # noqa: BLE001
+            log.warning("Energie-Log fehlgeschlagen: %s", e)
+
         self.last_tick = now.isoformat(timespec="seconds")
         self.last_error = None
 
@@ -263,6 +269,7 @@ def api_status():
         "ev_schedules": store.list_ev(),
         "charge_log": charge,
         "charge_overview": build_charge_overview(status, charge, prices),
+        "energy_history": store.energy_history_today(),
         "last_tick": ctrl.last_tick,
         "last_error": ctrl.last_error,
         "now": datetime.now().isoformat(timespec="seconds"),

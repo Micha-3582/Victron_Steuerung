@@ -10,6 +10,22 @@
   </div>
 </div>
 
+<div class="card full" style="margin-bottom:14px">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <h2 style="margin:0">Energie heute (Verlauf)</h2>
+    <span class="muted" style="margin-left:auto" id="energy-hint">Stündlicher Verbrauch &amp; Solar, Batterie-SOC. Baut sich im Lauf des Tages auf.</span>
+  </div>
+  <div class="chart-scroll">
+    <div class="chart-inner"><canvas id="energy-chart"></canvas></div>
+  </div>
+  <div class="legend">
+    <span><i class="sw" style="background:#e5544a"></i>Verbrauch</span>
+    <span><i class="sw" style="background:#f0a63c"></i>Solar</span>
+    <span><i class="sw" style="background:#4da3ff"></i>Batterie-SOC</span>
+    <span><i class="sw" style="background:rgba(77,163,255,.25);border:1px solid #4da3ff"></i>SOC Min/Max</span>
+  </div>
+</div>
+
 <div class="dash">
   <div class="card">
     <h2>Tibber</h2>
@@ -87,7 +103,7 @@ const LEVEL_COLORS = {
   VERY_CHEAP: '#35c07a', CHEAP: '#35c07a', NORMAL: '#4da3ff',
   EXPENSIVE: '#f0a63c', VERY_EXPENSIVE: '#e5544a'
 };
-let chart, prices = [], allPrices = [], schedules = [], nowSlot = '', nowIso = '';
+let chart, energyChart, prices = [], allPrices = [], schedules = [], nowSlot = '', nowIso = '';
 let activeDay = 'today', chargePowerW = 3500, overrideBusy = false;
 let drag = null;           // {from, to}
 let selectMode = false;    // Touch: ziehen markiert statt scrollen
@@ -183,6 +199,66 @@ function renderChart() {
   ds.borderColor = prices.map(p => p.planned ? '#b072f5' : 'transparent');
   ds.borderWidth = prices.map(p => p.planned ? 2 : 0);
   chart.update('none');
+}
+
+/* --- Energie-Verlauf (echte Stundenwerte) --- */
+function buildEnergyChart() {
+  energyChart = new Chart($('energy-chart').getContext('2d'), {
+    data: {
+      labels: [],
+      datasets: [
+        { type: 'bar', label: 'Verbrauch', data: [], backgroundColor: '#e5544a', yAxisID: 'y', order: 3 },
+        { type: 'bar', label: 'Solar', data: [], backgroundColor: '#f0a63c', yAxisID: 'y', order: 3 },
+        { type: 'line', label: 'SOC Max', data: [], borderColor: 'transparent', pointRadius: 0,
+          yAxisID: 'y1', order: 1, spanGaps: true },
+        { type: 'line', label: 'SOC Min', data: [], borderColor: 'transparent', pointRadius: 0,
+          backgroundColor: 'rgba(77,163,255,.18)', fill: '-1', yAxisID: 'y1', order: 1, spanGaps: true },
+        { type: 'line', label: 'Batterie-SOC', data: [], borderColor: '#4da3ff', backgroundColor: '#4da3ff',
+          pointRadius: 2, borderWidth: 2, tension: .3, yAxisID: 'y1', order: 0, spanGaps: true },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: {
+          label: item => {
+            const l = item.dataset.label;
+            if (l === 'SOC Max' || l === 'SOC Min') return null;
+            const v = item.parsed.y;
+            if (v == null) return null;
+            return l === 'Batterie-SOC' ? `${l}: ${v} %` : `${l}: ${v.toFixed(2)} kWh`;
+          }
+        } }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#8d96a8', autoSkip: false, maxRotation: 0,
+          callback(v, i) { const step = (energyChart && energyChart.width > 900) ? 2 : 4; return i % step === 0 ? this.getLabelForValue(v) : ''; } } },
+        y: { position: 'left', beginAtZero: true, title: { display: true, text: 'kWh', color: '#8d96a8' },
+          grid: { color: '#2e3542' }, ticks: { color: '#8d96a8' } },
+        y1: { position: 'right', min: 0, max: 100, title: { display: true, text: '%', color: '#8d96a8' },
+          grid: { drawOnChartArea: false }, ticks: { color: '#8d96a8', callback: v => v + ' %' } }
+      }
+    }
+  });
+}
+
+function renderEnergyChart(hist) {
+  if (!energyChart) return;
+  hist = hist || [];
+  energyChart.data.labels = hist.map(h => h.hour);
+  const d = energyChart.data.datasets;
+  d[0].data = hist.map(h => h.verbrauch);
+  d[1].data = hist.map(h => h.solar);
+  d[2].data = hist.map(h => h.soc_max);
+  d[3].data = hist.map(h => h.soc_min);
+  d[4].data = hist.map(h => h.soc_avg);
+  const hasData = hist.some(h => h.verbrauch || h.solar || h.soc_avg != null);
+  $('energy-hint').textContent = hasData
+    ? 'Stündlicher Verbrauch & Solar, Batterie-SOC (echte Messwerte).'
+    : 'Noch keine Verlaufsdaten – füllt sich mit jedem Regelzyklus.';
+  energyChart.update('none');
 }
 
 /* --- Drag-Auswahl --- */
@@ -282,6 +358,7 @@ async function load() {
   nowIso = d.now || '';
   applyDay();
   renderOverview(d.charge_overview);
+  renderEnergyChart(d.energy_history);
 
   const banner = $('banner');
   if (d.last_error) banner.innerHTML = `<div class="banner err">Fehler: ${d.last_error}</div>`;
@@ -482,6 +559,7 @@ function renderOverview(items) {
 }
 
 buildChart();
+buildEnergyChart();
 updateWidth();
 load();
 loadLive();
