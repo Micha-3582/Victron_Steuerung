@@ -26,6 +26,25 @@
   </div>
 </div>
 
+<div class="card full" style="margin-bottom:14px">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <h2 style="margin:0">Energieflüsse heute</h2>
+    <span class="muted" style="margin-left:auto" id="flow-hint">Woher der Strom kam und wohin er ging – oben genutzt/erzeugt, unten Batterie/Netz-Ladung.</span>
+  </div>
+  <div class="chart-scroll">
+    <div class="chart-inner"><canvas id="flow-chart"></canvas></div>
+  </div>
+  <div class="legend">
+    <span><i class="sw" style="background:#26c6c6"></i>Batterie ins Netz</span>
+    <span><i class="sw" style="background:#f0a63c"></i>Solar ins Netz</span>
+    <span><i class="sw" style="background:#35c07a"></i>Solar zur Batterie</span>
+    <span><i class="sw" style="background:#cddc39"></i>Solar zum Verbrauch</span>
+    <span><i class="sw" style="background:#4da3ff"></i>Batterie zum Verbrauch</span>
+    <span><i class="sw" style="background:#e5544a"></i>Netz zum Verbrauch</span>
+    <span><i class="sw" style="background:#c07af5"></i>Netz zur Batterie</span>
+  </div>
+</div>
+
 <div class="dash">
   <div class="card">
     <h2>Tibber</h2>
@@ -103,7 +122,7 @@ const LEVEL_COLORS = {
   VERY_CHEAP: '#35c07a', CHEAP: '#35c07a', NORMAL: '#4da3ff',
   EXPENSIVE: '#f0a63c', VERY_EXPENSIVE: '#e5544a'
 };
-let chart, energyChart, prices = [], allPrices = [], schedules = [], nowSlot = '', nowIso = '';
+let chart, energyChart, flowChart, prices = [], allPrices = [], schedules = [], nowSlot = '', nowIso = '';
 let activeDay = 'today', chargePowerW = 3500, overrideBusy = false;
 let drag = null;           // {from, to}
 let selectMode = false;    // Touch: ziehen markiert statt scrollen
@@ -261,6 +280,58 @@ function renderEnergyChart(hist) {
   energyChart.update('none');
 }
 
+/* --- Energieflüsse (7 Pfade, gestapelt +/-) --- */
+const FLOWS = [
+  { key: 'b_grid', label: 'Batterie ins Netz',     color: '#26c6c6', sign: -1 },
+  { key: 's_grid', label: 'Solar ins Netz',        color: '#f0a63c', sign: 1 },
+  { key: 's_batt', label: 'Solar zur Batterie',    color: '#35c07a', sign: 1 },
+  { key: 's_load', label: 'Solar zum Verbrauch',   color: '#cddc39', sign: 1 },
+  { key: 'b_load', label: 'Batterie zum Verbrauch', color: '#4da3ff', sign: -1 },
+  { key: 'g_load', label: 'Netz zum Verbrauch',    color: '#e5544a', sign: 1 },
+  { key: 'g_batt', label: 'Netz zur Batterie',     color: '#c07af5', sign: -1 },
+];
+function buildFlowChart() {
+  flowChart = new Chart($('flow-chart').getContext('2d'), {
+    type: 'bar',
+    data: { labels: [], datasets: FLOWS.map(f => ({
+      label: f.label, data: [], backgroundColor: f.color, stack: 'e',
+      borderWidth: 0, categoryPercentage: 0.9, barPercentage: 0.98 })) },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: {
+          label: item => {
+            const v = item.parsed.y;
+            if (!v) return null;
+            return `${item.dataset.label}: ${Math.abs(v).toFixed(2)} kWh`;
+          }
+        } }
+      },
+      scales: {
+        x: { stacked: true, grid: { display: false }, ticks: { color: '#8d96a8', autoSkip: false, maxRotation: 0,
+          callback(v, i) { const step = (flowChart && flowChart.width > 900) ? 2 : 4; return i % step === 0 ? this.getLabelForValue(v) : ''; } } },
+        y: { stacked: true, title: { display: true, text: 'kWh', color: '#8d96a8' },
+          grid: { color: '#2e3542' }, ticks: { color: '#8d96a8' } }
+      }
+    }
+  });
+}
+function renderFlowChart(hist) {
+  if (!flowChart) return;
+  hist = hist || [];
+  flowChart.data.labels = hist.map(h => h.hour);
+  FLOWS.forEach((f, i) => {
+    flowChart.data.datasets[i].data = hist.map(h => (h[f.key] || 0) * f.sign);
+  });
+  const hasData = hist.some(h => FLOWS.some(f => h[f.key]));
+  $('flow-hint').textContent = hasData
+    ? 'Woher der Strom kam und wohin er ging (echte Messwerte).'
+    : 'Noch keine Verlaufsdaten – füllt sich mit jedem Regelzyklus.';
+  flowChart.update('none');
+}
+
 /* --- Drag-Auswahl --- */
 function slotAtX(clientX) {
   if (!prices.length) return null;
@@ -359,6 +430,7 @@ async function load() {
   applyDay();
   renderOverview(d.charge_overview);
   renderEnergyChart(d.energy_history);
+  renderFlowChart(d.energy_history);
 
   const banner = $('banner');
   if (d.last_error) banner.innerHTML = `<div class="banner err">Fehler: ${d.last_error}</div>`;
@@ -560,6 +632,7 @@ function renderOverview(items) {
 
 buildChart();
 buildEnergyChart();
+buildFlowChart();
 updateWidth();
 load();
 loadLive();

@@ -222,10 +222,56 @@ def list_charge_sessions(now=None):
 
 
 # --- Energie-Verlauf (Stundenwerte, nur echte Messwerte) ------------------
-# history.json: {"hours": {"YYYY-MM-DDTHH": {verbrauch, solar, soc_min,
-# soc_max, soc_sum, soc_n}}, "last": {"ts", "cons_w", "solar_w"}}
+# history.json: {"hours": {"YYYY-MM-DDTHH": {verbrauch, solar, 7 Flüsse,
+#   soc_min, soc_max, soc_sum, soc_n}}, "last": {ts, pv, load, grid, bc, bd}}
 _HISTORY_KEEP_HOURS = 48          # rollierend, alte Stunden werden verworfen
 _MAX_SAMPLE_GAP_S = 900           # Lücken (z.B. nach Downtime) auf 15 min kappen
+
+# Die 7 Energieflüsse (wie Victron VRM). Werte in W bzw. aufintegriert in kWh.
+_FLOW_KEYS = ("s_load", "s_batt", "s_grid", "b_load", "b_grid", "g_load", "g_batt")
+
+
+def decompose_flows(pv, load, grid_import, grid_export, batt_charge, batt_discharge):
+    """Zerlegt die Momentanleistungen in die 7 Pfade (greedy, feste Priorität):
+    PV deckt zuerst Verbrauch, dann Batterie, dann Netz-Einspeisung.
+    Rest-Verbrauch aus Batterie, dann Netz. Batterie-Ladung aus PV, dann Netz.
+    Alle Rückgaben >= 0. Einheit = Einheit der Eingaben."""
+    pv = max(0.0, pv); load = max(0.0, load)
+    gi = max(0.0, grid_import); ge = max(0.0, grid_export)
+    bc = max(0.0, batt_charge); bd = max(0.0, batt_discharge)
+
+    s_load = min(pv, load);          pv -= s_load;  load -= s_load
+    s_batt = min(pv, bc);            pv -= s_batt;  bc -= s_batt
+    s_grid = min(pv, ge);            pv -= s_grid;  ge -= s_grid
+
+    b_load = min(bd, load);          bd -= b_load;  load -= b_load
+    b_grid = min(bd, ge);            bd -= b_grid;  ge -= b_grid
+
+    g_load = min(gi, load);          gi -= g_load;  load -= g_load
+    g_batt = min(gi, bc);            gi -= g_batt;  bc -= g_batt
+
+    return {"s_load": s_load, "s_batt": s_batt, "s_grid": s_grid,
+            "b_load": b_load, "b_grid": b_grid, "g_load": g_load, "g_batt": g_batt}
+
+
+def _flows_from_system(system: dict) -> dict:
+    """Momentane Flüsse (W) aus einem read_system()-Dict."""
+    pv = float(system["solar_total"])
+    load = float(system["loads"]["total"])
+    grid = float(system["grid"]["total"])           # + Bezug / − Einspeisung
+    state = int(system["battery"].get("state", 0))  # 1=laden, 2=entladen
+    power = abs(float(system["battery"].get("power", 0)))
+    bc = power if state == 1 else 0.0
+    bd = power if state == 2 else 0.0
+    return decompose_flows(pv, load, max(0.0, grid), max(0.0, -grid), bc, bd)
+
+
+def _new_bucket(soc: float) -> dict:
+    b = {"verbrauch": 0.0, "solar": 0.0, "soc_min": soc, "soc_max": soc,
+         "soc_sum": 0.0, "soc_n": 0}
+    for k in _FLOW_KEYS:
+        b[k] = 0.0
+    return b
 
 
 def _load_history() -> dict:
@@ -242,25 +288,25 @@ def _load_history() -> dict:
 
 
 def log_energy_sample(system: dict | None, now: datetime | None = None):
-    """Integriert Momentanleistung (Verbrauch/Solar) zu Stunden-kWh auf und
-    erfasst SOC (Min/Ø/Max) je Stunde. Nur echte Messwerte, keine Prognose.
+    """Integriert Momentanleistung zu Stunden-kWh auf: Verbrauch, Solar, die 7
+    Energieflüsse (VRM-Stil) und SOC (Min/Ø/Max). Nur echte Messwerte.
     Wird bei jedem Regelzyklus aufgerufen."""
     if not system:
         return
     now = now or datetime.now()
     try:
-        cons_w = float(system["loads"]["total"])
-        solar_w = float(system["solar_total"])
+        pv_w = float(system["solar_total"])
+        load_w = float(system["loads"]["total"])
         soc = float(system["battery"]["soc"])
+        flow_now = _flows_from_system(system)
     except (KeyError, TypeError, ValueError):
         return
 
     data = _load_history()
     hours = data["hours"]
     hour_key = now.strftime("%Y-%m-%dT%H")
-    b = hours.setdefault(hour_key, {"verbrauch": 0.0, "solar": 0.0,
-                                    "soc_min": soc, "soc_max": soc,
-                                    "soc_sum": 0.0, "soc_n": 0})
+    b = hours.get(hour_key) or _new_bucket(soc)
+    hours[hour_key] = b
 
     # Energie via Trapez zwischen letztem und aktuellem Sample
     last = data.get("last")
@@ -271,8 +317,14 @@ def log_energy_sample(system: dict | None, now: datetime | None = None):
             dt_s = 0.0
         if 0 < dt_s <= _MAX_SAMPLE_GAP_S:
             h = dt_s / 3600.0
-            b["verbrauch"] += (last["cons_w"] + cons_w) / 2.0 / 1000.0 * h
-            b["solar"] += (last["solar_w"] + solar_w) / 2.0 / 1000.0 * h
+            b["verbrauch"] += (last["load"] + load_w) / 2.0 / 1000.0 * h
+            b["solar"] += (last["pv"] + pv_w) / 2.0 / 1000.0 * h
+            # Flüsse: Momentanzerlegung an beiden Stützstellen, trapezförmig
+            flow_last = decompose_flows(last["pv"], last["load"],
+                                        max(0.0, last["grid"]), max(0.0, -last["grid"]),
+                                        last["bc"], last["bd"])
+            for k in _FLOW_KEYS:
+                b[k] += (flow_last[k] + flow_now[k]) / 2.0 / 1000.0 * h
 
     # SOC-Statistik (jedes Sample zählt)
     b["soc_min"] = min(b["soc_min"], soc)
@@ -280,8 +332,13 @@ def log_energy_sample(system: dict | None, now: datetime | None = None):
     b["soc_sum"] += soc
     b["soc_n"] += 1
 
+    grid_w = float(system["grid"]["total"])
+    state = int(system["battery"].get("state", 0))
+    power = abs(float(system["battery"].get("power", 0)))
     data["last"] = {"ts": now.isoformat(timespec="seconds"),
-                    "cons_w": cons_w, "solar_w": solar_w}
+                    "pv": pv_w, "load": load_w, "grid": grid_w,
+                    "bc": power if state == 1 else 0.0,
+                    "bd": power if state == 2 else 0.0}
 
     # Rollierend alte Stunden verwerfen
     keep_from = now.timestamp() - _HISTORY_KEEP_HOURS * 3600
@@ -297,7 +354,7 @@ def log_energy_sample(system: dict | None, now: datetime | None = None):
 
 
 def energy_history_today(now: datetime | None = None) -> list:
-    """Stundenwerte des heutigen Tages (0 bis aktuelle Stunde) für das Chart."""
+    """Stundenwerte des heutigen Tages (0 bis aktuelle Stunde) für die Charts."""
     now = now or datetime.now()
     hours = _load_history().get("hours", {})
     today = now.strftime("%Y-%m-%d")
@@ -306,17 +363,22 @@ def energy_history_today(now: datetime | None = None) -> list:
         key = f"{today}T{h:02d}"
         b = hours.get(key)
         if b and b.get("soc_n"):
-            out.append({
+            row = {
                 "hour": f"{h:02d}:00",
                 "verbrauch": round(b["verbrauch"], 3),
                 "solar": round(b["solar"], 3),
                 "soc_avg": round(b["soc_sum"] / b["soc_n"], 1),
                 "soc_min": round(b["soc_min"], 1),
                 "soc_max": round(b["soc_max"], 1),
-            })
+            }
+            for k in _FLOW_KEYS:
+                row[k] = round(b.get(k, 0.0), 3)
         else:
-            out.append({"hour": f"{h:02d}:00", "verbrauch": 0.0, "solar": 0.0,
-                        "soc_avg": None, "soc_min": None, "soc_max": None})
+            row = {"hour": f"{h:02d}:00", "verbrauch": 0.0, "solar": 0.0,
+                   "soc_avg": None, "soc_min": None, "soc_max": None}
+            for k in _FLOW_KEYS:
+                row[k] = 0.0
+        out.append(row)
     return out
 
 
