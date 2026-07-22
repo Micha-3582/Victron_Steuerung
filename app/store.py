@@ -261,16 +261,25 @@ def decompose_flows(pv, load, grid_import, grid_export, batt_charge, batt_discha
             "b_load": b_load, "b_grid": b_grid, "g_load": g_load, "g_batt": g_batt}
 
 
-def _flows_from_system(system: dict) -> dict:
-    """Momentane Flüsse (W) aus einem read_system()-Dict."""
+def _powers_from_system(system: dict) -> dict:
+    """Momentanleistungen (W) aus read_system(). Der Verbrauch wird als echter
+    Gesamtverbrauch aus der Energiebilanz gerechnet (nicht loads.total, das nur
+    die Lasten am WR-Ausgang erfasst): Verbrauch = PV + Netz + (Entladung − Ladung)."""
     pv = float(system["solar_total"])
-    load = float(system["loads"]["total"])
     grid = float(system["grid"]["total"])           # + Bezug / − Einspeisung
     state = int(system["battery"].get("state", 0))  # 1=laden, 2=entladen
     power = abs(float(system["battery"].get("power", 0)))
     bc = power if state == 1 else 0.0
     bd = power if state == 2 else 0.0
-    return decompose_flows(pv, load, max(0.0, grid), max(0.0, -grid), bc, bd)
+    load = max(0.0, pv + grid + bd - bc)
+    return {"pv": pv, "load": load, "grid": grid, "bc": bc, "bd": bd}
+
+
+def _flows_from_system(system: dict) -> dict:
+    """Momentane Flüsse (W) aus einem read_system()-Dict."""
+    p = _powers_from_system(system)
+    return decompose_flows(p["pv"], p["load"], max(0.0, p["grid"]),
+                           max(0.0, -p["grid"]), p["bc"], p["bd"])
 
 
 def _new_bucket(soc: float) -> dict:
@@ -302,10 +311,11 @@ def log_energy_sample(system: dict | None, now: datetime | None = None):
         return
     now = now or datetime.now()
     try:
-        pv_w = float(system["solar_total"])
-        load_w = float(system["loads"]["total"])
+        p = _powers_from_system(system)
+        pv_w, load_w = p["pv"], p["load"]
         soc = float(system["battery"]["soc"])
-        flow_now = _flows_from_system(system)
+        flow_now = decompose_flows(p["pv"], p["load"], max(0.0, p["grid"]),
+                                   max(0.0, -p["grid"]), p["bc"], p["bd"])
     except (KeyError, TypeError, ValueError):
         return
 
@@ -339,13 +349,9 @@ def log_energy_sample(system: dict | None, now: datetime | None = None):
     b["soc_sum"] += soc
     b["soc_n"] += 1
 
-    grid_w = float(system["grid"]["total"])
-    state = int(system["battery"].get("state", 0))
-    power = abs(float(system["battery"].get("power", 0)))
     data["last"] = {"ts": now.isoformat(timespec="seconds"),
-                    "pv": pv_w, "load": load_w, "grid": grid_w,
-                    "bc": power if state == 1 else 0.0,
-                    "bd": power if state == 2 else 0.0}
+                    "pv": p["pv"], "load": p["load"], "grid": p["grid"],
+                    "bc": p["bc"], "bd": p["bd"]}
 
     # Rollierend alte Slots verwerfen
     keep_from = now.timestamp() - _HISTORY_KEEP_DAYS * 86400
