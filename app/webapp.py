@@ -270,9 +270,22 @@ def api_status():
         "charge_log": charge,
         "charge_overview": build_charge_overview(status, charge, prices),
         "energy_history": store.energy_history_today(),
+        "energy_min_day": store.energy_min_day(),
         "last_tick": ctrl.last_tick,
         "last_error": ctrl.last_error,
         "now": datetime.now().isoformat(timespec="seconds"),
+    })
+
+
+@app.route("/api/history")
+def api_history():
+    now = datetime.now()
+    day = request.args.get("day") or now.strftime("%Y-%m-%d")
+    return jsonify({
+        "day": day,
+        "history": store.energy_history_for_day(day, now),
+        "min_day": store.energy_min_day(),
+        "max_day": now.strftime("%Y-%m-%d"),
     })
 
 

@@ -12,8 +12,11 @@
 
 <div class="card full" style="margin-bottom:14px">
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-    <h2 style="margin:0">Energie heute (Verlauf)</h2>
-    <span class="muted" style="margin-left:auto" id="energy-hint">Stündlicher Verbrauch &amp; Solar, Batterie-SOC. Baut sich im Lauf des Tages auf.</span>
+    <h2 style="margin:0">Energie (Verlauf)</h2>
+    <button id="e-prev" class="ghost daytab" title="Vorheriger Tag">◀</button>
+    <span id="e-day" style="min-width:78px;text-align:center;font-size:14px">Heute</span>
+    <button id="e-next" class="ghost daytab" title="Nächster Tag">▶</button>
+    <span class="muted" style="margin-left:auto" id="energy-hint">Verbrauch &amp; Solar, Batterie-SOC. Baut sich im Lauf des Tages auf.</span>
   </div>
   <div class="chart-scroll">
     <div class="chart-inner"><canvas id="energy-chart"></canvas></div>
@@ -28,7 +31,10 @@
 
 <div class="card full" style="margin-bottom:14px">
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-    <h2 style="margin:0">Energieflüsse heute</h2>
+    <h2 style="margin:0">Energieflüsse</h2>
+    <button id="f-prev" class="ghost daytab" title="Vorheriger Tag">◀</button>
+    <span id="f-day" style="min-width:78px;text-align:center;font-size:14px">Heute</span>
+    <button id="f-next" class="ghost daytab" title="Nächster Tag">▶</button>
     <span class="muted" style="margin-left:auto" id="flow-hint">Woher der Strom kam und wohin er ging – oben genutzt/erzeugt, unten Batterie/Netz-Ladung.</span>
   </div>
   <div class="chart-scroll">
@@ -123,6 +129,7 @@ const LEVEL_COLORS = {
   EXPENSIVE: '#f0a63c', VERY_EXPENSIVE: '#e5544a'
 };
 let chart, energyChart, flowChart, prices = [], allPrices = [], schedules = [], nowSlot = '', nowIso = '';
+let energyDay = '', energyMinDay = '';
 let activeDay = 'today', chargePowerW = 3500, overrideBusy = false;
 let drag = null;           // {from, to}
 let selectMode = false;    // Touch: ziehen markiert statt scrollen
@@ -275,7 +282,7 @@ function renderEnergyChart(hist) {
   d[4].data = hist.map(h => h.soc_avg);
   const hasData = hist.some(h => h.verbrauch || h.solar || h.soc_avg != null);
   $('energy-hint').textContent = hasData
-    ? 'Stündlicher Verbrauch & Solar, Batterie-SOC (echte Messwerte).'
+    ? 'Verbrauch & Solar, Batterie-SOC im 15-Min-Takt (echte Messwerte).'
     : 'Noch keine Verlaufsdaten – füllt sich mit jedem Regelzyklus.';
   energyChart.update('none');
 }
@@ -341,6 +348,48 @@ function renderFlowChart(hist) {
     : 'Noch keine Verlaufsdaten – füllt sich mit jedem Regelzyklus.';
   flowChart.update('none');
 }
+
+/* --- Tages-Navigation für beide Energie-Charts --- */
+function isoDay(d) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+function todayStr() { return (nowIso || new Date().toISOString()).slice(0, 10); }
+function fmtDayLabel(day) {
+  const t = todayStr();
+  const y = new Date(t + 'T00:00'); y.setDate(y.getDate() - 1);
+  if (day === t) return 'Heute';
+  if (day === isoDay(y)) return 'Gestern';
+  const [Y, M, D] = day.split('-'); return `${D}.${M}.${Y}`;
+}
+function applyEnergyDayUI() {
+  const minD = energyMinDay || todayStr();
+  ['e', 'f'].forEach(p => {
+    $(p + '-day').textContent = fmtDayLabel(energyDay);
+    $(p + '-prev').disabled = energyDay <= minD;
+    $(p + '-next').disabled = energyDay >= todayStr();
+  });
+}
+async function loadEnergyDay(day) {
+  energyDay = day;
+  try {
+    const d = await (await fetch('/api/history?day=' + day)).json();
+    energyMinDay = d.min_day || energyMinDay;
+    renderEnergyChart(d.history);
+    renderFlowChart(d.history);
+  } catch (e) { /* still */ }
+  applyEnergyDayUI();
+}
+function shiftEnergyDay(delta) {
+  const base = new Date((energyDay || todayStr()) + 'T00:00');
+  base.setDate(base.getDate() + delta);
+  let nd = isoDay(base);
+  const t = todayStr(), minD = energyMinDay || t;
+  if (nd > t) nd = t;
+  if (nd < minD) nd = minD;
+  loadEnergyDay(nd);
+}
+$('e-prev').addEventListener('click', () => shiftEnergyDay(-1));
+$('e-next').addEventListener('click', () => shiftEnergyDay(1));
+$('f-prev').addEventListener('click', () => shiftEnergyDay(-1));
+$('f-next').addEventListener('click', () => shiftEnergyDay(1));
 
 /* --- Drag-Auswahl --- */
 function slotAtX(clientX) {
@@ -439,8 +488,14 @@ async function load() {
   nowIso = d.now || '';
   applyDay();
   renderOverview(d.charge_overview);
-  renderEnergyChart(d.energy_history);
-  renderFlowChart(d.energy_history);
+  // Energie-Charts: Live-Refresh nur wenn der heutige Tag angezeigt wird
+  energyMinDay = d.energy_min_day || energyMinDay;
+  if (!energyDay) energyDay = todayStr();
+  if (energyDay === todayStr()) {
+    renderEnergyChart(d.energy_history);
+    renderFlowChart(d.energy_history);
+  }
+  applyEnergyDayUI();
 
   const banner = $('banner');
   if (d.last_error) banner.innerHTML = `<div class="banner err">Fehler: ${d.last_error}</div>`;

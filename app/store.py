@@ -225,7 +225,7 @@ def list_charge_sessions(now=None):
 # history.json: {"hours": {"YYYY-MM-DDTHH:MM": {verbrauch, solar, 7 Flüsse,
 #   soc_min, soc_max, soc_sum, soc_n}}, "last": {ts, pv, load, grid, bc, bd}}
 # (Schlüssel "hours" historisch beibehalten, enthält jetzt Viertelstunden-Slots.)
-_HISTORY_KEEP_HOURS = 48          # rollierend, alte Slots werden verworfen
+_HISTORY_KEEP_DAYS = 35           # rollierend, ältere Tage werden verworfen
 _MAX_SAMPLE_GAP_S = 900           # Lücken (z.B. nach Downtime) auf 15 min kappen
 
 
@@ -348,7 +348,7 @@ def log_energy_sample(system: dict | None, now: datetime | None = None):
                     "bd": power if state == 2 else 0.0}
 
     # Rollierend alte Slots verwerfen
-    keep_from = now.timestamp() - _HISTORY_KEEP_HOURS * 3600
+    keep_from = now.timestamp() - _HISTORY_KEEP_DAYS * 86400
     for k in list(hours.keys()):
         try:
             if datetime.fromisoformat(k).timestamp() < keep_from:
@@ -360,35 +360,56 @@ def log_energy_sample(system: dict | None, now: datetime | None = None):
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
+def _row_from_bucket(label: str, b: dict | None) -> dict:
+    if b and b.get("soc_n"):
+        row = {
+            "hour": label,
+            "verbrauch": round(b["verbrauch"], 3),
+            "solar": round(b["solar"], 3),
+            "soc_avg": round(b["soc_sum"] / b["soc_n"], 1),
+            "soc_min": round(b["soc_min"], 1),
+            "soc_max": round(b["soc_max"], 1),
+        }
+        for k in _FLOW_KEYS:
+            row[k] = round(b.get(k, 0.0), 3)
+    else:
+        row = {"hour": label, "verbrauch": 0.0, "solar": 0.0,
+               "soc_avg": None, "soc_min": None, "soc_max": None}
+        for k in _FLOW_KEYS:
+            row[k] = 0.0
+    return row
+
+
+def energy_history_for_day(day: str, now: datetime | None = None) -> list:
+    """15-Min-Werte eines Tages (YYYY-MM-DD). Heute nur bis zum aktuellen Slot,
+    vergangene Tage voll (00:00–23:45)."""
+    now = now or datetime.now()
+    try:
+        d0 = datetime.strptime(day, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return []
+    hours = _load_history().get("hours", {})
+    is_today = day == now.strftime("%Y-%m-%d")
+    end = now if is_today else d0.replace(hour=23, minute=45)
+    t = d0.replace(hour=0, minute=0)
+    out = []
+    while t <= end:
+        out.append(_row_from_bucket(f"{t:%H:%M}", hours.get(_slot_key(t))))
+        t += timedelta(minutes=15)
+    return out
+
+
 def energy_history_today(now: datetime | None = None) -> list:
     """15-Min-Werte des heutigen Tages (00:00 bis aktueller Slot) für die Charts."""
     now = now or datetime.now()
+    return energy_history_for_day(now.strftime("%Y-%m-%d"), now)
+
+
+def energy_min_day() -> str | None:
+    """Frühester Tag, für den Verlaufsdaten vorliegen (YYYY-MM-DD) oder None."""
     hours = _load_history().get("hours", {})
-    t = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    out = []
-    while t <= now:
-        key = _slot_key(t)
-        label = f"{t:%H:%M}"
-        b = hours.get(key)
-        if b and b.get("soc_n"):
-            row = {
-                "hour": label,
-                "verbrauch": round(b["verbrauch"], 3),
-                "solar": round(b["solar"], 3),
-                "soc_avg": round(b["soc_sum"] / b["soc_n"], 1),
-                "soc_min": round(b["soc_min"], 1),
-                "soc_max": round(b["soc_max"], 1),
-            }
-            for k in _FLOW_KEYS:
-                row[k] = round(b.get(k, 0.0), 3)
-        else:
-            row = {"hour": label, "verbrauch": 0.0, "solar": 0.0,
-                   "soc_avg": None, "soc_min": None, "soc_max": None}
-            for k in _FLOW_KEYS:
-                row[k] = 0.0
-        out.append(row)
-        t += timedelta(minutes=15)
-    return out
+    days = {k[:10] for k in hours.keys() if len(k) >= 10}
+    return min(days) if days else None
 
 
 def active_ev(now: datetime | None = None):
