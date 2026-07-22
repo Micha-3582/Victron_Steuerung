@@ -381,16 +381,15 @@ def _row_from_bucket(label: str, b: dict | None) -> dict:
 
 
 def energy_history_for_day(day: str, now: datetime | None = None) -> list:
-    """15-Min-Werte eines Tages (YYYY-MM-DD). Heute nur bis zum aktuellen Slot,
-    vergangene Tage voll (00:00–23:45)."""
+    """Alle 96 15-Min-Slots eines Tages (00:00–23:45, YYYY-MM-DD). Feste
+    Zeitachse – noch nicht erfasste Slots kommen als Leerwerte zurück."""
     now = now or datetime.now()
     try:
         d0 = datetime.strptime(day, "%Y-%m-%d")
     except (ValueError, TypeError):
         return []
     hours = _load_history().get("hours", {})
-    is_today = day == now.strftime("%Y-%m-%d")
-    end = now if is_today else d0.replace(hour=23, minute=45)
+    end = d0.replace(hour=23, minute=45)
     t = d0.replace(hour=0, minute=0)
     out = []
     while t <= end:
