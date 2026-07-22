@@ -75,8 +75,8 @@ später unter „Einstellungen" ändern.</div>
 </div>
 
 <div class="card">
-  <h2>4 · Solarflächen</h2>
-  <small class="hint">Azimut: 0 = Süd, −90 = Ost, +90 = West · Neigung 0–90° · kWp = Modulleistung.</small>
+  <h2>4 · Solarflächen <span class="muted" style="font-size:13px;text-transform:none;letter-spacing:0">(optional)</span></h2>
+  <small class="hint">Keine PV-Anlage? Einfach leer lassen. · Azimut: 0 = Süd, −90 = Ost, +90 = West · Neigung 0–90° · kWp = Modulleistung.</small>
   <details class="help">
     <summary>Was bedeuten Azimut, Neigung und kWp?</summary>
     <div class="help-body">
@@ -137,7 +137,7 @@ function collectPlanes() {
     azimuth: parseFloat(r.querySelector('.p-az').value),
     declination: parseFloat(r.querySelector('.p-dec').value),
     kwp: parseFloat(r.querySelector('.p-kwp').value),
-  })).filter(p => !isNaN(p.kwp));
+  })).filter(p => p.kwp > 0);
 }
 function collect() {
   return {

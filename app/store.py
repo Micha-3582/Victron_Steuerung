@@ -54,12 +54,10 @@ def save_config(cfg: dict):
 
 
 def is_configured(cfg=None) -> bool:
+    """Minimal nötig: Cerbo + Tibber. PV-Anlage (Standort/Flächen) ist optional –
+    ohne PV rechnet die Steuerung einfach mit 0 kWh Prognose."""
     cfg = cfg or load_config()
-    if not all(cfg.get(k) for k in ("cerbo_host", "tibber_token")):
-        return False
-    if cfg.get("pv_latitude") is None or cfg.get("pv_longitude") is None:
-        return False
-    return bool(cfg.get("pv_planes"))
+    return bool(cfg.get("cerbo_host") and cfg.get("tibber_token"))
 
 
 # --- Interner State -------------------------------------------------------

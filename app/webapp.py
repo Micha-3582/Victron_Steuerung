@@ -314,6 +314,9 @@ def api_config():
         if key in body:
             cfg[key] = body[key]
     store.save_config(cfg)
+    # Sofort einen Regel-Durchlauf anstoßen, damit Preise/Status gleich erscheinen
+    # (der periodische Thread schläft sonst bis zu poll_seconds).
+    threading.Thread(target=ctrl.safe_tick, daemon=True).start()
     return jsonify({"ok": True, "configured": store.is_configured(cfg)})
 
 

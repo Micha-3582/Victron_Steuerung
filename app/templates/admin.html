@@ -307,7 +307,7 @@ function collectPlanes() {
     azimuth: parseFloat(r.querySelector('.p-az').value),
     declination: parseFloat(r.querySelector('.p-dec').value),
     kwp: parseFloat(r.querySelector('.p-kwp').value),
-  })).filter(p => !isNaN(p.kwp));
+  })).filter(p => p.kwp > 0);
 }
 
 document.getElementById('btn-save').addEventListener('click', async () => {
