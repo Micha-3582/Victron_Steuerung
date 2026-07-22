@@ -1,0 +1,455 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div id="banner"></div>
+
+<div class="card full" style="margin-bottom:14px">
+  <h2>Live-Werte (Victron)</h2>
+  <div class="sysgrid" id="sysgrid">
+    <div class="muted">lädt …</div>
+  </div>
+</div>
+
+<div class="dash">
+  <div class="card">
+    <h2>Tibber</h2>
+    <div class="row">
+      <div class="metric"><div class="val" id="price">–</div><div class="lbl">Preis jetzt (ct/kWh)</div></div>
+      <div class="metric"><div class="val" id="mode">–</div><div class="lbl">ESS-Modus</div></div>
+    </div>
+    <div style="margin-top:14px" id="strategy"></div>
+    <div class="muted" id="meta" style="margin-top:6px"></div>
+  </div>
+
+  <div class="card">
+    <h2>Sofort laden (Override)</h2>
+    <div style="display:flex;align-items:center;gap:14px">
+      <label class="switch" style="margin:0">
+        <input type="checkbox" id="override"><span class="slider"></span>
+      </label>
+      <div class="muted">Erzwingt Netzladen, unabhängig vom Preis. Zum Beenden wieder ausschalten.</div>
+    </div>
+  </div>
+
+  <div class="card full">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <h2 style="margin:0">Strompreis & Ladeplan</h2>
+      <button id="day-today" class="ghost daytab active">Heute</button>
+      <button id="day-tomorrow" class="ghost daytab">Morgen</button>
+      <button id="btn-select" class="ghost sel-btn" aria-pressed="false">✏️ Markieren</button>
+      <span class="muted" style="margin-left:auto" id="drag-hint">In die Kurve klicken oder ziehen, um einen Ladetermin anzulegen.</span>
+    </div>
+    <div class="chart-scroll" id="chart-scroll">
+      <div class="chart-inner" id="chart-inner"><canvas id="chart"></canvas></div>
+    </div>
+    <div class="legend">
+      <span><i class="sw sw-cheap"></i>günstig</span>
+      <span><i class="sw sw-normal"></i>normal</span>
+      <span><i class="sw sw-exp"></i>teuer</span>
+      <span><i class="sw sw-vexp"></i>sehr teuer</span>
+      <span><i class="sw sw-plan"></i>geplantes Ladefenster</span>
+      <span><i class="sw" style="background:rgba(255,213,74,.4);border:1px solid #ffd54a"></i>dein Termin</span>
+    </div>
+    <div class="muted" id="planline" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Ladevorgänge (heute)</h2>
+  <div class="muted" style="margin-bottom:8px">Geplante Ladefenster und tatsächlich durchgeführte – mit Preis, Menge und Kosten. Reset um Mitternacht.</div>
+  <table id="charge-log"></table>
+</div>
+
+<div class="card">
+  <h2>Manuelle Ladetermine</h2>
+  <div id="ev-form" class="ev-form">
+    <div class="grid2">
+      <div><label>Start</label><input id="ev-start" readonly placeholder="in der Kurve wählen"></div>
+      <div><label>Ende</label><input id="ev-end" readonly placeholder="in der Kurve wählen"></div>
+    </div>
+    <label>Notiz (optional)</label>
+    <input type="text" id="ev-note" placeholder="z.B. Akku voll bis 7 Uhr">
+    <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+      <button id="ev-confirm" disabled>Termin anlegen</button>
+      <button id="ev-discard" class="ghost" disabled>Auswahl verwerfen</button>
+    </div>
+    <div class="muted" id="ev-empty" style="margin-top:8px">Ziehe in der Kurve über die gewünschten Viertelstunden – die Auswahl erscheint hier und wird erst nach Bestätigung angelegt.</div>
+  </div>
+  <table id="ev-list" style="margin-top:16px"></table>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+const LEVEL_COLORS = {
+  VERY_CHEAP: '#35c07a', CHEAP: '#35c07a', NORMAL: '#4da3ff',
+  EXPENSIVE: '#f0a63c', VERY_EXPENSIVE: '#e5544a'
+};
+let chart, prices = [], allPrices = [], schedules = [], nowSlot = '', nowIso = '';
+let activeDay = 'today', chargePowerW = 3500;
+let drag = null;           // {from, to}
+let selectMode = false;    // Touch: ziehen markiert statt scrollen
+
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2, '0');
+// Gemeinsame Spaltenbreiten für beide Ladetabellen (letzte Spalte = Löschen)
+const COLGROUP = '<colgroup>'
+  + '<col style="width:32%"><col style="width:13%"><col style="width:13%">'
+  + '<col style="width:13%"><col style="width:13%"><col style="width:16%"></colgroup>';
+// Summenzeile (Strich): Ø-Effektivpreis = Gesamtkosten / Gesamtmenge
+function totalRow(list) {
+  const kwh = list.reduce((a, x) => a + (x.kwh || 0), 0);
+  const cost = list.reduce((a, x) => a + (x.cost || 0), 0);
+  const avg = kwh > 0 ? (cost / kwh * 100) : null;
+  return `<tr class="total"><td>Summe</td><td></td>`
+    + `<td>${avg != null ? avg.toFixed(1) + ' ct' : '–'}</td>`
+    + `<td>${kwh.toFixed(2)} kWh</td><td>${cost.toFixed(2)} €</td><td></td></tr>`;
+}
+
+function isNarrow() { return window.matchMedia('(max-width: 720px)').matches; }
+
+/* --- Auswahl-/Termin-Bänder über der Kurve --- */
+const bandPlugin = {
+  id: 'bands',
+  beforeDatasetsDraw(c) {
+    if (!prices.length) return;
+    const { ctx, chartArea: area, scales: { x } } = c;
+    const half = (x.width / prices.length) / 2;
+    const band = (from, to, fill, stroke) => {
+      const left = x.getPixelForValue(from) - half;
+      const right = x.getPixelForValue(to) + half;
+      ctx.fillStyle = fill;
+      ctx.fillRect(left, area.top, right - left, area.bottom - area.top);
+      if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.strokeRect(left, area.top, right - left, area.bottom - area.top); }
+    };
+    ctx.save();
+    // bestehende Termine (gelb)
+    for (const s of schedules) {
+      if (!s.enabled) continue;
+      const idx = prices.map((p, i) => (p.start >= s.start && p.start < s.end) ? i : -1).filter(i => i >= 0);
+      if (idx.length) band(idx[0], idx[idx.length - 1], 'rgba(255,213,74,.16)', 'rgba(255,213,74,.5)');
+    }
+    // laufende Auswahl (blau)
+    if (drag) {
+      const a = Math.min(drag.from, drag.to), b = Math.max(drag.from, drag.to);
+      band(a, b, 'rgba(77,163,255,.22)', 'rgba(77,163,255,.7)');
+    }
+    // Jetzt-Linie
+    const ni = prices.findIndex(p => p.label.slice(0, 2) === nowSlot.slice(0, 2) && p.label.slice(3, 5) === nowSlot.slice(3, 5));
+    if (ni >= 0) {
+      const px = x.getPixelForValue(ni);
+      ctx.strokeStyle = '#e6e9ef'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
+      ctx.beginPath(); ctx.moveTo(px, area.top); ctx.lineTo(px, area.bottom); ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.restore();
+  }
+};
+
+function buildChart() {
+  chart = new Chart($('chart').getContext('2d'), {
+    type: 'bar',
+    data: { labels: [], datasets: [{ data: [], borderWidth: 0 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: {
+          title: items => { const p = prices[items[0].dataIndex]; return p ? p.label : ''; },
+          label: item => { const p = prices[item.dataIndex]; return p ? `${p.ct} ct/kWh${p.planned ? ' · eingeplant' : ''}` : ''; }
+        } }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#8d96a8', autoSkip: false, maxRotation: 0,
+          callback(v, i) { const p = prices[i]; if (!p || !p.label.endsWith(':00')) return '';
+            const step = (chart && chart.width > 900) ? 4 : 8; return i % step === 0 ? p.label : ''; } } },
+        y: { grid: { color: '#2e3542' }, ticks: { color: '#8d96a8', callback: v => v + ' ct' } }
+      }
+    },
+    plugins: [bandPlugin]
+  });
+  attachDrag();
+}
+
+function renderChart() {
+  chart.data.labels = prices.map(p => p.label);
+  const ds = chart.data.datasets[0];
+  ds.data = prices.map(p => p.ct);
+  ds.backgroundColor = prices.map(p => LEVEL_COLORS[p.level] || '#4da3ff');
+  ds.borderColor = prices.map(p => p.planned ? '#b072f5' : 'transparent');
+  ds.borderWidth = prices.map(p => p.planned ? 2 : 0);
+  chart.update('none');
+}
+
+/* --- Drag-Auswahl --- */
+function slotAtX(clientX) {
+  if (!prices.length) return null;
+  const rect = chart.canvas.getBoundingClientRect();
+  const area = chart.chartArea;
+  const x = clientX - rect.left;
+  if (x < area.left || x > area.right) return null;
+  const idx = Math.floor(((x - area.left) / (area.right - area.left)) * prices.length);
+  return Math.max(0, Math.min(prices.length - 1, idx));
+}
+function startDrag(clientX) { const i = slotAtX(clientX); if (i === null) return false; drag = { from: i, to: i }; chart.update('none'); return true; }
+function moveDrag(clientX) { if (!drag) return; const i = slotAtX(clientX); if (i === null || i === drag.to) return; drag.to = i; chart.update('none'); showSel(); }
+function showSel() {
+  if (!drag) return;
+  const a = Math.min(drag.from, drag.to), b = Math.max(drag.from, drag.to);
+  if (!prices[a] || !prices[b]) return;
+  const dur = (b - a + 1) * 15;
+  $('drag-hint').textContent = `Auswahl: ${prices[a].label}–${endLabel(b)} · ${Math.floor(dur/60)}:${pad(dur%60)} h`;
+}
+function endLabel(b) { const d = new Date(prices[b].start); d.setMinutes(d.getMinutes() + 15); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+
+let pendingSel = null;   // {start, end} – wartet auf Bestätigung
+
+function endDrag() {
+  if (!drag) return;
+  const a = Math.min(drag.from, drag.to), b = Math.max(drag.from, drag.to);
+  drag = null; chart.update('none');
+  if (!prices[a] || !prices[b]) return;
+  const start = prices[a].start.slice(0, 16);
+  const endD = new Date(prices[b].start); endD.setMinutes(endD.getMinutes() + 15);
+  const end = `${endD.getFullYear()}-${pad(endD.getMonth()+1)}-${pad(endD.getDate())}T${pad(endD.getHours())}:${pad(endD.getMinutes())}`;
+  // NICHT anlegen – nur die Eingabemaske füllen, Bestätigung abwarten.
+  pendingSel = { start, end };
+  $('ev-start').value = fmt(start);
+  $('ev-end').value = fmt(end);
+  $('ev-confirm').disabled = false;
+  $('ev-discard').disabled = false;
+  $('ev-empty').textContent = 'Auswahl bereit – mit „Termin anlegen" bestätigen oder verwerfen.';
+  $('drag-hint').textContent = 'In die Kurve klicken oder ziehen, um einen Ladetermin anzulegen.';
+}
+
+function clearSelection() {
+  pendingSel = null;
+  $('ev-start').value = ''; $('ev-end').value = ''; $('ev-note').value = '';
+  $('ev-confirm').disabled = true; $('ev-discard').disabled = true;
+  $('ev-empty').textContent = 'Ziehe in der Kurve über die gewünschten Viertelstunden – die Auswahl erscheint hier und wird erst nach Bestätigung angelegt.';
+}
+
+document.getElementById('ev-confirm').addEventListener('click', async () => {
+  if (!pendingSel) return;
+  const r = await fetch('/api/ev', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ start: pendingSel.start, end: pendingSel.end, note: $('ev-note').value }) });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); alert(e.error || 'Termin konnte nicht angelegt werden'); return; }
+  clearSelection();
+  load();
+});
+document.getElementById('ev-discard').addEventListener('click', clearSelection);
+
+function attachDrag() {
+  const cv = chart.canvas;
+  cv.addEventListener('mousedown', e => startDrag(e.clientX));
+  cv.addEventListener('mousemove', e => moveDrag(e.clientX));
+  window.addEventListener('mouseup', endDrag);
+  cv.addEventListener('touchstart', e => { if (!selectMode || e.touches.length !== 1) return; if (startDrag(e.touches[0].clientX)) e.preventDefault(); }, { passive: false });
+  cv.addEventListener('touchmove', e => { if (!selectMode || !drag) return; e.preventDefault(); moveDrag(e.touches[0].clientX); }, { passive: false });
+  cv.addEventListener('touchend', e => { if (!selectMode || !drag) return; e.preventDefault(); endDrag(); }, { passive: false });
+  cv.addEventListener('touchcancel', () => { drag = null; chart.update('none'); });
+}
+
+function setSelectMode(on) {
+  selectMode = on;
+  const btn = $('btn-select');
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  btn.textContent = on ? '✏️ Markieren aktiv' : '✏️ Markieren';
+  document.body.classList.toggle('selecting', on);
+  updateWidth();
+}
+$('btn-select').addEventListener('click', () => setSelectMode(!selectMode));
+
+/* Schmale Ansicht: Kurve doppelt so breit + seitlich scrollen (außer im Markier-Modus) */
+function updateWidth() {
+  const inner = $('chart-inner'), scroll = $('chart-scroll');
+  if (isNarrow()) { inner.style.width = Math.round(scroll.clientWidth * 2.4) + 'px'; }
+  else { inner.style.width = '100%'; }
+  if (chart) chart.resize();
+}
+window.addEventListener('resize', () => { updateWidth(); });
+window.addEventListener('orientationchange', () => setTimeout(updateWidth, 200));
+
+/* --- Daten --- */
+async function load() {
+  let d = await (await fetch('/api/status')).json();
+  let s = d.status || {};
+  allPrices = d.prices || [];
+  schedules = d.ev_schedules || [];
+  nowSlot = s.now_slot || '';
+  nowIso = d.now || '';
+  applyDay();
+  renderOverview(d.charge_overview);
+
+  const banner = $('banner');
+  if (d.last_error) banner.innerHTML = `<div class="banner err">Fehler: ${d.last_error}</div>`;
+  else if (s.dry_run) banner.innerHTML = `<div class="banner warn">DRY-RUN aktiv – der Cerbo wird NICHT geschaltet. Umstellen unter Einstellungen.</div>`;
+  else banner.innerHTML = '';
+
+  if (s.ok) {
+    chargePowerW = s.charge_power_w || 3500;
+    const priceEl = $('price'); priceEl.textContent = s.now_price;
+    const cur = prices.find(p => p.label.slice(0, 2) === (s.now_slot || '').slice(0, 2));
+    priceEl.style.color = cur ? (LEVEL_COLORS[cur.level] || '') : '';
+    $('mode').innerHTML = `<span class="pill ${s.ess_mode === 9 ? 'green' : 'grey'}">${s.ess_text}</span>`;
+    $('strategy').innerHTML = `<span class="pill amber">${s.strategy}</span>` +
+      (s.ev_active ? ` <span class="pill green">Ladetermin läuft</span>` : '');
+    $('meta').textContent = `Bilanz ${s.balance} kWh · PV heute ${s.pv_today} / morgen ${s.pv_tom} kWh · Stand ${d.last_tick || '–'}`
+      + (s.pv_note ? ` · ⚠ ${s.pv_note}` : '');
+    $('planline').textContent = s.plan_count ? `Geplante Ladefenster: ${s.plan_windows}` : 'Aktuell keine Netzladung geplant.';
+    $('override').checked = !!(s.strategy === 'MANUELL');
+  } else {
+    $('strategy').innerHTML = `<span class="pill grey">${s.reason || '–'}</span>`;
+  }
+  renderChart();
+  renderEv();
+  // Die Victron-Live-Kacheln zeichnet ausschließlich loadLive() (alle 2 s),
+  // damit sie nicht im 15-s-Takt gelöscht und neu aufgebaut werden (Flackern).
+}
+
+function w(v) { return (v > 0 ? '+' : '') + Math.round(v) + ' W'; }
+function kv(rows) { return rows.map(r => `<div class="kv"><span class="k">${r[0]}</span><span class="v">${r[1]}</span></div>`).join(''); }
+function phases(o) { return kv([['L1', Math.round(o.l1) + ' W'], ['L2', Math.round(o.l2) + ' W'], ['L3', Math.round(o.l3) + ' W']]); }
+function renderSystem(sys) {
+  const g = $('sysgrid');
+  if (!sys) { g.innerHTML = '<div class="muted">Keine Verbindung zum Cerbo.</div>'; return; }
+  const b = sys.battery;
+  const stateTxt = { 0: 'Ruhe', 1: 'Laden', 2: 'Entladen' }[b.state] || '–';
+  const gridColor = sys.grid.total > 5 ? 'var(--vexp)' : (sys.grid.total < -5 ? 'var(--cheap)' : 'var(--fg)');
+  const tile = (title, big, sub, color) => `
+    <div class="systile">
+      <div class="systile-t">${title}</div>
+      <div class="systile-v" ${color ? `style="color:${color}"` : ''}>${big}</div>
+      <div class="systile-s">${sub || ''}</div>
+    </div>`;
+  const sun = '<span class="sun-ico">☀︎</span>';
+  g.innerHTML =
+    tile('⚡ Netz', w(sys.grid.total), phases(sys.grid), gridColor) +
+    tile('🏠 Gesamtverbrauch', Math.round(sys.loads.total) + ' W', phases(sys.loads)) +
+    tile(sun + ' PV-Wechselrichter', Math.round(sys.pv_inverter.total) + ' W', phases(sys.pv_inverter)) +
+    tile(sun + ' PV-Ladegerät (MPPT)', Math.round(sys.pv_charger) + ' W', kv([['DC-Strom', sys.pv_charger_current.toFixed(1) + ' A']])) +
+    tile(sun + ' Gesamt Solar', Math.round(sys.solar_total) + ' W', kv([['Quelle', 'PV-WR + MPPT']])) +
+    tile('🔋 Batterie', b.soc + ' %',
+         kv([['Status', stateTxt], ['Leistung', w(b.power)], ['Spannung', b.voltage.toFixed(2) + ' V'], ['Strom', b.current.toFixed(1) + ' A']]),
+         b.state === 1 ? 'var(--cheap)' : (b.state === 2 ? 'var(--exp)' : 'var(--fg)'));
+  const gt = sys.grid_today;
+  if (gt) {
+    g.innerHTML +=
+      tile('← Zum Netz', gt.export.toFixed(1) + ' kWh', kv([['heute eingespeist', '']]), 'var(--cheap)') +
+      tile('→ Aus dem Netz', gt.import.toFixed(1) + ' kWh', kv([['heute bezogen', '']]), 'var(--vexp)');
+  }
+}
+
+/* Schnelle Live-Aktualisierung (unabhängig vom 5-Min-Regelzyklus) */
+async function loadLive() {
+  try {
+    const l = await (await fetch('/api/live')).json();
+    if (!l.ok) return;
+    renderSystem(l.system);
+  } catch (e) { /* still */ }
+}
+
+function fmt(x) { return x.replace('T', ' ').slice(0, 16); }
+function evStatus(i) {
+  const now = nowIso || new Date().toISOString().slice(0, 19);
+  if (now >= i.end) return '<span class="pill grey">abgelaufen</span>';
+  if (now >= i.start) return '<span class="pill green">läuft</span>';
+  return '<span class="pill amber">geplant</span>';
+}
+// Exakte Fenster-Berechnung: jeden 15-Min-Slot einzeln summieren
+function windowStats(startIso, endIso) {
+  const m = {};
+  allPrices.forEach(p => { m[p.start.slice(0, 16)] = p.ct; });
+  const kw = chargePowerW / 1000;
+  let n = 0, cost = 0, sum = 0, cnt = 0;
+  const e = new Date(endIso);
+  for (let t = new Date(startIso); t < e; t.setMinutes(t.getMinutes() + 15)) {
+    const key = `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}T${pad(t.getHours())}:${pad(t.getMinutes())}`;
+    n++;
+    const pr = m[key];
+    if (pr != null) { cost += pr / 100 * kw * 0.25; sum += pr; cnt++; }
+  }
+  return { kwh: n * kw * 0.25, cost, avg: cnt ? sum / cnt : null };
+}
+function renderEv() {
+  const t = $('ev-list');
+  if (!schedules.length) { t.innerHTML = '<tr><td class="muted">Keine Termine.</td></tr>'; return; }
+  const head = `<tr class="thead"><td>Zeitraum</td><td>Status</td><td>Ø Preis</td><td>Menge</td><td>Kosten</td><td></td></tr>`;
+  const stats = [];
+  const rows = schedules.map(i => {
+    const st = windowStats(i.start, i.end);
+    stats.push(st);
+    return `<tr>
+      <td><b>${fmt(i.start)}</b> → ${fmt(i.end)}${i.note ? '<br><span class="muted">' + i.note + '</span>' : ''}</td>
+      <td>${evStatus(i)}</td>
+      <td>${st.avg != null ? st.avg.toFixed(1) + ' ct' : '–'}</td>
+      <td>${st.kwh.toFixed(2)} kWh</td>
+      <td>${st.cost.toFixed(2)} €</td>
+      <td style="text-align:right"><button class="danger" onclick="delEv('${i.id}')">Löschen</button></td></tr>`;
+  }).join('');
+  t.innerHTML = COLGROUP + head + rows + totalRow(stats);
+}
+async function delEv(id) { await fetch('/api/ev/' + id, { method: 'DELETE' }); load(); }
+
+$('override').addEventListener('change', async e => {
+  await fetch('/api/override', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value: e.target.checked }) });
+  setTimeout(load, 500);
+});
+
+function dayStr(offset) {
+  const base = nowIso ? nowIso.slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const dt = new Date(base + 'T00:00:00'); dt.setDate(dt.getDate() + offset);
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+}
+function applyDay() {
+  const target = activeDay === 'today' ? dayStr(0) : dayStr(1);
+  prices = allPrices.filter(p => p.start.slice(0, 10) === target);
+  const emptyTom = activeDay === 'tomorrow' && !prices.length;
+  $('drag-hint').textContent = emptyTom
+    ? 'Für morgen liegen noch keine Preise vor (Tibber veröffentlicht sie ~13 Uhr).'
+    : 'In die Kurve klicken oder ziehen, um einen Ladetermin anzulegen.';
+  renderChart();
+}
+function setDay(d) {
+  activeDay = d;
+  $('day-today').classList.toggle('active', d === 'today');
+  $('day-tomorrow').classList.toggle('active', d === 'tomorrow');
+  applyDay();
+}
+$('day-today').addEventListener('click', () => setDay('today'));
+$('day-tomorrow').addEventListener('click', () => setDay('tomorrow'));
+
+function renderOverview(items) {
+  const t = $('charge-log');
+  if (!items || !items.length) {
+    t.innerHTML = '<tr><td class="muted">Heute noch keine Ladefenster geplant oder durchgeführt.</td></tr>';
+    return;
+  }
+  const badge = s => s === 'geplant' ? '<span class="pill amber">geplant</span>'
+    : s === 'läuft' ? '<span class="pill green">läuft</span>'
+    : '<span class="pill green">geladen ✓</span>';
+  const head = `<tr class="thead"><td>Zeitfenster</td><td>Status</td><td>Ø Preis</td><td>Menge</td><td>Kosten</td><td></td></tr>`;
+  const rows = items.map(i => {
+    const end = i.end ? i.end.slice(11, 16) : 'jetzt';
+    return `<tr>
+      <td><b>${i.start.slice(11, 16)}–${end}</b>${i.strategy ? '<br><span class="muted">' + i.strategy + '</span>' : ''}</td>
+      <td>${badge(i.status)}</td>
+      <td>${i.avg_price != null ? i.avg_price + ' ct' : '–'}</td>
+      <td>${i.kwh} kWh</td>
+      <td>${i.cost.toFixed(2)} €</td>
+      <td></td>
+    </tr>`;
+  }).join('');
+  t.innerHTML = COLGROUP + head + rows + totalRow(items.map(i => ({ kwh: i.kwh, cost: i.cost })));
+}
+
+buildChart();
+updateWidth();
+load();
+loadLive();
+setInterval(load, 15000);      // Plan/Preise/Termine (langsamer)
+setInterval(loadLive, 2000);   // Live-Werte vom Cerbo (wie Victron: alle 2 s)
+</script>
+{% endblock %}

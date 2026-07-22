@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Einrichtung{% endblock %}
+{% block content %}
+
+<div class="banner warn">Willkommen! Richte deine Anlage ein. Alle Werte kannst du
+später unter „Einstellungen" ändern.</div>
+
+<div class="card">
+  <h2>1 · Victron Cerbo GX</h2>
+  <small class="hint">Am Cerbo unter Einstellungen → Dienste → Modbus TCP aktivieren.</small>
+  <div class="grid2">
+    <div><label>Cerbo IP-Adresse</label><input id="cerbo_host" value="{{ cfg.cerbo_host }}" placeholder="192.168.2.241"></div>
+    <div><label>Port</label><input id="cerbo_port" value="{{ cfg.cerbo_port }}"></div>
+  </div>
+  <details class="help">
+    <summary>Wie finde ich IP & Port, und wie aktiviere ich Modbus?</summary>
+    <div class="help-body">
+      Die App liest die Werte direkt vom Cerbo GX über das Netzwerk. Dafür muss am Cerbo einmalig Modbus TCP eingeschaltet sein.
+      <ol>
+        <li><b>Modbus aktivieren:</b> am Cerbo (oder im VRM/Remote Console) auf
+          <b>Einstellungen → Dienste → Modbus TCP</b> und den Schalter auf <b>AN</b>.</li>
+        <li><b>IP-Adresse finden:</b> unter <b>Einstellungen → Ethernet</b> (oder WLAN) steht die
+          <b>IP-Adresse</b>, z.B. <code>192.168.2.241</code>. Diese oben eintragen.</li>
+        <li><b>Port:</b> bleibt bei <code>502</code> (Modbus-Standard), nur ändern wenn du es bewusst umgestellt hast.</li>
+      </ol>
+      <span class="muted">Tipp: Gib dem Cerbo im Router eine feste IP, damit sie sich nicht ändert. Mit „Verbindung testen" unten prüfst du sofort, ob es klappt.</span>
+    </div>
+  </details>
+</div>
+
+<div class="card">
+  <h2>2 · Tibber</h2>
+  <small class="hint">Access-Token von developer.tibber.com.</small>
+  <label>Tibber Access Token</label>
+  <input id="tibber_token" value="{{ cfg.tibber_token }}" placeholder="Token einfügen">
+  <a class="help-link" href="https://developer.tibber.com/" target="_blank" rel="noopener">Token bei developer.tibber.com holen ↗</a>
+  <details class="help">
+    <summary>Wie komme ich an meinen Tibber Access Token?</summary>
+    <div class="help-body">
+      Der Token verbindet die App mit deinem Tibber-Konto, um die Strompreise abzurufen. So bekommst du ihn:
+      <ol>
+        <li>Öffne <b>developer.tibber.com</b> und melde dich mit deinem normalen <b>Tibber-Login</b> an.</li>
+        <li>Klicke oben auf <b>„API Explorer"</b> bzw. auf dein Profil.</li>
+        <li>Dort steht dein persönlicher <b>Access Token</b> – ein langer Zeichen-String.</li>
+        <li>Kopiere ihn komplett und füge ihn oben ein.</li>
+      </ol>
+      <span class="muted">Behandle den Token wie ein Passwort. Er wird nur lokal gespeichert.</span>
+    </div>
+  </details>
+</div>
+
+<div class="card">
+  <h2>3 · Standort</h2>
+  <label>Aus Google Maps einfügen</label>
+  <input id="pv_coords" placeholder="51.592657, 6.504778">
+  <small class="hint">Beide Zahlen zusammen einfügen – wird automatisch aufgeteilt.</small>
+  <div class="grid2" style="margin-top:10px">
+    <div><label>Breitengrad</label><input id="pv_latitude" value="{{ cfg.pv_latitude or '' }}" placeholder="51.573"></div>
+    <div><label>Längengrad</label><input id="pv_longitude" value="{{ cfg.pv_longitude or '' }}" placeholder="6.510"></div>
+  </div>
+  <details class="help">
+    <summary>Wie finde ich meine Koordinaten?</summary>
+    <div class="help-body">
+      Standort deiner Anlage – damit holt die App die passende PV-Prognose. Auf ein paar Hundert Meter genau reicht völlig.
+      <ol>
+        <li>Öffne <b>Google Maps</b>, suche deine Adresse.</li>
+        <li><b>Rechtsklick</b> auf dein Dach → oben erscheinen die Koordinaten als
+          <b>zwei Zahlen mit Komma</b>, z.B. <code>51.592657, 6.504778</code>.</li>
+        <li>Klicke darauf (kopiert sie) und füge sie oben in <b>„Aus Google Maps einfügen"</b> ein –
+          Breiten- und Längengrad werden automatisch getrennt.</li>
+      </ol>
+      <span class="muted">Erste Zahl = Breitengrad, zweite = Längengrad. Alternativ einfach nach „Koordinaten &lt;deine Stadt&gt;" suchen.</span>
+    </div>
+  </details>
+</div>
+
+<div class="card">
+  <h2>4 · Solarflächen</h2>
+  <small class="hint">Azimut: 0 = Süd, −90 = Ost, +90 = West · Neigung 0–90° · kWp = Modulleistung.</small>
+  <details class="help">
+    <summary>Was bedeuten Azimut, Neigung und kWp?</summary>
+    <div class="help-body">
+      Für jede Dachfläche mit Solarmodulen legst du eine Zeile an. Damit holt die App die PV-Prognose.
+      <ol>
+        <li><b>Name</b> – frei wählbar, nur zur Übersicht.</li>
+        <li><b>Azimut</b> – Himmelsrichtung der Module: <b>0 = Süd</b>, <b>−90 = Ost</b>,
+          <b>+90 = West</b>, <b>±180 = Nord</b>. Südost ≈ <code>−45</code>.</li>
+        <li><b>Neigung</b> – Modulwinkel: <b>0° = flach</b>, <b>90° = senkrecht</b>. Schrägdach meist 30–45°.</li>
+        <li><b>kWp</b> – installierte Modulleistung der Fläche. Anzahl Module × Wattpeak ÷ 1000.
+          8 × 400 W = <code>3,2</code> kWp.</li>
+      </ol>
+      <span class="muted">Mehrere Dächer? Pro Ausrichtung eine eigene Zeile – wird summiert.</span>
+    </div>
+  </details>
+  <div id="planes" style="margin-top:10px"></div>
+  <button class="ghost" onclick="addPlane()">+ Fläche</button>
+</div>
+
+<div class="card">
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <button class="ghost" id="btn-test">Verbindung testen</button>
+    <button id="btn-save">Speichern & starten</button>
+  </div>
+  <div id="test-result" style="margin-top:12px"></div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+const initialPlanes = {{ cfg.pv_planes | tojson }};
+function planeRow(p = {}) {
+  const d = document.createElement('div'); d.className = 'plane-row';
+  d.innerHTML = `
+    <div><label>Name</label><input class="p-name" value="${p.name||''}"></div>
+    <div><label>Azimut</label><input class="p-az" value="${p.azimuth??''}"></div>
+    <div><label>Neigung</label><input class="p-dec" value="${p.declination??''}"></div>
+    <div><label>kWp</label><input class="p-kwp" value="${p.kwp??''}"></div>
+    <button class="danger" onclick="this.parentElement.remove()">✕</button>`;
+  return d;
+}
+function addPlane(p) { document.getElementById('planes').appendChild(planeRow(p)); }
+(initialPlanes.length ? initialPlanes : [{}]).forEach(addPlane);
+
+// Google-Maps-Koordinaten ("51.59, 6.50") automatisch aufteilen
+const coordsEl = document.getElementById('pv_coords');
+if (coordsEl) coordsEl.addEventListener('input', () => {
+  const m = coordsEl.value.split(',').map(x => parseFloat(x.trim()));
+  if (m.length === 2 && !isNaN(m[0]) && !isNaN(m[1])) {
+    document.getElementById('pv_latitude').value = m[0];
+    document.getElementById('pv_longitude').value = m[1];
+  }
+});
+
+function collectPlanes() {
+  return [...document.querySelectorAll('.plane-row')].map(r => ({
+    name: r.querySelector('.p-name').value,
+    azimuth: parseFloat(r.querySelector('.p-az').value),
+    declination: parseFloat(r.querySelector('.p-dec').value),
+    kwp: parseFloat(r.querySelector('.p-kwp').value),
+  })).filter(p => !isNaN(p.kwp));
+}
+function collect() {
+  return {
+    cerbo_host: document.getElementById('cerbo_host').value.trim(),
+    cerbo_port: parseInt(document.getElementById('cerbo_port').value) || 502,
+    tibber_token: document.getElementById('tibber_token').value.trim(),
+    pv_latitude: parseFloat(document.getElementById('pv_latitude').value),
+    pv_longitude: parseFloat(document.getElementById('pv_longitude').value),
+    pv_planes: collectPlanes(),
+  };
+}
+
+document.getElementById('btn-test').addEventListener('click', async () => {
+  const el = document.getElementById('test-result'); el.textContent = 'Teste ...';
+  const c = collect();
+  const r = await fetch('/api/test-connection', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(c)});
+  const d = await r.json();
+  const line = (name, x) => x.ok
+    ? `<div class="banner" style="background:rgba(63,185,80,.12);color:#3fb950">${name}: OK ${x.soc!==undefined?('· SOC '+x.soc+'%'):''}${x.slots!==undefined?('· '+x.slots+' Preis-Slots'):''}</div>`
+    : `<div class="banner err">${name}: ${x.error}</div>`;
+  el.innerHTML = line('Cerbo', d.cerbo) + line('Tibber', d.tibber);
+});
+
+document.getElementById('btn-save').addEventListener('click', async () => {
+  const r = await fetch('/api/config', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(collect())});
+  const d = await r.json();
+  if (d.configured) location.href = '/';
+  else document.getElementById('test-result').innerHTML =
+    '<div class="banner err">Noch unvollständig – bitte alle Felder ausfüllen.</div>';
+});
+</script>
+{% endblock %}

@@ -1,0 +1,6 @@
+# Standard: Git normalisiert Textdateien automatisch
+* text=auto
+
+# Shell-Skripte MÜSSEN Linux-Zeilenenden (LF) behalten,
+# sonst starten sie auf dem Raspberry Pi nicht.
+*.sh text eol=lf

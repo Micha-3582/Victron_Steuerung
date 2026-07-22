@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Victron Steuerung{% endblock %}</title>
+  <style>
+    :root {
+      --bg: #14171c; --card: #1c2027; --card2: #232833;
+      --fg: #e6e9ef; --muted: #8d96a8; --accent: #4da3ff; --border: #2e3542;
+      --green: #35c07a; --blue: #4da3ff; --red: #e5544a;
+      /* Preis-Ampel wie Tibber Timer */
+      --cheap: #35c07a; --normal: #4da3ff; --exp: #f0a63c; --vexp: #e5544a;
+      --plan: #b072f5; --timer: #ffd54a;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased; }
+    header { display: flex; align-items: center; gap: 10px; padding: 14px 20px;
+      background: var(--card); border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 10; }
+    header h1 { font-size: 18px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+    header .sun { font-size: 22px; }
+    header nav { margin-left: auto; display: flex; gap: 6px; }
+    header nav a { color: var(--muted); text-decoration: none; font-size: 14px;
+      padding: 7px 12px; border-radius: 8px; }
+    header nav a:hover { background: var(--card2); color: var(--fg); }
+    /* Desktop: volle Fensterbreite. Handy: schmal (passt automatisch). */
+    main { width: 100%; max-width: 1500px; margin: 0 auto; padding: 20px 24px; }
+    @media (max-width: 640px) { main { padding: 12px; } header { padding: 12px 14px; } }
+    .card { background: var(--card); border: 1px solid var(--border);
+      border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+    .card h2 { margin: 0 0 12px; font-size: 14px; color: var(--muted);
+      font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+    .row { display: flex; flex-wrap: wrap; gap: 12px; }
+    .metric { flex: 1; min-width: 120px; }
+    .metric .val { font-size: 26px; font-weight: 700; }
+    .metric .lbl { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .pill { display: inline-block; padding: 4px 10px; border-radius: 999px;
+      font-size: 13px; font-weight: 600; }
+    .pill.green { background: rgba(63,185,80,.15); color: var(--green); }
+    .pill.grey  { background: rgba(138,160,180,.15); color: var(--muted); }
+    .pill.amber { background: rgba(255,176,32,.15); color: var(--accent); }
+    label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+    input, select { width: 100%; padding: 10px 12px; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--bg); color: var(--fg);
+      font-size: 15px; }
+    button { cursor: pointer; border: none; border-radius: 10px; padding: 11px 16px;
+      font-size: 15px; font-weight: 600; background: var(--blue); color: #fff; }
+    button.ghost { background: var(--card2); color: var(--fg); border: 1px solid var(--border); }
+    button.danger { background: rgba(248,81,73,.15); color: var(--red); }
+    button:disabled { opacity: .5; cursor: default; }
+    .switch { position: relative; width: 52px; height: 30px; }
+    .switch input { display: none; }
+    .slider { position: absolute; inset: 0; background: var(--card2); border-radius: 999px;
+      transition: .2s; border: 1px solid var(--border); }
+    .slider:before { content: ""; position: absolute; width: 22px; height: 22px;
+      left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; }
+    .switch input:checked + .slider { background: var(--green); }
+    .switch input:checked + .slider:before { transform: translateX(22px); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    td { padding: 8px 4px; border-bottom: 1px solid var(--border); }
+    .muted { color: var(--muted); font-size: 13px; }
+    tr.thead td { color: var(--muted); font-size: 12px; text-transform: uppercase;
+      letter-spacing: .04em; font-weight: 600; }
+    /* Beide Ladetabellen exakt gleiche Spaltenausrichtung */
+    #charge-log, #ev-list { table-layout: fixed; }
+    #charge-log td, #ev-list td { overflow: hidden; text-overflow: ellipsis; }
+    tr.total td { border-top: 2px solid var(--muted); border-bottom: none;
+      font-weight: 700; padding-top: 10px; }
+    tr.total td:first-child { color: var(--muted); text-transform: uppercase;
+      font-size: 12px; letter-spacing: .04em; }
+    .banner { padding: 10px 14px; border-radius: 10px; margin-bottom: 14px; font-size: 14px; }
+    .banner.warn { background: rgba(255,176,32,.12); color: var(--accent);
+      border: 1px solid rgba(255,176,32,.3); }
+    .banner.err { background: rgba(248,81,73,.12); color: var(--red);
+      border: 1px solid rgba(248,81,73,.3); }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 480px) { .grid2 { grid-template-columns: 1fr; } }
+    /* Desktop-Dashboard: obere Reihe zweispaltig, Kurve volle Breite */
+    .dash { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+    .dash .full { grid-column: 1 / -1; }
+    @media (max-width: 720px) { .dash { grid-template-columns: 1fr; } }
+    .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px;
+      font-size: 13px; color: var(--muted); }
+    .legend .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px;
+      margin-right: 6px; vertical-align: -1px; }
+    .sw-cheap { background: var(--cheap); } .sw-normal { background: var(--normal); }
+    .sw-exp { background: var(--exp); } .sw-vexp { background: var(--vexp); }
+    .sw-plan { background: transparent; border: 2px solid var(--plan); }
+    /* Kurve mit Scroll (schmale Ansicht) + Drag-Auswahl */
+    .chart-scroll { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; margin-top: 12px; }
+    .chart-inner { height: 300px; }
+    @media (max-width: 720px) { .chart-inner { height: 240px; } }
+    .chart-scroll canvas { cursor: crosshair; touch-action: pan-x; }
+    body.selecting .chart-scroll canvas { touch-action: none; }
+    .sel-btn[aria-pressed="true"] { background: var(--timer); color: #14171c; border-color: var(--timer); }
+    .daytab { font-size: 13px; padding: 6px 14px; }
+    .daytab.active { background: var(--accent); color: #14171c; border-color: var(--accent); }
+    /* Victron Live-Kacheln */
+    /* Festes Raster: 6 pro Zeile (Desktop), damit nichts springt */
+    .sysgrid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+    @media (max-width: 1200px) { .sysgrid { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 640px)  { .sysgrid { grid-template-columns: repeat(2, 1fr); } }
+    .systile { background: var(--card2); border: 1px solid var(--border); border-radius: 12px;
+      padding: 12px 14px; min-width: 0; }
+    .systile-t { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    .systile-v { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .systile-s { font-size: 12px; color: var(--muted); margin-top: 3px; font-variant-numeric: tabular-nums; }
+    /* gelbe Sonne (Text-Darstellung erzwungen, damit die Farbe greift) */
+    .sun-ico { color: var(--timer); font-variant-emoji: text; }
+    .systile-s .kv { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+    .systile-s .kv .k { color: var(--muted); }
+    .systile-s .kv .v { color: var(--fg); font-weight: 600; }
+    .plane-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr auto; gap: 8px;
+      align-items: end; margin-bottom: 8px; }
+    .plane-row label { margin: 0 0 3px; }
+    small.hint { color: var(--muted); font-size: 12px; }
+    /* Hilfe-Boxen in den Einstellungen */
+    .help-link { display: inline-block; margin-top: 6px; color: var(--accent);
+      text-decoration: none; font-size: 13px; }
+    .help-link:hover { text-decoration: underline; }
+    details.help { margin-top: 10px; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 10px; padding: 0 12px; }
+    details.help > summary { cursor: pointer; padding: 10px 0; color: var(--accent);
+      font-size: 13px; font-weight: 600; list-style: none; }
+    details.help > summary::before { content: "❔ "; }
+    details.help[open] > summary { border-bottom: 1px solid var(--border); }
+    .help-body { padding: 12px 0; font-size: 14px; color: var(--fg); line-height: 1.55; }
+    .help-body ol { margin: 8px 0; padding-left: 20px; }
+    .help-body li { margin: 5px 0; }
+    .help-body b { color: var(--fg); }
+    .help-body code { background: var(--card2); padding: 1px 6px; border-radius: 5px; font-size: 13px; }
+    .help-body .muted { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="sun">🔆</span>
+    <h1>Victron Steuerung</h1>
+    <nav>
+      <a href="/">Dashboard</a>
+      <a href="/admin">Einstellungen</a>
+    </nav>
+  </header>
+  <main>{% block content %}{% endblock %}</main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

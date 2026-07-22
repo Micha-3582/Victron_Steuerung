@@ -1,0 +1,4 @@
+pymodbus>=3.0
+requests>=2.25
+flask>=2.0
+waitress>=2.0

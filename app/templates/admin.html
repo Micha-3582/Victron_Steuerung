@@ -1,0 +1,399 @@
+{% extends "base.html" %}
+{% block title %}Einstellungen{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>App-Version & Update</h2>
+  <div class="muted">Installierte Version: <b id="app-version">…</b></div>
+  <div id="update-status" style="margin-top:8px"></div>
+  <pre id="update-output" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:12px;overflow:auto;max-height:180px;white-space:pre-wrap"></pre>
+  <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+    <button class="ghost" id="btn-check">Nach Updates suchen</button>
+    <button id="btn-update" style="display:none">Jetzt aktualisieren</button>
+  </div>
+  <details class="help">
+    <summary>Wie funktioniert das Update?</summary>
+    <div class="help-body">
+      Die App holt sich neue Versionen direkt von GitHub. Deine persönlichen Einstellungen
+      (Cerbo-IP, Tibber-Token, Parameter, Termine, Zählerstände) bleiben dabei <b>erhalten</b> –
+      aktualisiert wird nur der Programmcode.
+      <ol>
+        <li><b>Nach Updates suchen</b> prüft, ob auf GitHub eine neuere Version liegt.</li>
+        <li>Ist eine verfügbar, erscheint <b>Jetzt aktualisieren</b>. Ein Klick lädt sie und
+          startet die App neu (auf dem Raspberry Pi automatisch per Dienst).</li>
+      </ol>
+      <span class="muted">Läuft die App nicht als Dienst (z.B. beim Testen am PC), musst du sie nach dem Update einmal von Hand neu starten.</span>
+    </div>
+  </details>
+</div>
+
+<div class="card">
+  <h2>Betrieb</h2>
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px">
+    <label class="switch" style="margin:0"><input type="checkbox" id="dry_run"><span class="slider"></span></label>
+    <div><b>Dry-Run</b><div class="muted">An = nur beobachten, der Cerbo wird nicht geschaltet.
+      Erst nach erfolgreichem Parallelvergleich ausschalten (und das alte ioBroker-Skript stoppen!).</div></div>
+  </div>
+  <label>Abfrage-Intervall (Sekunden)</label>
+  <input id="poll_seconds" type="number">
+  <details class="help">
+    <summary>Was bedeuten Dry-Run und Abfrage-Intervall?</summary>
+    <div class="help-body">
+      <b>Dry-Run</b> ist der Sicherheits-Modus:
+      <ol>
+        <li><b>An (empfohlen zum Start):</b> die App liest alles und rechnet den Ladeplan,
+          <b>schaltet den Cerbo aber nicht</b>. So kannst du sie gefahrlos beobachten und mit deiner
+          bisherigen Steuerung (ioBroker) vergleichen.</li>
+        <li><b>Aus (scharf):</b> die App steuert aktiv den ESS-Modus. <b>Wichtig:</b> vorher die alte
+          ioBroker-Steuerung stoppen, sonst schreiben zwei Regler gleichzeitig.</li>
+      </ol>
+      <b>Abfrage-Intervall</b> – wie oft der Regelzyklus läuft (Preise holen, Plan rechnen, ESS setzen).
+      <code>300</code> Sekunden (5 Min) sind ideal, weil sich die Strompreise nur viertelstündlich ändern.
+      Die Live-Kacheln im Dashboard aktualisieren davon unabhängig alle 2 Sekunden.
+    </div>
+  </details>
+</div>
+
+<div class="card">
+  <h2>Victron Cerbo GX</h2>
+  <div class="grid2">
+    <div><label>Cerbo IP</label><input id="cerbo_host"></div>
+    <div><label>Port</label><input id="cerbo_port"></div>
+  </div>
+  <details class="help">
+    <summary>Wie finde ich IP & Port, und wie aktiviere ich Modbus?</summary>
+    <div class="help-body">
+      Die App liest die Werte direkt vom Cerbo GX über das Netzwerk. Dafür muss Modbus TCP am Cerbo aktiv sein.
+      <ol>
+        <li><b>Modbus aktivieren:</b> am Cerbo unter <b>Einstellungen → Dienste → Modbus TCP</b> → <b>AN</b>.</li>
+        <li><b>IP finden:</b> unter <b>Einstellungen → Ethernet</b> (oder WLAN), z.B. <code>192.168.2.241</code>.</li>
+        <li><b>Port:</b> Standard <code>502</code>.</li>
+      </ol>
+      <span class="muted">Am besten dem Cerbo im Router eine feste IP geben, damit sie sich nicht ändert.</span>
+    </div>
+  </details>
+</div>
+
+<div class="card">
+  <h2>Tibber</h2>
+  <label>Access Token</label><input id="tibber_token">
+  <a class="help-link" href="https://developer.tibber.com/" target="_blank" rel="noopener">Token bei developer.tibber.com holen ↗</a>
+  <details class="help">
+    <summary>Wie komme ich an meinen Tibber Access Token?</summary>
+    <div class="help-body">
+      Der Token verbindet die App mit deinem Tibber-Konto, um die Strompreise abzurufen. So bekommst du ihn:
+      <ol>
+        <li>Öffne <b>developer.tibber.com</b> und melde dich mit deinem normalen <b>Tibber-Login</b> an (dieselben Daten wie in der Tibber-App).</li>
+        <li>Klicke oben auf <b>„API Explorer"</b> bzw. auf dein Profil.</li>
+        <li>Dort wird dein persönlicher <b>Access Token</b> angezeigt – ein langer Zeichen-String.</li>
+        <li>Kopiere ihn komplett und füge ihn oben in das Feld ein.</li>
+      </ol>
+      <span class="muted">Der Token ist ein Geheimnis – behandle ihn wie ein Passwort. Er wird nur lokal gespeichert und nicht weitergegeben.</span>
+    </div>
+  </details>
+</div>
+
+<div class="card">
+  <h2>Standort</h2>
+  <label>Aus Google Maps einfügen</label>
+  <input id="pv_coords" placeholder="51.592657, 6.504778">
+  <small class="hint">Beide Zahlen zusammen einfügen – wird automatisch aufgeteilt.</small>
+  <div class="grid2" style="margin-top:10px">
+    <div><label>Breitengrad</label><input id="pv_latitude"></div>
+    <div><label>Längengrad</label><input id="pv_longitude"></div>
+  </div>
+  <details class="help">
+    <summary>Wie finde ich meine Koordinaten?</summary>
+    <div class="help-body">
+      Standort deiner Anlage für die PV-Prognose – auf ein paar Hundert Meter genau reicht.
+      <ol>
+        <li><b>Google Maps</b> öffnen, Adresse suchen.</li>
+        <li><b>Rechtsklick</b> auf dein Dach → oben stehen die Koordinaten als <b>zwei Zahlen mit Komma</b>
+          (z.B. <code>51.592657, 6.504778</code>).</li>
+        <li>Draufklicken (kopiert) und oben in <b>„Aus Google Maps einfügen"</b> einfügen – wird automatisch getrennt.</li>
+      </ol>
+      <span class="muted">Erste Zahl = Breitengrad, zweite = Längengrad.</span>
+    </div>
+  </details>
+</div>
+
+<div class="card">
+  <h2>Solarflächen</h2>
+  <small class="hint">Azimut: 0 = Süd, −90 = Ost, +90 = West.</small>
+  <details class="help">
+    <summary>Was bedeuten Azimut, Neigung und kWp?</summary>
+    <div class="help-body">
+      Für jede Dachfläche mit Solarmodulen legst du eine Zeile an. Die App holt damit die PV-Prognose (von forecast.solar) und rechnet aus, wie viel Sonnenstrom zu erwarten ist.
+      <ol>
+        <li><b>Name</b> – frei wählbar, nur zur Übersicht (z.B. „Garagendach Süd").</li>
+        <li><b>Azimut</b> – die Himmelsrichtung, in die die Module zeigen:
+          <b>0 = Süden</b>, <b>−90 = Osten</b>, <b>+90 = Westen</b>, <b>±180 = Norden</b>.
+          Beispiel: leicht nach Südost = <code>−45</code>.</li>
+        <li><b>Neigung</b> – der Aufständerungswinkel der Module: <b>0° = flach</b> (waagerecht),
+          <b>90° = senkrecht</b> (z.B. an der Fassade). Ein typisches Schrägdach hat 30–45°.</li>
+        <li><b>kWp</b> – die installierte Modulleistung dieser Fläche in Kilowatt-Peak.
+          Steht auf dem Datenblatt/der Rechnung, oder: Anzahl Module × Wattpeak ÷ 1000.
+          Beispiel: 8 Module à 400 W = <code>3,2</code> kWp.</li>
+      </ol>
+      <span class="muted">Mehrere Dächer mit unterschiedlicher Ausrichtung? Lege einfach pro Fläche eine eigene Zeile an – die Prognosen werden summiert.</span>
+    </div>
+  </details>
+  <div id="planes" style="margin-top:10px"></div>
+  <button class="ghost" onclick="addPlane()">+ Fläche</button>
+</div>
+
+<div class="card">
+  <h2>Anlage & Speicher</h2>
+  <details class="help">
+    <summary>Wozu dienen diese Werte?</summary>
+    <div class="help-body">
+      Damit rechnet die Steuerung, wie viel Netzladung nötig ist. An deine Anlage anpassen:
+      <ol>
+        <li><b>Nutzbare Akkukapazität</b> – die real nutzbare Speichergröße in kWh (nicht die Brutto-Kapazität).
+          Beispiel: 2× Pylontech US5000 ≈ 24 kWh nutzbar.</li>
+        <li><b>Tagesverbrauch</b> – dein durchschnittlicher Stromverbrauch pro Tag in kWh.</li>
+        <li><b>Ladeleistung</b> – wie viel Leistung beim Netzladen im Akku ankommt (W). Begrenzt vom Lader/Wechselrichter.</li>
+        <li><b>PV-Reserve</b> – Puffer in kWh, der für die Mittags-PV freigehalten wird (nicht aus dem Netz vollladen).</li>
+      </ol>
+    </div>
+  </details>
+  <div class="grid2">
+    <div><label>Nutzbare Akkukapazität (kWh)</label><input id="battery_usable_kwh" type="number" step="0.1"></div>
+    <div><label>Tagesverbrauch (kWh)</label><input id="daily_usage_kwh" type="number" step="0.1"></div>
+    <div><label>Ladeleistung (W)</label><input id="charge_power_w" type="number" step="100"></div>
+    <div><label>PV-Reserve (kWh)</label><input id="pv_reserve_kwh" type="number" step="0.5"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>PV-Prognose</h2>
+  <details class="help">
+    <summary>Was bewirken die PV-Faktoren?</summary>
+    <div class="help-body">
+      <ol>
+        <li><b>Korrekturfaktor</b> – gleicht die Roh-Prognose an deine reale Erzeugung an.
+          <code>0.68</code> heißt: es werden 68 % der Vorhersage angesetzt (Verschattung, Verluste, Erfahrungswert).
+          Wenn deine Anlage regelmäßig mehr/weniger liefert, hier nachjustieren.</li>
+        <li><b>Morgen-Faktor</b> – wie viel der morgigen Vormittags-PV schon eingeplant wird.
+          Saisonal: Winter niedrig (~0.05), Sommer höher (~0.25).</li>
+      </ol>
+    </div>
+  </details>
+  <div class="grid2">
+    <div><label>Korrekturfaktor (0–1)</label><input id="pv_korrektur_faktor" type="number" step="0.01"></div>
+    <div><label>Morgen-Faktor (0–1)</label><input id="pv_tom_morning_factor" type="number" step="0.01"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Peak-Schutz & Preislimit</h2>
+  <details class="help">
+    <summary>Was regelt der Peak-Schutz?</summary>
+    <div class="help-body">
+      Der Peak-Schutz sorgt dafür, dass der Akku die teuren Verbrauchsspitzen (morgens/abends) übersteht,
+      ohne dann teuer aus dem Netz zu ziehen.
+      <ol>
+        <li><b>Morgen-/Abend-Peak (Start/Ende)</b> – die Stunden deiner typischen Lastspitzen (24 h-Format).</li>
+        <li><b>Mindest-SOC vor Peak</b> – so voll soll der Akku vor einer Spitze mindestens sein (%).</li>
+        <li><b>Notbrems-Preislimit</b> – bis zu diesem Preis (ct/kWh) wird notfalls geladen, um einen Peak
+          aus dem Netz zu vermeiden. Darüber wird gewartet.</li>
+      </ol>
+    </div>
+  </details>
+  <div class="grid2">
+    <div><label>Morgen-Peak Start (Uhr)</label><input id="morning_peak_start" type="number" min="0" max="23"></div>
+    <div><label>Morgen-Peak Ende (Uhr)</label><input id="morning_peak_end" type="number" min="0" max="23"></div>
+    <div><label>Abend-Peak Start (Uhr)</label><input id="evening_peak_start" type="number" min="0" max="23"></div>
+    <div><label>Abend-Peak Ende (Uhr)</label><input id="evening_peak_end" type="number" min="0" max="23"></div>
+    <div><label>Mindest-SOC vor Peak (%)</label><input id="min_peak_soc" type="number" min="0" max="100"></div>
+    <div><label>Notbrems-Preislimit (ct/kWh)</label><input id="peak_avoid_price" type="number" step="0.5"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>SOC-Strategie</h2>
+  <details class="help">
+    <summary>Was bedeuten Nacht-/Ziel-SOC und Hysterese?</summary>
+    <div class="help-body">
+      <ol>
+        <li><b>Nacht-Sicherheits-SOC</b> – Mindestladestand, den der Akku über Nacht halten soll (%).</li>
+        <li><b>Ziel-SOC Morgen-Brücke</b> – bis zu diesem Stand wird morgens vorgeladen, um über den Vormittag zu kommen (%).</li>
+        <li><b>Hysterese</b> – kleiner Puffer (%), damit die Steuerung nicht ständig an der Schwelle hin- und herschaltet.</li>
+      </ol>
+    </div>
+  </details>
+  <div class="grid2">
+    <div><label>Nacht-Sicherheits-SOC (%)</label><input id="night_safety_soc" type="number" min="0" max="100"></div>
+    <div><label>Ziel-SOC Morgen-Brücke (%)</label><input id="target_safe_soc" type="number" min="0" max="100"></div>
+    <div><label>Hysterese (%)</label><input id="hysterese_soc" type="number" step="0.5"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Netz-Zähler heute korrigieren</h2>
+  <details class="help">
+    <summary>Wann brauche ich das?</summary>
+    <div class="help-body">
+      „Zum Netz / Aus dem Netz" im Dashboard wird aus dem Gesamtzähler des Cerbo berechnet
+      (Stand jetzt minus Stand um Mitternacht). Der Cerbo zählt immer weiter – auch wenn die App aus ist.
+      <ol>
+        <li>Normalerweise musst du hier <b>nichts</b> tun: ab Mitternacht stimmen die Werte automatisch mit Victron überein.</li>
+        <li>War die App aber <b>über Mitternacht</b> aus (Serverausfall), fehlt die Tagesbasis.
+          Dann trägst du hier einfach die aktuellen Tageswerte aus der <b>Victron-App</b> ein –
+          die App rechnet die Basis um und zählt korrekt weiter.</li>
+      </ol>
+    </div>
+  </details>
+  <div class="grid2">
+    <div><label>Aus dem Netz heute (kWh)</label><input id="grid_import" type="number" step="0.1" placeholder="z.B. 5.8"></div>
+    <div><label>Zum Netz heute (kWh)</label><input id="grid_export" type="number" step="0.1" placeholder="z.B. 0.2"></div>
+  </div>
+  <div style="margin-top:12px"><button id="btn-grid">Übernehmen</button>
+    <span id="grid-msg" class="muted" style="margin-left:12px"></span></div>
+</div>
+
+<div class="card">
+  <button id="btn-save">Speichern</button>
+  <span id="saved" class="muted" style="margin-left:12px"></span>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+let cfg = {};
+function planeRow(p = {}) {
+  const d = document.createElement('div'); d.className = 'plane-row';
+  d.innerHTML = `
+    <div><label>Name</label><input class="p-name" value="${p.name||''}"></div>
+    <div><label>Azimut</label><input class="p-az" value="${p.azimuth??''}"></div>
+    <div><label>Neigung</label><input class="p-dec" value="${p.declination??''}"></div>
+    <div><label>kWp</label><input class="p-kwp" value="${p.kwp??''}"></div>
+    <button class="danger" onclick="this.parentElement.remove()">✕</button>`;
+  return d;
+}
+function addPlane(p) { document.getElementById('planes').appendChild(planeRow(p)); }
+
+const PARAM_KEYS = ['battery_usable_kwh','daily_usage_kwh','charge_power_w','pv_reserve_kwh',
+  'pv_korrektur_faktor','pv_tom_morning_factor','morning_peak_start','morning_peak_end',
+  'evening_peak_start','evening_peak_end','min_peak_soc','peak_avoid_price',
+  'night_safety_soc','target_safe_soc','hysterese_soc'];
+
+async function init() {
+  cfg = await (await fetch('/api/config')).json();
+  document.getElementById('dry_run').checked = !!cfg.dry_run;
+  document.getElementById('poll_seconds').value = cfg.poll_seconds;
+  document.getElementById('cerbo_host').value = cfg.cerbo_host || '';
+  document.getElementById('cerbo_port').value = cfg.cerbo_port || 502;
+  document.getElementById('tibber_token').value = cfg.tibber_token || '';
+  document.getElementById('pv_latitude').value = cfg.pv_latitude ?? '';
+  document.getElementById('pv_longitude').value = cfg.pv_longitude ?? '';
+  PARAM_KEYS.forEach(k => { const el = document.getElementById(k); if (el) el.value = cfg[k] ?? ''; });
+  (cfg.pv_planes || []).forEach(addPlane);
+}
+
+// Google-Maps-Koordinaten automatisch aufteilen
+const coordsEl = document.getElementById('pv_coords');
+if (coordsEl) coordsEl.addEventListener('input', () => {
+  const m = coordsEl.value.split(',').map(x => parseFloat(x.trim()));
+  if (m.length === 2 && !isNaN(m[0]) && !isNaN(m[1])) {
+    document.getElementById('pv_latitude').value = m[0];
+    document.getElementById('pv_longitude').value = m[1];
+  }
+});
+
+function collectPlanes() {
+  return [...document.querySelectorAll('.plane-row')].map(r => ({
+    name: r.querySelector('.p-name').value,
+    azimuth: parseFloat(r.querySelector('.p-az').value),
+    declination: parseFloat(r.querySelector('.p-dec').value),
+    kwp: parseFloat(r.querySelector('.p-kwp').value),
+  })).filter(p => !isNaN(p.kwp));
+}
+
+document.getElementById('btn-save').addEventListener('click', async () => {
+  const body = {
+    dry_run: document.getElementById('dry_run').checked,
+    poll_seconds: parseInt(document.getElementById('poll_seconds').value) || 300,
+    cerbo_host: document.getElementById('cerbo_host').value.trim(),
+    cerbo_port: parseInt(document.getElementById('cerbo_port').value) || 502,
+    tibber_token: document.getElementById('tibber_token').value.trim(),
+    pv_latitude: parseFloat(document.getElementById('pv_latitude').value),
+    pv_longitude: parseFloat(document.getElementById('pv_longitude').value),
+    pv_planes: collectPlanes(),
+  };
+  PARAM_KEYS.forEach(k => { const v = parseFloat(document.getElementById(k).value); if (!isNaN(v)) body[k] = v; });
+  await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)});
+  const el = document.getElementById('saved'); el.textContent = 'Gespeichert ✓';
+  setTimeout(() => el.textContent = '', 2500);
+});
+
+// Netz-Zähler heute manuell setzen
+(async () => {
+  try {
+    const l = await (await fetch('/api/live')).json();
+    if (l.ok && l.system && l.system.grid_today) {
+      document.getElementById('grid_import').value = l.system.grid_today.import;
+      document.getElementById('grid_export').value = l.system.grid_today.export;
+    }
+  } catch (e) {}
+})();
+document.getElementById('btn-grid').addEventListener('click', async () => {
+  const body = {
+    import: parseFloat(document.getElementById('grid_import').value) || 0,
+    export: parseFloat(document.getElementById('grid_export').value) || 0,
+  };
+  const msg = document.getElementById('grid-msg');
+  msg.textContent = 'Übernehme …';
+  const r = await fetch('/api/grid-adjust', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  const d = await r.json();
+  msg.textContent = r.ok ? 'Übernommen ✓' : (d.error || 'Fehler');
+  setTimeout(() => msg.textContent = '', 3000);
+});
+
+// App-Version & Update
+(async () => {
+  try {
+    const v = await (await fetch('/api/version')).json();
+    document.getElementById('app-version').textContent = v.version || '–';
+  } catch (e) {}
+})();
+document.getElementById('btn-check').addEventListener('click', async () => {
+  const st = document.getElementById('update-status');
+  st.textContent = 'Prüfe GitHub …';
+  try {
+    const d = await (await fetch('/api/check-update')).json();
+    const upd = document.getElementById('btn-update');
+    if (d.git === false) { st.innerHTML = '<span class="muted">' + (d.reason || 'Kein Git.') + '</span>'; return; }
+    if (d.reason) { st.innerHTML = '<span class="muted">' + d.reason + '</span>'; }
+    if (d.update_available) {
+      st.innerHTML = `<span style="color:var(--exp)">Update verfügbar (${d.behind} Änderung(en)).</span>`;
+      upd.style.display = '';
+    } else {
+      st.innerHTML = '<span style="color:var(--cheap)">Du bist auf dem neuesten Stand ✓</span>';
+      upd.style.display = 'none';
+    }
+  } catch (e) { st.textContent = 'Fehler bei der Prüfung.'; }
+});
+document.getElementById('btn-update').addEventListener('click', async () => {
+  if (!confirm('Jetzt aktualisieren? Die App wird dabei kurz neu gestartet.')) return;
+  const st = document.getElementById('update-status');
+  const out = document.getElementById('update-output');
+  st.textContent = 'Lade Update …';
+  try {
+    const d = await (await fetch('/api/update', {method:'POST'})).json();
+    out.style.display = 'block'; out.textContent = d.output || '';
+    if (d.ok && d.restarting) {
+      st.innerHTML = '<span style="color:var(--cheap)">Aktualisiert – App startet neu. Seite lädt gleich neu …</span>';
+      setTimeout(() => location.reload(), 12000);
+    } else if (d.ok) {
+      st.innerHTML = '<span style="color:var(--exp)">Aktualisiert ✓ – bitte App von Hand neu starten.</span>';
+    } else {
+      st.innerHTML = '<span style="color:var(--vexp)">Update fehlgeschlagen.</span>';
+    }
+  } catch (e) { st.textContent = 'Fehler beim Update.'; }
+});
+
+init();
+</script>
+{% endblock %}
