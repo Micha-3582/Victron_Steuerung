@@ -355,16 +355,17 @@ function todayStr() { return (nowIso || new Date().toISOString()).slice(0, 10); 
 function fmtDayLabel(day) {
   const t = todayStr();
   const y = new Date(t + 'T00:00'); y.setDate(y.getDate() - 1);
+  const [Y, M, D] = day.split('-');
   if (day === t) return 'Heute';
-  if (day === isoDay(y)) return 'Gestern';
-  const [Y, M, D] = day.split('-'); return `${D}.${M}.${Y}`;
+  if (day === isoDay(y)) return `Gestern · ${D}.${M}.`;
+  return `${D}.${M}.${Y}`;
 }
 function applyEnergyDayUI() {
   const minD = energyMinDay || todayStr();
   ['e', 'f'].forEach(p => {
     $(p + '-day').textContent = fmtDayLabel(energyDay);
-    $(p + '-prev').disabled = energyDay <= minD;
-    $(p + '-next').disabled = energyDay >= todayStr();
+    $(p + '-prev').style.display = energyDay <= minD ? 'none' : '';
+    $(p + '-next').style.display = energyDay >= todayStr() ? 'none' : '';
   });
 }
 async function loadEnergyDay(day) {
