@@ -58,7 +58,7 @@
 <div class="card">
   <h2>Ladevorgänge (heute)</h2>
   <div class="muted" style="margin-bottom:8px">Geplante Ladefenster und tatsächlich durchgeführte – mit Preis, Menge und Kosten. Reset um Mitternacht.</div>
-  <table id="charge-log"></table>
+  <div class="table-scroll"><table id="charge-log"></table></div>
 </div>
 
 <div class="card">
@@ -76,7 +76,7 @@
     </div>
     <div class="muted" id="ev-empty" style="margin-top:8px">Ziehe in der Kurve über die gewünschten Viertelstunden – die Auswahl erscheint hier und wird erst nach Bestätigung angelegt.</div>
   </div>
-  <table id="ev-list" style="margin-top:16px"></table>
+  <div class="table-scroll"><table id="ev-list" style="margin-top:16px"></table></div>
 </div>
 
 {% endblock %}
@@ -262,11 +262,16 @@ function setSelectMode(on) {
 }
 $('btn-select').addEventListener('click', () => setSelectMode(!selectMode));
 
-/* Schmale Ansicht: Kurve doppelt so breit + seitlich scrollen (außer im Markier-Modus) */
+/* Schmale Ansicht: nur ~12 h sichtbar, Rest seitlich scrollen */
+const HOURS_VISIBLE = 12;
 function updateWidth() {
   const inner = $('chart-inner'), scroll = $('chart-scroll');
-  if (isNarrow()) { inner.style.width = Math.round(scroll.clientWidth * 2.4) + 'px'; }
-  else { inner.style.width = '100%'; }
+  if (isNarrow()) {
+    const hours = Math.max(HOURS_VISIBLE, (prices.length || 48) / 4);  // 15-Min-Slots -> Stunden
+    inner.style.width = Math.round(scroll.clientWidth * hours / HOURS_VISIBLE) + 'px';
+  } else {
+    inner.style.width = '100%';
+  }
   if (chart) chart.resize();
 }
 window.addEventListener('resize', () => { updateWidth(); });
@@ -421,6 +426,7 @@ function applyDay() {
     ? 'Für morgen liegen noch keine Preise vor (Tibber veröffentlicht sie ~13 Uhr).'
     : 'In die Kurve klicken oder ziehen, um einen Ladetermin anzulegen.';
   renderChart();
+  updateWidth();
 }
 function setDay(d) {
   activeDay = d;
