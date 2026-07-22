@@ -133,6 +133,19 @@ class Controller:
         except Exception as e:                           # noqa: BLE001
             log.warning("Energie-Log fehlgeschlagen: %s", e)
 
+        # Tages-Netzbezug/-Einspeisung: Baseline im Hintergrund pflegen, damit sie
+        # nahe Mitternacht gesetzt wird - unabhängig davon, ob das Dashboard offen
+        # ist. Nur mit plausiblem Zählerstand (>0), sonst würde ein Fehl-Read die
+        # Baseline auf 0 zurücksetzen.
+        if system:
+            gt = system.get("grid_energy_total") or {}
+            imp, exp = gt.get("import", 0), gt.get("export", 0)
+            if imp and imp > 0:
+                try:
+                    store.grid_today(imp, exp, now)
+                except Exception as e:                   # noqa: BLE001
+                    log.warning("Netz-Tagesbasis fehlgeschlagen: %s", e)
+
         self.last_tick = now.isoformat(timespec="seconds")
         self.last_error = None
 
@@ -316,7 +329,11 @@ def api_live():
             cerbo = Cerbo(cfg["cerbo_host"], cfg.get("cerbo_port", 502))
             system = cerbo.read_system()
             gt = system.get("grid_energy_total") or {}
-            system["grid_today"] = store.grid_today(gt.get("import", 0), gt.get("export", 0))
+            imp, exp = gt.get("import", 0), gt.get("export", 0)
+            # Nur mit plausiblem Zählerstand die Basis pflegen (Fehl-Read = 0
+            # würde die Baseline zurücksetzen).
+            system["grid_today"] = (store.grid_today(imp, exp)
+                                    if imp and imp > 0 else {"import": 0.0, "export": 0.0})
             data = {"ok": True, "soc": round(cerbo.read_soc(), 1),
                     "ess_mode": cerbo.read_ess_mode(),
                     "system": system,
