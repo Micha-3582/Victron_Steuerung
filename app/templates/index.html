@@ -270,9 +270,33 @@ function buildEnergyChart() {
   });
 }
 
+// TEMPORÄR: "Energie (Verlauf)" stündlich zusammenfassen (wie VRM) zum Vergleich.
+// Auf false setzen für zurück zu 15-Min.
+const ENERGY_HOURLY = true;
+function aggregateHourly(hist) {
+  const map = new Map();
+  for (const h of hist) {
+    const hr = h.hour.slice(0, 2) + ':00';
+    let a = map.get(hr);
+    if (!a) { a = { hour: hr, verbrauch: 0, solar: 0, socs: [], soc_min: null, soc_max: null }; map.set(hr, a); }
+    a.verbrauch += h.verbrauch || 0;
+    a.solar += h.solar || 0;
+    if (h.soc_avg != null) a.socs.push(h.soc_avg);
+    if (h.soc_min != null) a.soc_min = a.soc_min == null ? h.soc_min : Math.min(a.soc_min, h.soc_min);
+    if (h.soc_max != null) a.soc_max = a.soc_max == null ? h.soc_max : Math.max(a.soc_max, h.soc_max);
+  }
+  return [...map.values()].map(a => ({
+    hour: a.hour,
+    verbrauch: Math.round(a.verbrauch * 1000) / 1000,
+    solar: Math.round(a.solar * 1000) / 1000,
+    soc_avg: a.socs.length ? Math.round(a.socs.reduce((x, y) => x + y, 0) / a.socs.length * 10) / 10 : null,
+    soc_min: a.soc_min, soc_max: a.soc_max,
+  }));
+}
 function renderEnergyChart(hist) {
   if (!energyChart) return;
   hist = hist || [];
+  if (ENERGY_HOURLY) hist = aggregateHourly(hist);
   energyChart.data.labels = hist.map(h => h.hour);
   const d = energyChart.data.datasets;
   d[0].data = hist.map(h => h.verbrauch);
