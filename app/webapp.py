@@ -351,6 +351,7 @@ def api_live():
             # store.energy_grid_today) - die kumulierten Zählerregister sind
             # unzuverlässig.
             system["grid_today"] = store.energy_grid_today()
+            system["solar_today"] = store.energy_solar_today()
             data = {"ok": True, "soc": round(cerbo.read_soc(), 1),
                     "ess_mode": cerbo.read_ess_mode(),
                     "system": system,

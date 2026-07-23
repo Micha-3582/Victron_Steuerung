@@ -586,6 +586,10 @@ function renderSystem(sys) {
       tile('← Zum Netz', gt.export.toFixed(1) + ' kWh', kv([['heute eingespeist', '']]), 'var(--cheap)') +
       tile('→ Aus dem Netz', gt.import.toFixed(1) + ' kWh', kv([['heute bezogen', '']]), 'var(--vexp)');
   }
+  if (sys.solar_today != null) {
+    g.innerHTML +=
+      tile(sun + ' Solar heute', sys.solar_today.toFixed(1) + ' kWh', kv([['heute erzeugt', '']]), 'var(--timer)');
+  }
 }
 
 /* Schnelle Live-Aktualisierung (unabhängig vom 5-Min-Regelzyklus) */

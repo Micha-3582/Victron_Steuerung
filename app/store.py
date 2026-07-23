@@ -435,6 +435,18 @@ def energy_grid_today(now: datetime | None = None) -> dict:
     return {"import": round(imp, 2), "export": round(exp, 2)}
 
 
+def energy_solar_today(now: datetime | None = None) -> float:
+    """Heute erzeugter Solarstrom (kWh) aus der integrierten PV-Leistung
+    (gleiche Quelle wie die Verlaufs-Charts, nicht aus Zählerregistern)."""
+    now = now or datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    total = 0.0
+    for k, b in _load_history().get("hours", {}).items():
+        if k[:10] == today:
+            total += b.get("solar", 0.0)
+    return round(total, 2)
+
+
 def active_ev(now: datetime | None = None):
     """Gibt den aktuell laufenden E-Auto-Termin zurück (oder None)."""
     now = now or datetime.now()
