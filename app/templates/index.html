@@ -609,10 +609,10 @@ function renderSystem(sys) {
   const sun = '<span class="sun-ico">☀︎</span>';
   g.innerHTML =
     tile('⚡ Netz', w(sys.grid.total), phases(sys.grid), gridColor) +
-    tile('🏠 Gesamtverbrauch', Math.round(sys.loads.total) + ' W', phases(sys.loads)) +
-    tile(sun + ' PV-Wechselrichter', Math.round(sys.pv_inverter.total) + ' W', phases(sys.pv_inverter)) +
-    tile(sun + ' PV-Ladegerät (MPPT)', Math.round(sys.pv_charger) + ' W', kv([['DC-Strom', sys.pv_charger_current.toFixed(1) + ' A']])) +
-    tile(sun + ' Gesamt Solar', Math.round(sys.solar_total) + ' W', kv([['Quelle', 'PV-WR + MPPT']])) +
+    tile('🏠 Gesamtverbrauch', Math.round(sys.loads.total) + ' W', phases(sys.loads), 'var(--exp)') +
+    tile(sun + ' PV-Wechselrichter', Math.round(sys.pv_inverter.total) + ' W', phases(sys.pv_inverter), 'var(--timer)') +
+    tile(sun + ' PV-Ladegerät (MPPT)', Math.round(sys.pv_charger) + ' W', kv([['DC-Strom', sys.pv_charger_current.toFixed(1) + ' A']]), 'var(--timer)') +
+    tile(sun + ' Gesamt Solar', Math.round(sys.solar_total) + ' W', kv([['Quelle', 'PV-WR + MPPT']]), 'var(--timer)') +
     tile('🔋 Batterie', b.soc + ' %',
          kv([['Status', stateTxt], ['Leistung', w(b.power)], ['Spannung', b.voltage.toFixed(2) + ' V'], ['Strom', b.current.toFixed(1) + ' A']]),
          b.state === 1 ? 'var(--cheap)' : (b.state === 2 ? 'var(--exp)' : 'var(--fg)'));
