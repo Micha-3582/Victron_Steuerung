@@ -93,6 +93,12 @@ class Controller:
                    params=Params.from_config(cfg))
         store.save_state(state)
         store.log_charge_state(d.ess_mode == ESS_CHARGE, d.strategy, now)
+        # Solar-Logbuch: Tages-Prognose (roh + korrigiert) einfrieren und
+        # vergangene Tage mit dem realen Ertrag abschließen.
+        if pv_note is None and solar_today > 0:
+            store.record_solar_forecast(raw=solar_today, corr=d.solar_today_korr,
+                                        factor=Params.from_config(cfg).pv_korrektur_faktor,
+                                        now=now)
 
         dry = bool(cfg.get("dry_run", True))
         wrote = False
@@ -229,6 +235,19 @@ def setup():
 @app.route("/admin")
 def admin():
     return render_template("admin.html", cfg=store.load_config())
+
+
+@app.route("/solar-log")
+def solar_log_page():
+    return render_template("solar_log.html")
+
+
+@app.route("/api/solar-log")
+def api_solar_log():
+    cfg = store.load_config()
+    data = store.solar_log()
+    data["current_factor"] = Params.from_config(cfg).pv_korrektur_faktor
+    return jsonify(data)
 
 
 def _next15(iso):

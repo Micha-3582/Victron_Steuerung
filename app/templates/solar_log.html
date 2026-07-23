@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Solarlogbuch · Victron Steuerung{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>Solarlogbuch – Prognose vs. reale Erzeugung</h2>
+  <div class="muted" style="margin-bottom:12px">
+    Jeder Tag hält die morgens eingefrorene Tages-Prognose gegen den tatsächlichen
+    Ertrag. „Vorschlag" ist der Korrekturfaktor, mit dem die Roh-Prognose diesen Tag
+    exakt getroffen hätte. Über mehrere Tage nähert sich daraus ein stabiler Wert.
+  </div>
+
+  <div class="row" style="margin-bottom:14px">
+    <div class="metric"><div class="val" id="cur-factor">–</div><div class="lbl">Aktueller Faktor</div></div>
+    <div class="metric"><div class="val" id="suggestion">–</div><div class="lbl">Empfehlung (Median)</div></div>
+    <div class="metric"><div class="val" id="days-used">–</div><div class="lbl">Tage in Empfehlung</div></div>
+  </div>
+  <div class="muted" id="hint" style="margin-bottom:14px"></div>
+
+  <div class="table-scroll"><table id="log-table"></table></div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = id => document.getElementById(id);
+const fmtDate = d => { const [Y, M, D] = d.split('-'); return `${D}.${M}.${Y}`; };
+
+function devColor(p) {
+  if (p == null) return 'var(--muted)';
+  if (Math.abs(p) < 8) return 'var(--cheap)';        // gut getroffen
+  return p > 0 ? 'var(--timer)' : 'var(--vexp)';     // + = mehr erzeugt, − = weniger
+}
+
+async function load() {
+  let d;
+  try { d = await (await fetch('/api/solar-log')).json(); }
+  catch (e) { $('log-table').innerHTML = '<tr><td class="muted">Fehler beim Laden.</td></tr>'; return; }
+
+  $('cur-factor').textContent = (d.current_factor ?? 1).toFixed(2);
+  $('suggestion').textContent = d.suggestion != null ? d.suggestion.toFixed(2) : '–';
+  $('days-used').textContent = d.days_used || 0;
+  $('hint').textContent = d.suggestion != null
+    ? `Empfehlung aus den letzten ${d.days_used} abgeschlossenen Tagen. Änderst du den Faktor, dann in den Einstellungen unter PV-Prognose.`
+    : 'Noch keine abgeschlossenen Tage – das Logbuch füllt sich ab dem ersten vollen Tag.';
+
+  const head = `<tr class="thead"><td>Datum</td><td>Prognose</td><td>Ertrag</td><td>Abweichung</td><td>Vorschlag</td></tr>`;
+  const rows = (d.rows || []).map(r => {
+    const prov = r.provisional ? ' <span class="muted">(läuft)</span>' : '';
+    const dev = r.deviation_pct != null
+      ? `<span style="color:${devColor(r.deviation_pct)};font-weight:600">${r.deviation_pct > 0 ? '+' : ''}${r.deviation_pct.toFixed(0)} %</span>`
+      : '<span class="muted">–</span>';
+    const sug = r.suggested_factor != null ? r.suggested_factor.toFixed(2) : '<span class="muted">–</span>';
+    return `<tr>
+      <td><b>${fmtDate(r.date)}</b>${prov}</td>
+      <td>${(r.forecast_corr ?? 0).toFixed(1)} kWh<br><span class="muted">roh ${(r.forecast_raw ?? 0).toFixed(1)} · ×${(r.factor ?? 1).toFixed(2)}</span></td>
+      <td>${r.actual != null ? r.actual.toFixed(1) + ' kWh' : '–'}</td>
+      <td>${dev}</td>
+      <td>${sug}</td>
+    </tr>`;
+  }).join('');
+  $('log-table').innerHTML = head + (rows || '<tr><td class="muted">Keine Einträge.</td></tr>');
+}
+load();
+</script>
+{% endblock %}

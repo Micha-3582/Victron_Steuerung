@@ -20,6 +20,7 @@ EV_PATH = os.path.join(_DIR, "ev_schedules.json")
 ENERGY_PATH = os.path.join(_DIR, "energy.json")
 CHARGE_LOG_PATH = os.path.join(_DIR, "charge_log.json")
 HISTORY_PATH = os.path.join(_DIR, "history.json")
+SOLAR_LOG_PATH = os.path.join(_DIR, "solar_log.json")
 
 _lock = threading.Lock()
 
@@ -456,6 +457,90 @@ def energy_grid_today(now: datetime | None = None) -> dict:
             imp += b.get("g_load", 0.0) + b.get("g_batt", 0.0)   # Netz→Verbrauch/Batterie
             exp += b.get("s_grid", 0.0) + b.get("b_grid", 0.0)   # Solar/Batterie→Netz
     return {"import": round(imp, 2), "export": round(exp, 2)}
+
+
+# --- Solar-Logbuch (Prognose vs. reale Erzeugung) -------------------------
+def _load_solar_log() -> dict:
+    if os.path.exists(SOLAR_LOG_PATH):
+        try:
+            with open(SOLAR_LOG_PATH, encoding="utf-8") as f:
+                d = json.load(f)
+            d.setdefault("days", {})
+            return d
+        except (ValueError, OSError):
+            pass
+    return {"days": {}}
+
+
+def _solar_actual_for_day(day: str) -> float:
+    """Realer Tagesertrag (kWh) aus der integrierten PV-Leistung."""
+    hours = _load_history().get("hours", {})
+    return round(sum(b.get("solar", 0.0) for k, b in hours.items() if k[:10] == day), 2)
+
+
+def _finalize_solar_days(days: dict, now: datetime):
+    """Schließt alle vergangenen Tage ab: trägt den realen Ertrag, die Abweichung
+    und den Faktor ein, mit dem die Prognose exakt getroffen hätte."""
+    today = now.date().isoformat()
+    for day, e in days.items():
+        if day < today and e.get("actual") is None:
+            actual = _solar_actual_for_day(day)
+            e["actual"] = actual
+            raw = e.get("forecast_raw") or 0.0
+            corr = e.get("forecast_corr") or 0.0
+            e["deviation_pct"] = round((actual - corr) / corr * 100, 1) if corr else None
+            # Faktor, der die Roh-Prognose exakt auf den realen Ertrag gebracht hätte
+            e["suggested_factor"] = round(actual / raw, 2) if raw else None
+
+
+def record_solar_forecast(raw: float, corr: float, factor: float,
+                          now: datetime | None = None):
+    """Friert die Tages-Prognose EINMAL pro Tag ein (erste gültige Messung, also
+    quasi die Tagesvorhersage) und finalisiert dabei vergangene Tage. Wird im
+    Regeltakt aufgerufen; überschreibt einen bereits gesetzten Tag nicht."""
+    if not raw or raw <= 0:
+        return
+    now = now or datetime.now()
+    today = now.date().isoformat()
+    data = _load_solar_log()
+    days = data["days"]
+    _finalize_solar_days(days, now)
+    if today not in days:
+        days[today] = {"forecast_raw": round(raw, 2), "forecast_corr": round(corr, 2),
+                       "factor": round(factor, 2), "actual": None,
+                       "deviation_pct": None, "suggested_factor": None}
+    with _lock, open(SOLAR_LOG_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def solar_log(now: datetime | None = None) -> dict:
+    """Logbuch-Einträge (neueste zuerst) + eine gerollte Faktor-Empfehlung aus
+    den letzten abgeschlossenen Tagen. Der heutige Tag erscheint mit dem
+    bisherigen Ertrag als vorläufig."""
+    now = now or datetime.now()
+    today = now.date().isoformat()
+    data = _load_solar_log()
+    days = data["days"]
+    _finalize_solar_days(days, now)
+    rows = []
+    for day in sorted(days.keys(), reverse=True):
+        e = dict(days[day])
+        e["date"] = day
+        # Heute ist vorläufig, SOLANGE kein Ist-Wert manuell gesetzt wurde. Ein
+        # eingetragener actual (z.B. Handeintrag am Tagesende) bleibt stehen.
+        if day == today and e.get("actual") is None:
+            e["actual"] = _solar_actual_for_day(day)
+            e["provisional"] = True
+        rows.append(e)
+    # Empfehlung: Median der Vorschlagsfaktoren der letzten 14 fertigen Tage
+    finals = [days[d]["suggested_factor"] for d in sorted(days.keys(), reverse=True)
+              if d < today and days[d].get("suggested_factor")][:14]
+    suggestion = None
+    if finals:
+        s = sorted(finals)
+        n = len(s)
+        suggestion = round((s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2), 2)
+    return {"rows": rows, "suggestion": suggestion, "days_used": len(finals)}
 
 
 def active_ev(now: datetime | None = None):

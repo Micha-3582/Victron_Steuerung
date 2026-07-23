@@ -7,6 +7,8 @@ app/state.json
 app/ev_schedules.json
 app/energy.json
 app/charge_log.json
+app/history.json
+app/solar_log.json
 app/.venv/
 app/__pycache__/
 **/__pycache__/
