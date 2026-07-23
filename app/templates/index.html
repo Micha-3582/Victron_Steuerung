@@ -609,7 +609,7 @@ function renderSystem(sys) {
   const sun = '<span class="sun-ico">☀︎</span>';
   g.innerHTML =
     tile('⚡ Netz', w(sys.grid.total), phases(sys.grid), gridColor) +
-    tile('🏠 Gesamtverbrauch', Math.round(sys.loads.total) + ' W', phases(sys.loads), 'var(--exp)') +
+    tile('🏠 Gesamtverbrauch', Math.round(sys.loads.total) + ' W', phases(sys.loads), '#e0761f') +
     tile(sun + ' PV-Wechselrichter', Math.round(sys.pv_inverter.total) + ' W', phases(sys.pv_inverter), 'var(--timer)') +
     tile(sun + ' PV-Ladegerät (MPPT)', Math.round(sys.pv_charger) + ' W', kv([['DC-Strom', sys.pv_charger_current.toFixed(1) + ' A']]), 'var(--timer)') +
     tile(sun + ' Gesamt Solar', Math.round(sys.solar_total) + ' W', kv([['Quelle', 'PV-WR + MPPT']]), 'var(--timer)') +
@@ -642,7 +642,7 @@ function renderEnergyTiles(history, day) {
   el.innerHTML =
     tile('← Zum Netz', exp.toFixed(1) + ' kWh', kv([[tag + ' eingespeist', '']]), 'var(--cheap)') +
     tile('→ Aus dem Netz', imp.toFixed(1) + ' kWh', kv([[tag + ' bezogen', '']]), 'var(--vexp)') +
-    tile('🏠 Gesamtverbrauch', verbrauch.toFixed(1) + ' kWh', kv([[tag + ' verbraucht', '']]), 'var(--exp)') +
+    tile('🏠 Gesamtverbrauch', verbrauch.toFixed(1) + ' kWh', kv([[tag + ' verbraucht', '']]), '#e0761f') +
     tile(sun + ' Solar', solar.toFixed(1) + ' kWh', kv([[tag + ' erzeugt', '']]), 'var(--timer)');
 }
 
