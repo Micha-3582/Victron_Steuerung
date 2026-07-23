@@ -92,6 +92,7 @@
       <span><i class="sw sw-vexp"></i>sehr teuer</span>
       <span><i class="sw sw-plan"></i>geplantes Ladefenster</span>
       <span><i class="sw" style="background:rgba(255,213,74,.4);border:1px solid #ffd54a"></i>dein Termin</span>
+      <span class="muted" style="margin-left:auto" id="price-stats"></span>
     </div>
     <div class="muted" id="planline" style="margin-top:8px"></div>
   </div>
@@ -753,6 +754,11 @@ function applyDay() {
   $('drag-hint').textContent = emptyTom
     ? 'Für morgen liegen noch keine Preise vor (Tibber veröffentlicht sie ~13 Uhr).'
     : 'In die Kurve klicken oder ziehen, um einen Ladetermin anzulegen.';
+  // Preis-Kennzahlen des angezeigten Tages (min / Ø / max)
+  const cts = prices.map(p => p.ct).filter(v => v != null);
+  $('price-stats').textContent = cts.length
+    ? `Min ${Math.min(...cts).toFixed(1)} · Ø ${(cts.reduce((a, b) => a + b, 0) / cts.length).toFixed(1)} · Max ${Math.max(...cts).toFixed(1)} ct/kWh`
+    : '';
   const win = plannedWindowsFor(target);
   $('planline').textContent = win
     ? `Geplante Ladefenster (${activeDay === 'today' ? 'heute' : 'morgen'}): ${win}`
