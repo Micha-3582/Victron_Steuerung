@@ -521,6 +521,7 @@ async function load() {
   if (energyDay === todayStr()) {
     renderEnergyChart(d.energy_history);
     renderFlowChart(d.energy_history);
+    renderEnergyTiles(d.energy_history, energyDay);
   }
   applyEnergyDayUI();
 
