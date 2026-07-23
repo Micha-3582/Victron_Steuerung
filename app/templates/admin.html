@@ -190,15 +190,16 @@
     <div class="help-body">
       <ol>
         <li><b>Korrekturfaktor</b> – gleicht die Roh-Prognose an deine reale Erzeugung an.
-          <code>0.68</code> heißt: es werden 68 % der Vorhersage angesetzt (Verschattung, Verluste, Erfahrungswert).
-          Wenn deine Anlage regelmäßig mehr/weniger liefert, hier nachjustieren.</li>
+          <code>1.0</code> = Prognose unverändert übernehmen. <b>Unter 1</b> dämpft (z.B. <code>0.68</code> =
+          68 %, bei Verschattung/Verlusten), <b>über 1</b> hebt an (z.B. <code>1.2</code> = 120 %, wenn die
+          Anlage regelmäßig mehr liefert als vorhergesagt). Hier über die nächsten Tage nachjustieren.</li>
         <li><b>Morgen-Faktor</b> – wie viel der morgigen Vormittags-PV schon eingeplant wird.
           Saisonal: Winter niedrig (~0.05), Sommer höher (~0.25).</li>
       </ol>
     </div>
   </details>
   <div class="grid2">
-    <div><label>Korrekturfaktor (0–1)</label><input id="pv_korrektur_faktor" type="number" step="0.01"></div>
+    <div><label>Korrekturfaktor (1.0 = unverändert)</label><input id="pv_korrektur_faktor" type="number" step="0.01" min="0"></div>
     <div><label>Morgen-Faktor (0–1)</label><input id="pv_tom_morning_factor" type="number" step="0.01"></div>
   </div>
 </div>
