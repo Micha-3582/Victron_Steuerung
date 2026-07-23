@@ -477,11 +477,27 @@ def api_ev_add():
 @app.route("/api/ev/<eid>", methods=["DELETE", "PATCH"])
 def api_ev_modify(eid):
     if request.method == "DELETE":
-        if not store.delete_ev(eid):
+        # Nur noch nicht gestartete Termine dürfen gelöscht werden. Laufende
+        # sind nur stoppbar (das Geladene bleibt in den Ladevorgängen erhalten).
+        entry = next((i for i in store.list_ev() if i["id"] == eid), None)
+        if not entry:
             return jsonify({"error": "nicht gefunden"}), 404
+        try:
+            started = datetime.fromisoformat(entry["start"]) <= datetime.now()
+        except (ValueError, KeyError):
+            started = False
+        if started:
+            return jsonify({"error": "bereits gestartet – nur stoppbar"}), 409
+        store.delete_ev(eid)
         threading.Thread(target=ctrl.safe_tick, daemon=True).start()
         return jsonify({"ok": True})
     body = request.get_json(silent=True) or {}
+    if body.get("action") == "stop":
+        entry = store.stop_ev(eid)
+        if not entry:
+            return jsonify({"error": "nicht laufend"}), 400
+        threading.Thread(target=ctrl.safe_tick, daemon=True).start()
+        return jsonify(entry)
     entry = store.toggle_ev(eid, body.get("enabled", True))
     if not entry:
         return jsonify({"error": "nicht gefunden"}), 404

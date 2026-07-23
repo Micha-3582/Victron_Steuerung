@@ -659,23 +659,38 @@ function windowStats(startIso, endIso) {
 }
 function renderEv() {
   const t = $('ev-list');
-  if (!schedules.length) { t.innerHTML = '<tr><td class="muted">Keine Termine.</td></tr>'; return; }
+  const now = nowIso || new Date().toISOString().slice(0, 19);
+  // Abgelaufene Termine verschwinden hier – das tatsächlich Geladene steht dann
+  // oben in "Ladevorgänge" (mit Menge, Ø-Preis und Kosten aus dem Protokoll).
+  const active = schedules.filter(i => now < i.end);
+  if (!active.length) { t.innerHTML = '<tr><td class="muted">Keine anstehenden Termine.</td></tr>'; return; }
   const head = `<tr class="thead"><td>Zeitraum</td><td>Status</td><td>Ø Preis</td><td>Menge</td><td>Kosten</td><td></td></tr>`;
   const stats = [];
-  const rows = schedules.map(i => {
+  const rows = active.map(i => {
     const st = windowStats(i.start, i.end);
     stats.push(st);
+    const running = now >= i.start;
+    // Läuft schon: nicht mehr löschbar, nur stoppbar. Noch geplant: löschbar.
+    const action = running
+      ? `<button class="danger" onclick="stopEv('${i.id}')">Stop</button>`
+      : `<button class="danger" onclick="delEv('${i.id}')">Löschen</button>`;
     return `<tr>
       <td><b>${fmt(i.start)}</b> → ${fmt(i.end)}${i.note ? '<br><span class="muted">' + i.note + '</span>' : ''}</td>
       <td>${evStatus(i)}</td>
       <td>${st.avg != null ? st.avg.toFixed(1) + ' ct' : '–'}</td>
       <td>${st.kwh.toFixed(2)} kWh</td>
       <td>${st.cost.toFixed(2)} €</td>
-      <td style="text-align:right"><button class="danger" onclick="delEv('${i.id}')">Löschen</button></td></tr>`;
+      <td style="text-align:right">${action}</td></tr>`;
   }).join('');
   t.innerHTML = COLGROUP + head + rows + totalRow(stats);
 }
 async function delEv(id) { await fetch('/api/ev/' + id, { method: 'DELETE' }); load(); }
+async function stopEv(id) {
+  if (!confirm('Ladetermin jetzt beenden? Das bereits Geladene bleibt in der Liste der Ladevorgänge.')) return;
+  await fetch('/api/ev/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'stop' }) });
+  load();
+}
 
 $('override').addEventListener('change', async e => {
   overrideBusy = true;

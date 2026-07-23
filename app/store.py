@@ -132,6 +132,29 @@ def delete_ev(eid):
     return True
 
 
+def stop_ev(eid, now: datetime | None = None):
+    """Beendet einen bereits laufenden Termin sofort (setzt Ende = jetzt).
+    Das bis dahin Geladene bleibt über das Lade-Protokoll in den Ladevorgängen
+    erhalten. Gibt None zurück, wenn der Termin nicht existiert oder noch nicht
+    gestartet ist (dann wäre Löschen der richtige Weg)."""
+    now = now or datetime.now()
+    ts = now.isoformat(timespec="minutes")
+    items = _load_ev()
+    for i in items:
+        if i["id"] == eid:
+            try:
+                start = datetime.fromisoformat(i["start"])
+                end = datetime.fromisoformat(i["end"])
+            except (ValueError, KeyError):
+                return None
+            if start > now or end <= now:
+                return None  # nicht laufend
+            i["end"] = ts
+            _save_ev(items)
+            return i
+    return None
+
+
 def toggle_ev(eid, enabled):
     items = _load_ev()
     for i in items:
@@ -433,18 +456,6 @@ def energy_grid_today(now: datetime | None = None) -> dict:
             imp += b.get("g_load", 0.0) + b.get("g_batt", 0.0)   # Netz→Verbrauch/Batterie
             exp += b.get("s_grid", 0.0) + b.get("b_grid", 0.0)   # Solar/Batterie→Netz
     return {"import": round(imp, 2), "export": round(exp, 2)}
-
-
-def energy_solar_today(now: datetime | None = None) -> float:
-    """Heute erzeugter Solarstrom (kWh) aus der integrierten PV-Leistung
-    (gleiche Quelle wie die Verlaufs-Charts, nicht aus Zählerregistern)."""
-    now = now or datetime.now()
-    today = now.strftime("%Y-%m-%d")
-    total = 0.0
-    for k, b in _load_history().get("hours", {}).items():
-        if k[:10] == today:
-            total += b.get("solar", 0.0)
-    return round(total, 2)
 
 
 def active_ev(now: datetime | None = None):
