@@ -174,10 +174,14 @@ const bandPlugin = {
       const idx = prices.map((p, i) => (p.start >= s.start && p.start < s.end) ? i : -1).filter(i => i >= 0);
       if (idx.length) band(idx[0], idx[idx.length - 1], 'rgba(255,213,74,.16)', 'rgba(255,213,74,.5)');
     }
-    // laufende Auswahl (blau)
+    // laufende Auswahl (blau) bzw. bestätigungswartende Auswahl (bleibt blau
+    // markiert, bis sie angelegt oder verworfen wird)
     if (drag) {
       const a = Math.min(drag.from, drag.to), b = Math.max(drag.from, drag.to);
       band(a, b, 'rgba(77,163,255,.22)', 'rgba(77,163,255,.7)');
+    } else if (pendingSel) {
+      const idx = prices.map((p, i) => (p.start >= pendingSel.start && p.start < pendingSel.end) ? i : -1).filter(i => i >= 0);
+      if (idx.length) band(idx[0], idx[idx.length - 1], 'rgba(77,163,255,.22)', 'rgba(77,163,255,.7)');
     }
     // Jetzt-Linie – nur in der HEUTE-Ansicht (im Morgen-Tab gibt es kein "jetzt")
     const ni = activeDay === 'today'
@@ -470,6 +474,7 @@ function endDrag() {
   $('ev-discard').disabled = false;
   $('ev-empty').textContent = 'Auswahl bereit – mit „Termin anlegen" bestätigen oder verwerfen.';
   $('drag-hint').textContent = 'In die Kurve klicken oder ziehen, um einen Ladetermin anzulegen.';
+  chart.update('none');   // pendingSel jetzt gesetzt -> blaue Markierung stehen lassen
 }
 
 function clearSelection() {
@@ -477,6 +482,7 @@ function clearSelection() {
   $('ev-start').value = ''; $('ev-end').value = ''; $('ev-note').value = '';
   $('ev-confirm').disabled = true; $('ev-discard').disabled = true;
   $('ev-empty').textContent = 'Ziehe in der Kurve über die gewünschten Viertelstunden – die Auswahl erscheint hier und wird erst nach Bestätigung angelegt.';
+  if (chart) chart.update('none');   // blaue Markierung entfernen
 }
 
 document.getElementById('ev-confirm').addEventListener('click', async () => {
