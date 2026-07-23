@@ -271,33 +271,44 @@ function buildEnergyChart() {
   });
 }
 
-// TEMPORÄR: "Energie (Verlauf)" stündlich zusammenfassen (wie VRM) zum Vergleich.
-// Auf false setzen für zurück zu 15-Min.
-const ENERGY_HOURLY = true;
+// Auflösung der Energie-Diagramme (15-Min vs. stündlich, wie VRM). Wird per
+// Einstellung gesetzt und im Status-Poll aktualisiert. Getrennt je Chart.
+let energyHourly = false;   // "Energie (Verlauf)"
+let flowHourly = false;     // "Energieflüsse"
+const FLOW_KEYS = ['b_grid', 's_grid', 's_batt', 's_load', 'b_load', 'g_load', 'g_batt'];
 function aggregateHourly(hist) {
   const map = new Map();
   for (const h of hist) {
     const hr = h.hour.slice(0, 2) + ':00';
     let a = map.get(hr);
-    if (!a) { a = { hour: hr, verbrauch: 0, solar: 0, socs: [], soc_min: null, soc_max: null }; map.set(hr, a); }
+    if (!a) {
+      a = { hour: hr, verbrauch: 0, solar: 0, socs: [], soc_min: null, soc_max: null };
+      FLOW_KEYS.forEach(k => a[k] = 0);
+      map.set(hr, a);
+    }
     a.verbrauch += h.verbrauch || 0;
     a.solar += h.solar || 0;
+    FLOW_KEYS.forEach(k => a[k] += h[k] || 0);
     if (h.soc_avg != null) a.socs.push(h.soc_avg);
     if (h.soc_min != null) a.soc_min = a.soc_min == null ? h.soc_min : Math.min(a.soc_min, h.soc_min);
     if (h.soc_max != null) a.soc_max = a.soc_max == null ? h.soc_max : Math.max(a.soc_max, h.soc_max);
   }
-  return [...map.values()].map(a => ({
-    hour: a.hour,
-    verbrauch: Math.round(a.verbrauch * 1000) / 1000,
-    solar: Math.round(a.solar * 1000) / 1000,
-    soc_avg: a.socs.length ? Math.round(a.socs.reduce((x, y) => x + y, 0) / a.socs.length * 10) / 10 : null,
-    soc_min: a.soc_min, soc_max: a.soc_max,
-  }));
+  return [...map.values()].map(a => {
+    const o = {
+      hour: a.hour,
+      verbrauch: Math.round(a.verbrauch * 1000) / 1000,
+      solar: Math.round(a.solar * 1000) / 1000,
+      soc_avg: a.socs.length ? Math.round(a.socs.reduce((x, y) => x + y, 0) / a.socs.length * 10) / 10 : null,
+      soc_min: a.soc_min, soc_max: a.soc_max,
+    };
+    FLOW_KEYS.forEach(k => o[k] = Math.round(a[k] * 1000) / 1000);
+    return o;
+  });
 }
 function renderEnergyChart(hist) {
   if (!energyChart) return;
   hist = hist || [];
-  if (ENERGY_HOURLY) hist = aggregateHourly(hist);
+  if (energyHourly) hist = aggregateHourly(hist);
   energyChart.data.labels = hist.map(h => h.hour);
   const d = energyChart.data.datasets;
   d[0].data = hist.map(h => h.verbrauch);
@@ -306,8 +317,9 @@ function renderEnergyChart(hist) {
   d[3].data = hist.map(h => h.soc_min);
   d[4].data = hist.map(h => h.soc_avg);
   const hasData = hist.some(h => h.verbrauch || h.solar || h.soc_avg != null);
+  const takt = energyHourly ? 'stündlich' : 'im 15-Min-Takt';
   $('energy-hint').textContent = hasData
-    ? 'Verbrauch & Solar, Batterie-SOC im 15-Min-Takt (echte Messwerte).'
+    ? `Verbrauch & Solar, Batterie-SOC ${takt} (echte Messwerte).`
     : 'Noch keine Verlaufsdaten – füllt sich mit jedem Regelzyklus.';
   energyChart.update('none');
 }
@@ -353,6 +365,7 @@ function buildFlowChart() {
 function renderFlowChart(hist) {
   if (!flowChart) return;
   hist = hist || [];
+  if (flowHourly) hist = aggregateHourly(hist);
   flowChart.data.labels = hist.map(h => h.hour);
   FLOWS.forEach((f, i) => {
     flowChart.data.datasets[i].data = hist.map(h => (h[f.key] || 0) * f.sign);
@@ -515,6 +528,8 @@ async function load() {
   nowIso = d.now || '';
   applyDay();
   renderOverview(d.charge_overview);
+  // Chart-Auflösung aus den Einstellungen übernehmen (15-Min vs. stündlich)
+  if (d.ui) { energyHourly = !!d.ui.chart_energy_hourly; flowHourly = !!d.ui.chart_flow_hourly; }
   // Energie-Charts: Live-Refresh nur wenn der heutige Tag angezeigt wird
   energyMinDay = d.energy_min_day || energyMinDay;
   if (!energyDay) energyDay = todayStr();

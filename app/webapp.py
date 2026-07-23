@@ -303,8 +303,11 @@ def api_status():
         status = dict(ctrl.status)
         prices = list(ctrl.prices)
     charge = store.list_charge_sessions()
+    cfg = store.load_config()
     return jsonify({
         "status": status,
+        "ui": {"chart_energy_hourly": bool(cfg.get("chart_energy_hourly", False)),
+               "chart_flow_hourly": bool(cfg.get("chart_flow_hourly", False))},
         "prices": prices,
         "ev_schedules": store.list_ev(),
         "charge_log": charge,
@@ -371,7 +374,8 @@ def api_config():
     cfg = store.load_config()
     allowed = ["cerbo_host", "cerbo_port", "tibber_token", "pv_latitude",
                "pv_longitude", "pv_planes", "dry_run", "poll_seconds",
-               "energy_sample_seconds", "manual_override", "web_port"] + list(Params().__dict__.keys())
+               "energy_sample_seconds", "manual_override", "web_port",
+               "chart_energy_hourly", "chart_flow_hourly"] + list(Params().__dict__.keys())
     for key in allowed:
         if key in body:
             cfg[key] = body[key]

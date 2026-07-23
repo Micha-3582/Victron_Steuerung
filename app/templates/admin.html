@@ -75,6 +75,27 @@
 </div>
 
 <div class="card">
+  <h2><svg class="h2i" viewBox="0 0 24 24"><line x1="3" y1="21" x2="21" y2="21"/><rect x="5" y="11" width="3" height="8"/><rect x="11" y="6" width="3" height="13"/><rect x="17" y="14" width="3" height="5"/></svg>Diagramme</h2>
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
+    <label class="switch" style="margin:0"><input type="checkbox" id="chart_energy_hourly"><span class="slider"></span></label>
+    <div><b>Energie (Verlauf) stündlich</b><div class="muted">An = stündlich zusammengefasst (wie VRM), Aus = 15-Min-Auflösung.</div></div>
+  </div>
+  <div style="display:flex;align-items:center;gap:14px">
+    <label class="switch" style="margin:0"><input type="checkbox" id="chart_flow_hourly"><span class="slider"></span></label>
+    <div><b>Energieflüsse stündlich</b><div class="muted">An = stündlich zusammengefasst (wie VRM), Aus = 15-Min-Auflösung.</div></div>
+  </div>
+  <details class="help">
+    <summary>Wann welche Auflösung?</summary>
+    <div class="help-body">
+      Die <b>15-Min-Auflösung</b> zeigt jede Viertelstunde einzeln – am genauesten und passend
+      zum Regeltakt. <b>Stündlich</b> fasst je vier Viertelstunden zu einem Balken zusammen und
+      entspricht damit der Darstellung im Victron-VRM-Portal – praktisch zum direkten Vergleich.
+      Beide Diagramme lassen sich unabhängig umstellen.
+    </div>
+  </details>
+</div>
+
+<div class="card">
   <h2><svg class="h2i" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1"/><line x1="12" y1="2" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="22"/><line x1="2" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="22" y2="12"/></svg>Victron Cerbo GX</h2>
   <div class="grid2">
     <div><label>Cerbo IP</label><input id="cerbo_host"></div>
@@ -306,6 +327,8 @@ async function init() {
   document.getElementById('dry_run').checked = !!cfg.dry_run;
   document.getElementById('poll_seconds').value = cfg.poll_seconds;
   document.getElementById('energy_sample_seconds').value = cfg.energy_sample_seconds ?? 10;
+  document.getElementById('chart_energy_hourly').checked = !!cfg.chart_energy_hourly;
+  document.getElementById('chart_flow_hourly').checked = !!cfg.chart_flow_hourly;
   document.getElementById('cerbo_host').value = cfg.cerbo_host || '';
   document.getElementById('cerbo_port').value = cfg.cerbo_port || 502;
   document.getElementById('tibber_token').value = cfg.tibber_token || '';
@@ -341,6 +364,8 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     dry_run: document.getElementById('dry_run').checked,
     poll_seconds: parseInt(document.getElementById('poll_seconds').value) || 300,
     energy_sample_seconds: parseInt(document.getElementById('energy_sample_seconds').value) || 10,
+    chart_energy_hourly: document.getElementById('chart_energy_hourly').checked,
+    chart_flow_hourly: document.getElementById('chart_flow_hourly').checked,
     cerbo_host: document.getElementById('cerbo_host').value.trim(),
     cerbo_port: parseInt(document.getElementById('cerbo_port').value) || 502,
     tibber_token: document.getElementById('tibber_token').value.trim(),
