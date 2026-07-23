@@ -624,9 +624,10 @@ function renderSystem(sys) {
 function renderEnergyTiles(history, day) {
   const el = $('energy-tiles');
   if (!el) return;
-  let solar = 0, imp = 0, exp = 0;
+  let solar = 0, imp = 0, exp = 0, verbrauch = 0;
   (history || []).forEach(r => {
     solar += r.solar || 0;
+    verbrauch += r.verbrauch || 0;                 // Summe der roten Balken
     imp += (r.g_load || 0) + (r.g_batt || 0);      // Netz → Verbrauch/Batterie
     exp += (r.s_grid || 0) + (r.b_grid || 0);      // Solar/Batterie → Netz
   });
@@ -641,6 +642,7 @@ function renderEnergyTiles(history, day) {
   el.innerHTML =
     tile('← Zum Netz', exp.toFixed(1) + ' kWh', kv([[tag + ' eingespeist', '']]), 'var(--cheap)') +
     tile('→ Aus dem Netz', imp.toFixed(1) + ' kWh', kv([[tag + ' bezogen', '']]), 'var(--vexp)') +
+    tile('🏠 Gesamtverbrauch', verbrauch.toFixed(1) + ' kWh', kv([[tag + ' verbraucht', '']]), 'var(--exp)') +
     tile(sun + ' Solar', solar.toFixed(1) + ' kWh', kv([[tag + ' erzeugt', '']]), 'var(--timer)');
 }
 
