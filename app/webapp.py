@@ -127,11 +127,9 @@ class Controller:
                 "system": system,
                 "override": bool(cfg.get("manual_override")),
             }
-        # Energie-Verlauf mitschreiben (echte Messwerte, für das Verlaufs-Chart)
-        try:
-            store.log_energy_sample(system, now)
-        except Exception as e:                           # noqa: BLE001
-            log.warning("Energie-Log fehlgeschlagen: %s", e)
+        # Hinweis: Das Energie-Logging läuft in einem eigenen, feineren Takt
+        # (run_energy / energy_sample_seconds), NICHT hier - sonst würde die
+        # Trapez-Integration doppelt zählen.
 
         self.last_tick = now.isoformat(timespec="seconds")
         self.last_error = None
@@ -185,11 +183,31 @@ class Controller:
                 sleep_s += interval
             self._stop.wait(sleep_s)
 
+    def run_energy(self):
+        """Eigener, feiner Takt nur für die Energie-Messung. Tastet die
+        Momentanleistung häufig ab (Standard 10 s) und integriert sie zu kWh -
+        deutlich genauer als der 60-s-Regeltakt, näher an VRM. Läuft unabhängig
+        vom Dashboard. Einziger Aufrufer von log_energy_sample (kein Doppelzählen)."""
+        while not self._stop.is_set():
+            try:
+                cfg = store.load_config()
+                if store.is_configured(cfg):
+                    cerbo = Cerbo(cfg["cerbo_host"], cfg.get("cerbo_port", 502))
+                    system = cerbo.read_system()
+                    store.log_energy_sample(system, datetime.now())
+            except Exception as e:                       # noqa: BLE001
+                log.warning("Energie-Sampler: %s", e)
+            try:
+                iv = max(3, int(store.load_config().get("energy_sample_seconds", 10)))
+            except Exception:                            # noqa: BLE001
+                iv = 10
+            self._stop.wait(iv)
+
     def start(self):
         cfg = store.load_config()
         interval = int(cfg.get("poll_seconds", 300))
-        t = threading.Thread(target=self.run, args=(interval,), daemon=True)
-        t.start()
+        threading.Thread(target=self.run, args=(interval,), daemon=True).start()
+        threading.Thread(target=self.run_energy, daemon=True).start()
 
 
 ctrl = Controller()
@@ -357,7 +375,7 @@ def api_config():
     cfg = store.load_config()
     allowed = ["cerbo_host", "cerbo_port", "tibber_token", "pv_latitude",
                "pv_longitude", "pv_planes", "dry_run", "poll_seconds",
-               "manual_override", "web_port"] + list(Params().__dict__.keys())
+               "energy_sample_seconds", "manual_override", "web_port"] + list(Params().__dict__.keys())
     for key in allowed:
         if key in body:
             cfg[key] = body[key]

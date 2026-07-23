@@ -35,6 +35,7 @@ CONFIG_DEFAULTS = {
     "pv_planes": [],
     "dry_run": True,
     "poll_seconds": 300,
+    "energy_sample_seconds": 10,   # eigener, feiner Takt für die Energie-Messung
     "manual_override": False,
     "web_port": 5005,
 }

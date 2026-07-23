@@ -52,8 +52,10 @@
     <div><b>Dry-Run</b><div class="muted">An = nur beobachten, der Cerbo wird nicht geschaltet.
       Erst nach erfolgreichem Parallelvergleich ausschalten (und das alte ioBroker-Skript stoppen!).</div></div>
   </div>
-  <label>Abfrage-Intervall (Sekunden)</label>
-  <input id="poll_seconds" type="number">
+  <div class="grid2">
+    <div><label>Regel-Intervall (Sekunden)</label><input id="poll_seconds" type="number"></div>
+    <div><label>Energie-Messtakt (Sekunden)</label><input id="energy_sample_seconds" type="number"></div>
+  </div>
   <details class="help">
     <summary>Was bedeuten Dry-Run und Abfrage-Intervall?</summary>
     <div class="help-body">
@@ -303,6 +305,7 @@ async function init() {
   cfg = await (await fetch('/api/config')).json();
   document.getElementById('dry_run').checked = !!cfg.dry_run;
   document.getElementById('poll_seconds').value = cfg.poll_seconds;
+  document.getElementById('energy_sample_seconds').value = cfg.energy_sample_seconds ?? 10;
   document.getElementById('cerbo_host').value = cfg.cerbo_host || '';
   document.getElementById('cerbo_port').value = cfg.cerbo_port || 502;
   document.getElementById('tibber_token').value = cfg.tibber_token || '';
@@ -337,6 +340,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
   const body = {
     dry_run: document.getElementById('dry_run').checked,
     poll_seconds: parseInt(document.getElementById('poll_seconds').value) || 300,
+    energy_sample_seconds: parseInt(document.getElementById('energy_sample_seconds').value) || 10,
     cerbo_host: document.getElementById('cerbo_host').value.trim(),
     cerbo_port: parseInt(document.getElementById('cerbo_port').value) || 502,
     tibber_token: document.getElementById('tibber_token').value.trim(),

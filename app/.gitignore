@@ -4,6 +4,7 @@ ev_schedules.json
 energy.json
 charge_log.json
 history.json
+pv_cache.json
 __pycache__/
 *.pyc
 .venv/
