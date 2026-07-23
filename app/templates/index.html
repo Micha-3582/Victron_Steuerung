@@ -562,8 +562,20 @@ async function load() {
     $('mode').innerHTML = `<span class="pill ${s.ess_mode === 9 ? 'green' : 'grey'}">${s.ess_text}</span>`;
     $('strategy').innerHTML = `<span class="pill amber">${s.strategy}</span>` +
       (s.ev_active ? ` <span class="pill green">Ladetermin läuft</span>` : '');
-    $('meta').textContent = `Bilanz ${s.balance} kWh · PV heute ${s.pv_today} / morgen ${s.pv_tom} kWh · Stand ${d.last_tick || '–'}`
-      + (s.pv_note ? ` · ⚠ ${s.pv_note}` : '');
+    // "Bilanz" als Klartext: reicht der Strom bis morgen Mittag oder fehlt was?
+    const bal = Number(s.balance);
+    const ok = bal >= 0;
+    const balTxt = ok
+      ? `Strom reicht bis morgen Mittag – Puffer ${bal.toFixed(1)} kWh`
+      : `${Math.abs(bal).toFixed(1)} kWh fehlen bis morgen Mittag – wird günstig nachgeladen`;
+    const tip = 'Vorschau bis morgen 12 Uhr: aktueller Akku-Inhalt + erwartete Sonne − geschätzter Verbrauch. '
+      + 'Positiv = Überschuss, es muss nichts extra aus dem Netz geladen werden. '
+      + 'Negativ = so viel fehlt und wird in den günstigsten Viertelstunden nachgeladen.';
+    $('meta').innerHTML =
+      `<div style="font-size:15px;font-weight:600;color:${ok ? 'var(--cheap)' : 'var(--exp)'}" title="${tip}">`
+      + `${ok ? '✓' : '⚠'} ${balTxt} <span style="opacity:.55;font-weight:400;cursor:help">ⓘ</span></div>`
+      + `<div class="muted" style="margin-top:4px">Sonne heute ${s.pv_today} / morgen ${s.pv_tom} kWh · Stand ${d.last_tick || '–'}`
+      + (s.pv_note ? ` · ⚠ ${s.pv_note}` : '') + `</div>`;
     // planline wird tag-genau in applyDay() gesetzt
     if (!overrideBusy) $('override').checked = !!s.override;
     const note = $('override-note');
