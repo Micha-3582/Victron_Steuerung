@@ -27,6 +27,7 @@
     <span><i class="sw" style="background:#4da3ff"></i>Batterie-SOC</span>
     <span><i class="sw" style="background:rgba(77,163,255,.25);border:1px solid #4da3ff"></i>SOC Min/Max</span>
   </div>
+  <div class="sysgrid" id="energy-tiles" style="margin-top:12px"></div>
 </div>
 
 <div class="card full" style="margin-bottom:14px">
@@ -399,6 +400,7 @@ async function loadEnergyDay(day) {
     energyMinDay = d.min_day || energyMinDay;
     renderEnergyChart(d.history);
     renderFlowChart(d.history);
+    renderEnergyTiles(d.history, day);
   } catch (e) { /* still */ }
   applyEnergyDayUI();
 }
@@ -580,16 +582,32 @@ function renderSystem(sys) {
     tile('🔋 Batterie', b.soc + ' %',
          kv([['Status', stateTxt], ['Leistung', w(b.power)], ['Spannung', b.voltage.toFixed(2) + ' V'], ['Strom', b.current.toFixed(1) + ' A']]),
          b.state === 1 ? 'var(--cheap)' : (b.state === 2 ? 'var(--exp)' : 'var(--fg)'));
-  const gt = sys.grid_today;
-  if (gt) {
-    g.innerHTML +=
-      tile('← Zum Netz', gt.export.toFixed(1) + ' kWh', kv([['heute eingespeist', '']]), 'var(--cheap)') +
-      tile('→ Aus dem Netz', gt.import.toFixed(1) + ' kWh', kv([['heute bezogen', '']]), 'var(--vexp)');
-  }
-  if (sys.solar_today != null) {
-    g.innerHTML +=
-      tile(sun + ' Solar heute', sys.solar_today.toFixed(1) + ' kWh', kv([['heute erzeugt', '']]), 'var(--timer)');
-  }
+}
+
+/* Tages-Bilanz-Kacheln (Netz/Solar) – an den im Energieverlauf gewählten Tag
+   gekoppelt. Rechnet aus den 15-Min-Verlaufsdaten des Tages (gleiche Quelle
+   wie die Charts), nicht aus den Live-Werten. */
+function renderEnergyTiles(history, day) {
+  const el = $('energy-tiles');
+  if (!el) return;
+  let solar = 0, imp = 0, exp = 0;
+  (history || []).forEach(r => {
+    solar += r.solar || 0;
+    imp += (r.g_load || 0) + (r.g_batt || 0);      // Netz → Verbrauch/Batterie
+    exp += (r.s_grid || 0) + (r.b_grid || 0);      // Solar/Batterie → Netz
+  });
+  const tag = (day && day === todayStr()) ? 'heute' : 'an diesem Tag';
+  const sun = '<span class="sun-ico">☀︎</span>';
+  const tile = (title, big, sub, color) => `
+    <div class="systile">
+      <div class="systile-t">${title}</div>
+      <div class="systile-v" ${color ? `style="color:${color}"` : ''}>${big}</div>
+      <div class="systile-s">${sub || ''}</div>
+    </div>`;
+  el.innerHTML =
+    tile('← Zum Netz', exp.toFixed(1) + ' kWh', kv([[tag + ' eingespeist', '']]), 'var(--cheap)') +
+    tile('→ Aus dem Netz', imp.toFixed(1) + ' kWh', kv([[tag + ' bezogen', '']]), 'var(--vexp)') +
+    tile(sun + ' Solar', solar.toFixed(1) + ' kWh', kv([[tag + ' erzeugt', '']]), 'var(--timer)');
 }
 
 /* Schnelle Live-Aktualisierung (unabhängig vom 5-Min-Regelzyklus) */
