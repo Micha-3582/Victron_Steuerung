@@ -262,16 +262,19 @@ def decompose_flows(pv, load, grid_import, grid_export, batt_charge, batt_discha
 
 
 def _powers_from_system(system: dict) -> dict:
-    """Momentanleistungen (W) aus read_system(). Der Verbrauch wird als echter
-    Gesamtverbrauch aus der Energiebilanz gerechnet (nicht loads.total, das nur
-    die Lasten am WR-Ausgang erfasst): Verbrauch = PV + Netz + (Entladung − Ladung)."""
+    """Momentanleistungen (W) aus read_system(), konsistent zur VRM-Darstellung.
+
+    - Verbrauch = loads.total (AC-Verbrauch, = VRM „Gesamtverbrauch").
+    - Batterie-Fluss wird als REST der AC-Energiebilanz abgeleitet, nicht aus dem
+      DC-Register 842. So landen AC↔DC-Wandlungsverluste (beim Netzladen) korrekt
+      bei „Netz zur Batterie" und werden nicht dem Verbrauch zugeschlagen.
+      net = PV + Netz − Verbrauch  →  >0 laden, <0 entladen."""
     pv = float(system["solar_total"])
     grid = float(system["grid"]["total"])           # + Bezug / − Einspeisung
-    state = int(system["battery"].get("state", 0))  # 1=laden, 2=entladen
-    power = abs(float(system["battery"].get("power", 0)))
-    bc = power if state == 1 else 0.0
-    bd = power if state == 2 else 0.0
-    load = max(0.0, pv + grid + bd - bc)
+    load = max(0.0, float(system["loads"]["total"]))
+    net = pv + grid - load
+    bc = max(0.0, net)
+    bd = max(0.0, -net)
     return {"pv": pv, "load": load, "grid": grid, "bc": bc, "bd": bd}
 
 
@@ -415,6 +418,20 @@ def energy_min_day() -> str | None:
     hours = _load_history().get("hours", {})
     days = {k[:10] for k in hours.keys() if len(k) >= 10}
     return min(days) if days else None
+
+
+def energy_grid_today(now: datetime | None = None) -> dict:
+    """Tages-Netzbezug/-Einspeisung aus der integrierten Netzleistung (nicht aus
+    den kumulierten Zählerregistern, die unzuverlässig zählen). Aus/Zum Netz =
+    Summe der heutigen Netz-Flüsse. Reset um Mitternacht ergibt sich automatisch."""
+    now = now or datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    imp = exp = 0.0
+    for k, b in _load_history().get("hours", {}).items():
+        if k[:10] == today:
+            imp += b.get("g_load", 0.0) + b.get("g_batt", 0.0)   # Netz→Verbrauch/Batterie
+            exp += b.get("s_grid", 0.0) + b.get("b_grid", 0.0)   # Solar/Batterie→Netz
+    return {"import": round(imp, 2), "export": round(exp, 2)}
 
 
 def active_ev(now: datetime | None = None):
