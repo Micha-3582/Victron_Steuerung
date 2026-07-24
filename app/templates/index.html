@@ -563,13 +563,13 @@ async function load() {
     $('mode').innerHTML = `<span class="pill ${s.ess_mode === 9 ? 'green' : 'grey'}">${s.ess_text}</span>`;
     $('strategy').innerHTML = `<span class="pill amber">${s.strategy}</span>` +
       (s.ev_active ? ` <span class="pill green">Ladetermin läuft</span>` : '');
-    // "Bilanz" als Klartext: reicht der Strom bis morgen Mittag oder fehlt was?
+    // "Bilanz" als Klartext: reicht der Strom bis zum nächsten Mittag oder fehlt was?
     const bal = Number(s.balance);
     const ok = bal >= 0;
     const balTxt = ok
-      ? `Strom reicht bis morgen Mittag – Puffer ${bal.toFixed(1)} kWh`
-      : `${Math.abs(bal).toFixed(1)} kWh fehlen bis morgen Mittag – wird günstig nachgeladen`;
-    const tip = 'Vorschau bis morgen 12 Uhr: aktueller Akku-Inhalt + erwartete Sonne − geschätzter Verbrauch. '
+      ? `Strom reicht bis zum nächsten Mittag – Puffer ${bal.toFixed(1)} kWh`
+      : `${Math.abs(bal).toFixed(1)} kWh fehlen bis zum nächsten Mittag – wird günstig nachgeladen`;
+    const tip = 'Vorschau bis zum nächsten Mittag (wenn die Sonne wieder trägt): aktueller Akku-Inhalt + erwartete Sonne − geschätzter Verbrauch. '
       + 'Positiv = Überschuss, es muss nichts extra aus dem Netz geladen werden. '
       + 'Negativ = so viel fehlt und wird in den günstigsten Viertelstunden nachgeladen.';
     $('meta').innerHTML =

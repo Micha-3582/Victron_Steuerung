@@ -264,11 +264,15 @@ def decide(soc: float, price_entries: list, solar_today_raw: float,
     solar_today = round(solar_today_raw * p.pv_korrektur_faktor, 2)
     solar_tom = round(solar_tom_raw * p.pv_korrektur_faktor, 2)
 
-    # --- Gesamtbilanz bis morgen Mittag ---
+    # --- Gesamtbilanz bis zum NÄCHSTEN Mittag (wenn die PV wieder trägt) ---
+    # Vor 12 Uhr ist das der heutige Mittag (~Stunden), ab 12 Uhr der morgige.
+    # (Vorher fest now+1Tag -> nachts nach 00:00 wurde fälschlich der übernächste
+    #  Mittag angesetzt, ~34 h, was die Bilanz massiv zu negativ machte.)
     pv_rem_factor = 0.75 if hour_now < 10 else (0.50 if hour_now < 13 else (0.25 if hour_now < 16 else 0.0))
     expected_pv_rest = (solar_today * pv_rem_factor) + (solar_tom * p.pv_tom_morning_factor)
-    tomorrow_noon = (now + timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
-    hours_to_bridge = max(1, (tomorrow_noon - now).total_seconds() / 3600)
+    noon = now.replace(hour=12, minute=0, second=0, microsecond=0)
+    next_noon = noon if now < noon else noon + timedelta(days=1)
+    hours_to_bridge = max(1, (next_noon - now).total_seconds() / 3600)
     current_kwh = (soc / 100) * p.battery_usable_kwh
     total_need_kwh = (p.daily_usage_kwh / 24) * hours_to_bridge
     balance = (current_kwh + expected_pv_rest) - total_need_kwh
