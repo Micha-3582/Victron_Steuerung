@@ -279,22 +279,50 @@ def _window_stats(start_iso, end_iso, price_at, power_kw):
             "kwh": round(kwh, 2), "cost": round(cost, 2)}
 
 
+def _window_stats_measured(start_iso, end_iso, price_at, gbatt_at):
+    """Wie _window_stats, aber mit der TATSÄCHLICH gemessenen Netz→Batterie-Energie
+    (aus dem Energie-Sampler) statt der geschätzten Ladeleistung. Für bereits
+    geladene/laufende Fenster – so stimmt die Menge mit dem Flüsse-Chart überein."""
+    s = datetime.fromisoformat(start_iso)
+    e = datetime.fromisoformat(end_iso)
+    kwh = cost = wsum = wdur = 0.0
+    t = s
+    while t < e:
+        slot_start = t.replace(minute=(t.minute // 15) * 15, second=0, microsecond=0)
+        key = slot_start.strftime("%Y-%m-%dT%H:%M")
+        seg_end = min(e, slot_start + timedelta(minutes=15))
+        frac = (seg_end - t).total_seconds() / 900.0          # Anteil am 15-Min-Bucket
+        kwh_seg = gbatt_at.get(key, 0.0) * frac
+        kwh += kwh_seg
+        dur_h = (seg_end - t).total_seconds() / 3600.0
+        p = price_at.get(key)
+        if p is not None:
+            cost += p / 100.0 * kwh_seg
+            wsum += p * dur_h
+            wdur += dur_h
+        t = seg_end
+    return {"avg_price": round(wsum / wdur, 1) if wdur else None,
+            "kwh": round(kwh, 2), "cost": round(cost, 2)}
+
+
 def build_charge_overview(status, charge, prices):
     """Kombiniert geplante Ladefenster (aus dem Plan) mit tatsächlich geladenen
-    (aus dem Protokoll) inkl. Menge und Kosten."""
+    (aus dem Protokoll) inkl. Menge und Kosten. Geladene/laufende Fenster nutzen die
+    gemessene Netz→Batterie-Energie, geplante die geschätzte Ladeleistung."""
     power_kw = (status.get("charge_power_w") or 3500) / 1000.0
     price_at = {p["start"][:16]: p["ct"] for p in prices}
     now_iso = datetime.now().isoformat(timespec="minutes")
+    gbatt_at = store.energy_grid_charge_buckets(now_iso[:10])
     items = []
     for s in charge.get("sessions", []):
         items.append({"start": s["start"], "end": s["end"], "status": "geladen",
                       "strategy": s.get("strategy", ""),
-                      **_window_stats(s["start"], s["end"], price_at, power_kw)})
+                      **_window_stats_measured(s["start"], s["end"], price_at, gbatt_at)})
     op = charge.get("open")
     if op:
         items.append({"start": op["start"], "end": None, "status": "läuft",
                       "strategy": op.get("strategy", ""),
-                      **_window_stats(op["start"], now_iso, price_at, power_kw)})
+                      **_window_stats_measured(op["start"], now_iso, price_at, gbatt_at)})
     # geplante (zukünftige) Fenster: zusammenhängende Plan-Slots mergen.
     # Nur HEUTE (die Karte zeigt nur den heutigen Tag) und bereits laufende
     # Slots (vom offenen Vorgang abgedeckt) ausblenden. Sonst würden morgige

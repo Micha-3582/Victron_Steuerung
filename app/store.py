@@ -543,6 +543,13 @@ def solar_log(now: datetime | None = None) -> dict:
     return {"rows": rows, "suggestion": suggestion, "days_used": len(finals)}
 
 
+def energy_grid_charge_buckets(day: str) -> dict:
+    """{slot_key 'YYYY-MM-DDTHH:MM': gemessene Netz→Batterie-kWh} eines Tages.
+    Basis für die tatsächliche (statt geschätzte) Lademenge in den Ladevorgängen."""
+    hours = _load_history().get("hours", {})
+    return {k: round(b.get("g_batt", 0.0), 4) for k, b in hours.items() if k[:10] == day}
+
+
 def active_ev(now: datetime | None = None):
     """Gibt den aktuell laufenden E-Auto-Termin zurück (oder None)."""
     now = now or datetime.now()
