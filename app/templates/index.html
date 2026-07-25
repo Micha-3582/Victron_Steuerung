@@ -566,9 +566,13 @@ async function load() {
     // "Bilanz" als Klartext: reicht der Strom bis zum nächsten Mittag oder fehlt was?
     const bal = Number(s.balance);
     const ok = bal >= 0;
+    // Konkret benennen, welcher Mittag gemeint ist: vor 12 Uhr = heute, ab 12 = morgen
+    // (identisch zur Horizont-Logik im Backend: nächster 12-Uhr-Punkt).
+    const nowH = parseInt((nowIso || '').slice(11, 13), 10);
+    const mittag = (isNaN(nowH) || nowH < 12) ? 'heute Mittag' : 'morgen Mittag';
     const balTxt = ok
-      ? `Strom reicht bis zum nächsten Mittag – rechnerisch ${bal.toFixed(1)} kWh übrig (Akku ${s.soc}% + erwartete Sonne)`
-      : `${Math.abs(bal).toFixed(1)} kWh fehlen bis zum nächsten Mittag – wird günstig nachgeladen`;
+      ? `Strom reicht bis ${mittag} – rechnerisch ${bal.toFixed(1)} kWh übrig (Akku ${s.soc}% + erwartete Sonne)`
+      : `${Math.abs(bal).toFixed(1)} kWh fehlen bis ${mittag} – wird günstig nachgeladen`;
     const tip = 'Vorschau bis zum nächsten Mittag (wenn die Sonne wieder trägt): aktueller Akku-Inhalt + erwartete Sonne − geschätzter Verbrauch. '
       + 'Positiv = Überschuss, es muss nichts extra aus dem Netz geladen werden. '
       + 'Negativ = so viel fehlt und wird in den günstigsten Viertelstunden nachgeladen.';
