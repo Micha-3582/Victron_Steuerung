@@ -567,7 +567,7 @@ async function load() {
     const bal = Number(s.balance);
     const ok = bal >= 0;
     const balTxt = ok
-      ? `Strom reicht bis zum nächsten Mittag – Puffer ${bal.toFixed(1)} kWh`
+      ? `Strom reicht bis zum nächsten Mittag – rechnerisch ${bal.toFixed(1)} kWh übrig (Akku ${s.soc}% + erwartete Sonne)`
       : `${Math.abs(bal).toFixed(1)} kWh fehlen bis zum nächsten Mittag – wird günstig nachgeladen`;
     const tip = 'Vorschau bis zum nächsten Mittag (wenn die Sonne wieder trägt): aktueller Akku-Inhalt + erwartete Sonne − geschätzter Verbrauch. '
       + 'Positiv = Überschuss, es muss nichts extra aus dem Netz geladen werden. '
