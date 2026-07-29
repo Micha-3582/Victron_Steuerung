@@ -478,9 +478,22 @@ def _solar_actual_for_day(day: str) -> float:
     return round(sum(b.get("solar", 0.0) for k, b in hours.items() if k[:10] == day), 2)
 
 
+# Akku gilt als "voll" (MPPT drosselt evtl. → Ertrag gedeckelt) ab diesem SOC.
+_SOC_FULL_THRESHOLD = 99.0
+
+
+def _solar_socmax_for_day(day: str):
+    """Höchster erreichter Batterie-SOC des Tages (aus der History) oder None."""
+    hours = _load_history().get("hours", {})
+    vals = [b.get("soc_max") for k, b in hours.items()
+            if k[:10] == day and b.get("soc_max") is not None]
+    return max(vals) if vals else None
+
+
 def _finalize_solar_days(days: dict, now: datetime):
     """Schließt alle vergangenen Tage ab: trägt den realen Ertrag, die Abweichung
-    und den Faktor ein, mit dem die Prognose exakt getroffen hätte."""
+    und den Faktor ein, mit dem die Prognose exakt getroffen hätte. Markiert Tage,
+    an denen der Akku voll war (PV evtl. gedeckelt → Ertrag unter Potenzial)."""
     today = now.date().isoformat()
     for day, e in days.items():
         if day < today and e.get("actual") is None:
@@ -491,6 +504,15 @@ def _finalize_solar_days(days: dict, now: datetime):
             e["deviation_pct"] = round((actual - corr) / corr * 100, 1) if corr else None
             # Faktor, der die Roh-Prognose exakt auf den realen Ertrag gebracht hätte
             e["suggested_factor"] = round(actual / raw, 2) if raw else None
+            smax = _solar_socmax_for_day(day)
+            e["soc_max"] = round(smax, 1) if smax is not None else None
+            e["curtailed"] = bool(smax is not None and smax >= _SOC_FULL_THRESHOLD)
+        elif day < today and "curtailed" not in e:
+            # Nachrüstung für Tage, die vor dem Curtailment-Feature finalisiert wurden.
+            smax = _solar_socmax_for_day(day)
+            if smax is not None:
+                e["soc_max"] = round(smax, 1)
+                e["curtailed"] = bool(smax >= _SOC_FULL_THRESHOLD)
 
 
 def record_solar_forecast(raw: float, corr: float, factor: float,
@@ -532,15 +554,20 @@ def solar_log(now: datetime | None = None) -> dict:
             e["actual"] = _solar_actual_for_day(day)
             e["provisional"] = True
         rows.append(e)
-    # Empfehlung: Median der Vorschlagsfaktoren der letzten 14 fertigen Tage
-    finals = [days[d]["suggested_factor"] for d in sorted(days.keys(), reverse=True)
+    # Empfehlung: Median der Vorschlagsfaktoren der letzten 14 fertigen Tage.
+    # Tage mit vollem Akku (PV evtl. gedeckelt) fließen NICHT ein – ihr Ertrag liegt
+    # unter dem Potenzial und würde die Empfehlung verzerren.
+    recent = [days[d] for d in sorted(days.keys(), reverse=True)
               if d < today and days[d].get("suggested_factor")][:14]
+    curtailed_days = sum(1 for e in recent if e.get("curtailed"))
+    finals = [e["suggested_factor"] for e in recent if not e.get("curtailed")]
     suggestion = None
     if finals:
         s = sorted(finals)
         n = len(s)
         suggestion = round((s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2), 2)
-    return {"rows": rows, "suggestion": suggestion, "days_used": len(finals)}
+    return {"rows": rows, "suggestion": suggestion, "days_used": len(finals),
+            "curtailed_days": curtailed_days}
 
 
 def energy_grid_charge_buckets(day: str) -> dict:

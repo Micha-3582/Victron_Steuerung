@@ -40,9 +40,12 @@ async function load() {
   $('cur-factor').textContent = (d.current_factor ?? 1).toFixed(2);
   $('suggestion').textContent = d.suggestion != null ? d.suggestion.toFixed(2) : '–';
   $('days-used').textContent = d.days_used || 0;
+  const curtNote = d.curtailed_days
+    ? ` ${d.curtailed_days} Tag(e) mit vollem Akku sind ausgeklammert (PV evtl. gedeckelt → Ertrag unter Potenzial).`
+    : '';
   $('hint').textContent = d.suggestion != null
-    ? `Empfehlung aus den letzten ${d.days_used} abgeschlossenen Tagen. Änderst du den Faktor, dann in den Einstellungen unter PV-Prognose.`
-    : 'Noch keine abgeschlossenen Tage – das Logbuch füllt sich ab dem ersten vollen Tag.';
+    ? `Empfehlung aus ${d.days_used} sauberen abgeschlossenen Tagen.${curtNote} Faktor änderst du in den Einstellungen unter PV-Prognose.`
+    : `Noch keine verwertbaren Tage – das Logbuch füllt sich ab dem ersten vollen Tag.${curtNote}`;
 
   const head = `<tr class="thead"><td>Datum</td><td>Prognose</td><td>Ertrag</td><td>Abweichung</td><td>Vorschlag</td></tr>`;
   const rows = (d.rows || []).map(r => {
@@ -50,11 +53,16 @@ async function load() {
     const dev = r.deviation_pct != null
       ? `<span style="color:${devColor(r.deviation_pct)};font-weight:600">${r.deviation_pct > 0 ? '+' : ''}${r.deviation_pct.toFixed(0)} %</span>`
       : '<span class="muted">–</span>';
-    const sug = r.suggested_factor != null ? r.suggested_factor.toFixed(2) : '<span class="muted">–</span>';
+    const sug = r.suggested_factor != null
+      ? (r.curtailed ? `<span class="muted">(${r.suggested_factor.toFixed(2)})</span>` : r.suggested_factor.toFixed(2))
+      : '<span class="muted">–</span>';
+    const curt = r.curtailed
+      ? '<br><span style="color:var(--timer)">⚠ Akku voll – Ertrag evtl. gedeckelt</span>'
+      : '';
     return `<tr>
       <td><b>${fmtDate(r.date)}</b>${prov}</td>
       <td>${(r.forecast_corr ?? 0).toFixed(1)} kWh<br><span class="muted">roh ${(r.forecast_raw ?? 0).toFixed(1)} · ×${(r.factor ?? 1).toFixed(2)}</span></td>
-      <td>${r.actual != null ? r.actual.toFixed(1) + ' kWh' : '–'}</td>
+      <td>${r.actual != null ? r.actual.toFixed(1) + ' kWh' : '–'}${curt}</td>
       <td>${dev}</td>
       <td>${sug}</td>
     </tr>`;
