@@ -22,7 +22,7 @@ import os
 
 import store
 import updater
-from datasources import PvForecast, fetch_tibber_prices
+from datasources import PvForecast, PvForecastOpenMeteo, fetch_tibber_prices
 from logic import ESS_CHARGE, ESS_IDLE, Params, decide
 from logic import _parse_iso as logic_parse_iso
 from victron import Cerbo
@@ -49,6 +49,8 @@ class Controller:
         self.last_error = None
         self._pv = None
         self._pv_key = None
+        self._om = None
+        self._om_key = None
         self._stop = threading.Event()
 
     def _pv_source(self, cfg):
@@ -57,6 +59,15 @@ class Controller:
             self._pv = PvForecast(cfg["pv_latitude"], cfg["pv_longitude"], cfg["pv_planes"])
             self._pv_key = key
         return self._pv
+
+    def _om_source(self, cfg):
+        """Zweit-Prognose Open-Meteo (nur fürs Parallel-Logging)."""
+        key = (cfg["pv_latitude"], cfg["pv_longitude"], str(cfg["pv_planes"]))
+        if self._om is None or self._om_key != key:
+            self._om = PvForecastOpenMeteo(cfg["pv_latitude"], cfg["pv_longitude"],
+                                           cfg["pv_planes"])
+            self._om_key = key
+        return self._om
 
     def tick(self):
         cfg = store.load_config()
@@ -94,11 +105,18 @@ class Controller:
         store.save_state(state)
         store.log_charge_state(d.ess_mode == ESS_CHARGE, d.strategy, now)
         # Solar-Logbuch: Tages-Prognose (roh + korrigiert) einfrieren und
-        # vergangene Tage mit dem realen Ertrag abschließen.
+        # vergangene Tage mit dem realen Ertrag abschließen. Zusätzlich – rein
+        # zum Vergleich – die Zweitprognose von Open-Meteo mitloggen (kein Einfluss
+        # auf die Steuerung).
         if pv_note is None and solar_today > 0:
+            om_today = None
+            try:
+                om_today, _ = self._om_source(cfg).get()
+            except Exception as e:                           # noqa: BLE001
+                log.warning("Open-Meteo-Prognose nicht verfügbar: %s", e)
             store.record_solar_forecast(raw=solar_today, corr=d.solar_today_korr,
                                         factor=Params.from_config(cfg).pv_korrektur_faktor,
-                                        now=now)
+                                        now=now, om_kwh=om_today)
 
         dry = bool(cfg.get("dry_run", True))
         wrote = False

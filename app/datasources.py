@@ -14,6 +14,7 @@ import requests
 log = logging.getLogger("datasources")
 
 _PV_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pv_cache.json")
+_OM_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pv_cache_openmeteo.json")
 
 TIBBER_URL = "https://api.tibber.com/v1-beta/gql"
 
@@ -32,6 +33,10 @@ TIBBER_QUERY_HOURLY = """
 } } } } }
 """
 FORECAST_BASE = "https://api.forecast.solar/estimate"
+OPENMETEO_BASE = "https://api.open-meteo.com/v1/forecast"
+# Performance Ratio: GTI (Einstrahlung auf die Modulebene) → AC-Ertrag.
+# Deckt Wechselrichter-, Leitungs- und Temperaturverluste ab (~0,85 typisch).
+OPENMETEO_PR = 0.85
 
 
 def _post(token, query, timeout):
@@ -139,3 +144,89 @@ class PvForecast:
         self._cache = (now, sum_t, sum_m, today)
         self._save_disk()
         return sum_t, sum_m
+
+
+class PvForecastOpenMeteo:
+    """Zweit-Prognose über Open-Meteo (kostenlos, kein Key). Liefert
+    (today_kwh, tomorrow_kwh) roh (ohne Korrekturfaktor). Holt je Fläche die
+    'global_tilted_irradiance' (Einstrahlung auf die geneigte Modulebene) und
+    rechnet sie mit kWp und Performance Ratio in Ertrag um:
+        kWh_Tag = Σ_stunden (GTI/1000) · kWp · PR
+    Nur zum PARALLELEN Loggen/Vergleich gedacht – füttert die Steuerung nicht."""
+
+    def __init__(self, lat, lon, planes, pr=OPENMETEO_PR, cache_seconds=10800):
+        self.lat, self.lon, self.planes = lat, lon, planes
+        self.pr = pr
+        self.cache_seconds = cache_seconds
+        self._cache = None        # (ts, today_kwh, tomorrow_kwh, day_iso)
+        self._next_try = 0.0
+        self._backoff = 0
+        self._load_disk()
+
+    def _load_disk(self):
+        try:
+            with open(_OM_CACHE_FILE, encoding="utf-8") as f:
+                d = json.load(f)
+            self._cache = (d["ts"], d["today"], d["tomorrow"], d.get("day", ""))
+        except Exception:                                     # noqa: BLE001
+            pass
+
+    def _save_disk(self):
+        try:
+            with open(_OM_CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump({"ts": self._cache[0], "today": self._cache[1],
+                           "tomorrow": self._cache[2], "day": self._cache[3]}, f)
+        except Exception:                                     # noqa: BLE001
+            pass
+
+    def _fresh(self, now, today):
+        return (self._cache and self._cache[3] == today
+                and (now - self._cache[0]) < self.cache_seconds)
+
+    def get(self):
+        now = time.time()
+        today = date.today().isoformat()
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        if self._fresh(now, today):
+            return self._cache[1], self._cache[2]
+        if now < self._next_try:
+            if self._cache:
+                return self._cache[1], self._cache[2]
+            raise RuntimeError("Open-Meteo im Backoff, noch kein Wert vorhanden")
+        sum_t = sum_m = 0.0
+        try:
+            for p in self.planes:
+                params = {
+                    "latitude": self.lat, "longitude": self.lon,
+                    "hourly": "global_tilted_irradiance",
+                    "timezone": "Europe/Berlin", "forecast_days": 2,
+                    "tilt": p["declination"], "azimuth": p["azimuth"],
+                }
+                r = requests.get(OPENMETEO_BASE, params=params, timeout=20)
+                r.raise_for_status()
+                h = r.json().get("hourly", {})
+                times = h.get("time", [])
+                gti = h.get("global_tilted_irradiance", [])
+                kwp = p["kwp"]
+                for t, g in zip(times, gti):
+                    if g is None:
+                        continue
+                    day = t[:10]
+                    kwh = (g / 1000.0) * kwp * self.pr      # 1 Stundenwert = g Wh/m²
+                    if day == today:
+                        sum_t += kwh
+                    elif day == tomorrow:
+                        sum_m += kwh
+        except Exception as e:                                # noqa: BLE001
+            self._backoff = min(3600, (self._backoff * 2) or 1800)
+            self._next_try = now + self._backoff
+            if self._cache:
+                log.warning("Open-Meteo-Abruf fehlgeschlagen (%s) - letzter Wert, "
+                            "nächster Versuch in %d min", e, self._backoff // 60)
+                return self._cache[1], self._cache[2]
+            raise
+        self._backoff = 0
+        self._next_try = 0.0
+        self._cache = (now, round(sum_t, 2), round(sum_m, 2), today)
+        self._save_disk()
+        return self._cache[1], self._cache[2]

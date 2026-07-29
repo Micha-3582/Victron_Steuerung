@@ -504,6 +504,9 @@ def _finalize_solar_days(days: dict, now: datetime):
             e["deviation_pct"] = round((actual - corr) / corr * 100, 1) if corr else None
             # Faktor, der die Roh-Prognose exakt auf den realen Ertrag gebracht hätte
             e["suggested_factor"] = round(actual / raw, 2) if raw else None
+            # Zweitquelle Open-Meteo (falls vorhanden): Abweichung gegen real
+            om = e.get("om_forecast")
+            e["om_deviation_pct"] = round((actual - om) / om * 100, 1) if om else None
             smax = _solar_socmax_for_day(day)
             e["soc_max"] = round(smax, 1) if smax is not None else None
             e["curtailed"] = bool(smax is not None and smax >= _SOC_FULL_THRESHOLD)
@@ -516,10 +519,11 @@ def _finalize_solar_days(days: dict, now: datetime):
 
 
 def record_solar_forecast(raw: float, corr: float, factor: float,
-                          now: datetime | None = None):
+                          now: datetime | None = None, om_kwh: float | None = None):
     """Friert die Tages-Prognose EINMAL pro Tag ein (erste gültige Messung, also
     quasi die Tagesvorhersage) und finalisiert dabei vergangene Tage. Wird im
-    Regeltakt aufgerufen; überschreibt einen bereits gesetzten Tag nicht."""
+    Regeltakt aufgerufen; überschreibt einen bereits gesetzten Tag nicht.
+    om_kwh = optionale Zweitprognose (Open-Meteo) für den Parallelvergleich."""
     if not raw or raw <= 0:
         return
     now = now or datetime.now()
@@ -527,10 +531,15 @@ def record_solar_forecast(raw: float, corr: float, factor: float,
     data = _load_solar_log()
     days = data["days"]
     _finalize_solar_days(days, now)
+    om = round(om_kwh, 2) if om_kwh and om_kwh > 0 else None
     if today not in days:
         days[today] = {"forecast_raw": round(raw, 2), "forecast_corr": round(corr, 2),
                        "factor": round(factor, 2), "actual": None,
-                       "deviation_pct": None, "suggested_factor": None}
+                       "deviation_pct": None, "suggested_factor": None,
+                       "om_forecast": om, "om_deviation_pct": None}
+    elif om is not None and days[today].get("om_forecast") is None:
+        # Open-Meteo war beim Einfrieren evtl. noch nicht da -> einmal nachtragen
+        days[today]["om_forecast"] = om
     with _lock, open(SOLAR_LOG_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
