@@ -14,13 +14,21 @@ import requests
 log = logging.getLogger("datasources")
 
 # Der Server-LXC hat eine kaputte IPv6-Route: manche APIs (u.a. api.open-meteo.com)
-# lösen per IPv6 auf, die Verbindung hängt dann bis zum Timeout. urllib3 (und damit
-# requests) global auf IPv4 zwingen behebt das zuverlässig – IPv4 antwortet in ms.
-try:
-    import urllib3.util.connection as _u3c
-    _u3c.HAS_IPV6 = False
-except Exception:                                    # noqa: BLE001
-    log.warning("Konnte IPv6 nicht deaktivieren – falls Timeouts auftreten, prüfen.")
+# lösen per IPv6 auf, die Verbindung hängt dann bis zum Timeout (curl -4 antwortet
+# dagegen in ms). Wir zwingen die gesamte Namensauflösung des Prozesses auf IPv4,
+# indem getaddrinfo nur noch AF_INET-Adressen zurückgibt. Das wirkt garantiert für
+# alle HTTP-Aufrufe (requests/urllib3, egal welche Variante) und behebt nebenbei die
+# gelegentlichen forecast.solar-/Tibber-Timeouts.
+import socket as _socket
+
+_orig_getaddrinfo = _socket.getaddrinfo
+
+
+def _getaddrinfo_ipv4_only(host, port, family=0, *args, **kwargs):
+    return _orig_getaddrinfo(host, port, _socket.AF_INET, *args, **kwargs)
+
+
+_socket.getaddrinfo = _getaddrinfo_ipv4_only
 
 _PV_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pv_cache.json")
 _OM_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pv_cache_openmeteo.json")
