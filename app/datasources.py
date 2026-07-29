@@ -202,7 +202,7 @@ class PvForecastOpenMeteo:
                     "timezone": "Europe/Berlin", "forecast_days": 2,
                     "tilt": p["declination"], "azimuth": p["azimuth"],
                 }
-                r = requests.get(OPENMETEO_BASE, params=params, timeout=20)
+                r = requests.get(OPENMETEO_BASE, params=params, timeout=30)
                 r.raise_for_status()
                 h = r.json().get("hourly", {})
                 times = h.get("time", [])
@@ -218,7 +218,10 @@ class PvForecastOpenMeteo:
                     elif day == tomorrow:
                         sum_m += kwh
         except Exception as e:                                # noqa: BLE001
-            self._backoff = min(3600, (self._backoff * 2) or 1800)
+            # Open-Meteo hat ein sehr großzügiges Limit (10.000/Tag) - ein Timeout
+            # ist nur Netz-Flackern. Deshalb SANFTER Backoff (60 s → max 5 min),
+            # damit ein einzelner Aussetzer die Zweitquelle nicht lange lahmlegt.
+            self._backoff = min(300, (self._backoff * 2) or 60)
             self._next_try = now + self._backoff
             if self._cache:
                 log.warning("Open-Meteo-Abruf fehlgeschlagen (%s) - letzter Wert, "
