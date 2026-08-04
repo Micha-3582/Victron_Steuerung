@@ -5,16 +5,16 @@
 <div class="card">
   <h2>Solarlogbuch – Prognose vs. reale Erzeugung</h2>
   <div class="muted" style="margin-bottom:12px">
-    Jeder Tag hält die morgens eingefrorene Tages-Prognose gegen den tatsächlichen
-    Ertrag. „Vorschlag" ist der Korrekturfaktor, mit dem die forecast.solar-Roh-Prognose
-    diesen Tag exakt getroffen hätte. Über mehrere Tage nähert sich daraus ein stabiler
-    Wert. Zum Vergleich läuft die Zweitquelle <b>Open-Meteo</b> parallel mit (eigene
-    Spalte, steuert nichts) – so siehst du, welche Prognose die realen Tage besser trifft.
+    Die Anlage wird von <b>Open-Meteo</b> gesteuert. Jeder Tag hält die morgens
+    eingefrorene Tages-Prognose gegen den realen Ertrag. „Vorschlag" ist die
+    <b>Performance Ratio (PR)</b>, mit der Open-Meteo diesen Tag exakt getroffen hätte –
+    über mehrere Tage nähert sich daraus ein stabiler Wert. forecast.solar läuft nur noch
+    als Vergleichsspalte mit (steuert nichts).
   </div>
 
   <div class="row" style="margin-bottom:14px">
-    <div class="metric"><div class="val" id="cur-factor">–</div><div class="lbl">Aktueller Faktor</div></div>
-    <div class="metric"><div class="val" id="suggestion">–</div><div class="lbl">Empfehlung (Median)</div></div>
+    <div class="metric"><div class="val" id="cur-pr">–</div><div class="lbl">Aktuelle PR</div></div>
+    <div class="metric"><div class="val" id="suggestion">–</div><div class="lbl">Empfehlung PR (Median)</div></div>
     <div class="metric"><div class="val" id="days-used">–</div><div class="lbl">Tage in Empfehlung</div></div>
   </div>
   <div class="muted" id="hint" style="margin-bottom:14px"></div>
@@ -33,41 +33,47 @@ function devColor(p) {
   if (Math.abs(p) < 8) return 'var(--cheap)';        // gut getroffen
   return p > 0 ? 'var(--timer)' : 'var(--vexp)';     // + = mehr erzeugt, − = weniger
 }
+const devSpan = p => p != null
+  ? `<span style="color:${devColor(p)};font-weight:600">${p > 0 ? '+' : ''}${p.toFixed(0)} %</span>`
+  : '<span class="muted">–</span>';
 
 async function load() {
   let d;
   try { d = await (await fetch('/api/solar-log')).json(); }
   catch (e) { $('log-table').innerHTML = '<tr><td class="muted">Fehler beim Laden.</td></tr>'; return; }
 
-  $('cur-factor').textContent = (d.current_factor ?? 1).toFixed(2);
+  $('cur-pr').textContent = (d.current_pr ?? 0.68).toFixed(2);
   $('suggestion').textContent = d.suggestion != null ? d.suggestion.toFixed(2) : '–';
   $('days-used').textContent = d.days_used || 0;
   const curtNote = d.curtailed_days
     ? ` ${d.curtailed_days} Tag(e) mit vollem Akku sind ausgeklammert (PV evtl. gedeckelt → Ertrag unter Potenzial).`
     : '';
   $('hint').textContent = d.suggestion != null
-    ? `Empfehlung aus ${d.days_used} sauberen abgeschlossenen Tagen.${curtNote} Faktor änderst du in den Einstellungen unter PV-Prognose.`
+    ? `Empfehlung aus ${d.days_used} sauberen abgeschlossenen Tagen.${curtNote} PR änderst du in den Einstellungen unter PV-Prognose.`
     : `Noch keine verwertbaren Tage – das Logbuch füllt sich ab dem ersten vollen Tag.${curtNote}`;
 
-  const devSpan = p => p != null
-    ? `<span style="color:${devColor(p)};font-weight:600">${p > 0 ? '+' : ''}${p.toFixed(0)} %</span>`
-    : '<span class="muted">–</span>';
-  const head = `<tr class="thead"><td>Datum</td><td>forecast.solar</td><td>Open-Meteo</td><td>Ertrag</td><td>Vorschlag</td></tr>`;
+  const head = `<tr class="thead"><td>Datum</td><td>Open-Meteo (steuert)</td><td>forecast.solar (Vergleich)</td><td>Ertrag</td><td>Vorschlag PR</td></tr>`;
   const rows = (d.rows || []).map(r => {
     const prov = r.provisional ? ' <span class="muted">(läuft)</span>' : '';
-    const sug = r.suggested_factor != null
-      ? (r.curtailed ? `<span class="muted">(${r.suggested_factor.toFixed(2)})</span>` : r.suggested_factor.toFixed(2))
-      : '<span class="muted">–</span>';
     const curt = r.curtailed
       ? '<br><span style="color:var(--timer)">⚠ Akku voll – Ertrag evtl. gedeckelt</span>'
       : '';
+    // Open-Meteo (Steuerquelle)
     const om = r.om_forecast != null
-      ? `${r.om_forecast.toFixed(1)} kWh<br><span class="muted">Abw. ${r.om_deviation_pct != null ? (r.om_deviation_pct > 0 ? '+' : '') + r.om_deviation_pct.toFixed(0) + ' %' : '–'}</span>`
+      ? `${r.om_forecast.toFixed(1)} kWh<br><span class="muted">Abw. </span>${devSpan(r.om_deviation_pct)}`
+      : '<span class="muted">–</span>';
+    // forecast.solar (Vergleich)
+    const fs = (r.forecast_corr != null)
+      ? `${r.forecast_corr.toFixed(1)} kWh<br><span class="muted">roh ${(r.forecast_raw ?? 0).toFixed(1)} · Abw. </span>${devSpan(r.deviation_pct)}`
+      : '<span class="muted">–</span>';
+    // Vorschlags-PR (Open-Meteo); an gedeckelten Tagen nur in Klammern (ausgeklammert)
+    const sug = r.om_suggested_pr != null
+      ? (r.curtailed ? `<span class="muted">(${r.om_suggested_pr.toFixed(2)})</span>` : r.om_suggested_pr.toFixed(2))
       : '<span class="muted">–</span>';
     return `<tr>
       <td><b>${fmtDate(r.date)}</b>${prov}</td>
-      <td>${(r.forecast_corr ?? 0).toFixed(1)} kWh<br><span class="muted">roh ${(r.forecast_raw ?? 0).toFixed(1)} · Abw. </span>${devSpan(r.deviation_pct)}</td>
       <td>${om}</td>
+      <td>${fs}</td>
       <td>${r.actual != null ? r.actual.toFixed(1) + ' kWh' : '–'}${curt}</td>
       <td>${sug}</td>
     </tr>`;

@@ -39,6 +39,7 @@ CONFIG_DEFAULTS = {
     "energy_sample_seconds": 10,   # eigener, feiner Takt für die Energie-Messung
     "manual_override": False,
     "web_port": 5005,
+    "openmeteo_pr": 0.68,          # Performance Ratio der Open-Meteo-Steuerprognose
 }
 
 
@@ -490,42 +491,57 @@ def _solar_socmax_for_day(day: str):
     return max(vals) if vals else None
 
 
+# PR alter Tage (vor der PR-Kalibrierung lief Open-Meteo mit 0,85).
+_OLD_OM_PR = 0.85
+
+
+def _finalize_om_pr(e: dict):
+    """Vorschlags-PR (Open-Meteo, Steuerquelle) = genutzte PR · real/Prognose."""
+    om = e.get("om_forecast")
+    actual = e.get("actual")
+    pr_used = e.get("pr", _OLD_OM_PR)
+    if om and actual is not None:
+        e["om_deviation_pct"] = round((actual - om) / om * 100, 1)
+        e["om_suggested_pr"] = round(pr_used * actual / om, 2)
+
+
 def _finalize_solar_days(days: dict, now: datetime):
-    """Schließt alle vergangenen Tage ab: trägt den realen Ertrag, die Abweichung
-    und den Faktor ein, mit dem die Prognose exakt getroffen hätte. Markiert Tage,
-    an denen der Akku voll war (PV evtl. gedeckelt → Ertrag unter Potenzial)."""
+    """Schließt vergangene Tage ab: realer Ertrag, Abweichung und Vorschlagswerte
+    für beide Quellen. Markiert Tage mit vollem Akku (PV evtl. gedeckelt)."""
     today = now.date().isoformat()
     for day, e in days.items():
         if day < today and e.get("actual") is None:
             actual = _solar_actual_for_day(day)
             e["actual"] = actual
+            # forecast.solar (nur Vergleich)
             raw = e.get("forecast_raw") or 0.0
             corr = e.get("forecast_corr") or 0.0
             e["deviation_pct"] = round((actual - corr) / corr * 100, 1) if corr else None
-            # Faktor, der die Roh-Prognose exakt auf den realen Ertrag gebracht hätte
             e["suggested_factor"] = round(actual / raw, 2) if raw else None
-            # Zweitquelle Open-Meteo (falls vorhanden): Abweichung gegen real
-            om = e.get("om_forecast")
-            e["om_deviation_pct"] = round((actual - om) / om * 100, 1) if om else None
+            # Open-Meteo (Steuerquelle): Abweichung + Vorschlags-PR
+            _finalize_om_pr(e)
             smax = _solar_socmax_for_day(day)
             e["soc_max"] = round(smax, 1) if smax is not None else None
             e["curtailed"] = bool(smax is not None and smax >= _SOC_FULL_THRESHOLD)
-        elif day < today and "curtailed" not in e:
-            # Nachrüstung für Tage, die vor dem Curtailment-Feature finalisiert wurden.
-            smax = _solar_socmax_for_day(day)
-            if smax is not None:
-                e["soc_max"] = round(smax, 1)
-                e["curtailed"] = bool(smax >= _SOC_FULL_THRESHOLD)
+        elif day < today:
+            # Nachrüstung für Tage, die vor neuen Features finalisiert wurden.
+            if "curtailed" not in e:
+                smax = _solar_socmax_for_day(day)
+                if smax is not None:
+                    e["soc_max"] = round(smax, 1)
+                    e["curtailed"] = bool(smax >= _SOC_FULL_THRESHOLD)
+            if e.get("om_suggested_pr") is None:
+                _finalize_om_pr(e)
 
 
-def record_solar_forecast(raw: float, corr: float, factor: float,
-                          now: datetime | None = None, om_kwh: float | None = None):
-    """Friert die Tages-Prognose EINMAL pro Tag ein (erste gültige Messung, also
-    quasi die Tagesvorhersage) und finalisiert dabei vergangene Tage. Wird im
-    Regeltakt aufgerufen; überschreibt einen bereits gesetzten Tag nicht.
-    om_kwh = optionale Zweitprognose (Open-Meteo) für den Parallelvergleich."""
-    if not raw or raw <= 0:
-        return
+def record_solar_forecast(om_kwh: float | None, pr: float,
+                          now: datetime | None = None,
+                          fs_raw: float | None = None, fs_corr: float | None = None,
+                          fs_factor: float | None = None):
+    """Friert die Tages-Prognose EINMAL pro Tag ein und finalisiert vergangene Tage.
+    Primärquelle = Open-Meteo (om_kwh mit Performance Ratio pr, steuert die Anlage);
+    forecast.solar (fs_*) läuft nur als Vergleich mit. Überschreibt einen bereits
+    eingefrorenen Tag nicht, trägt aber eine anfangs fehlende Quelle einmal nach."""
     now = now or datetime.now()
     today = now.date().isoformat()
     data = _load_solar_log()
@@ -533,13 +549,25 @@ def record_solar_forecast(raw: float, corr: float, factor: float,
     _finalize_solar_days(days, now)
     om = round(om_kwh, 2) if om_kwh and om_kwh > 0 else None
     if today not in days:
-        days[today] = {"forecast_raw": round(raw, 2), "forecast_corr": round(corr, 2),
-                       "factor": round(factor, 2), "actual": None,
-                       "deviation_pct": None, "suggested_factor": None,
-                       "om_forecast": om, "om_deviation_pct": None}
-    elif om is not None and days[today].get("om_forecast") is None:
-        # Open-Meteo war beim Einfrieren evtl. noch nicht da -> einmal nachtragen
-        days[today]["om_forecast"] = om
+        if om is None and not fs_raw:
+            return                      # noch keine einzige Quelle -> nicht einfrieren
+        days[today] = {
+            "om_forecast": om, "pr": round(pr, 3),
+            "om_deviation_pct": None, "om_suggested_pr": None,
+            "forecast_raw": round(fs_raw, 2) if fs_raw else None,
+            "forecast_corr": round(fs_corr, 2) if fs_corr else None,
+            "factor": round(fs_factor, 2) if fs_factor else None,
+            "actual": None, "deviation_pct": None, "suggested_factor": None,
+        }
+    else:
+        e = days[today]
+        if om is not None and e.get("om_forecast") is None:
+            e["om_forecast"] = om
+            e["pr"] = round(pr, 3)
+        if fs_raw and e.get("forecast_raw") is None:
+            e["forecast_raw"] = round(fs_raw, 2)
+            e["forecast_corr"] = round(fs_corr, 2) if fs_corr else None
+            e["factor"] = round(fs_factor, 2) if fs_factor else None
     with _lock, open(SOLAR_LOG_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
@@ -563,13 +591,13 @@ def solar_log(now: datetime | None = None) -> dict:
             e["actual"] = _solar_actual_for_day(day)
             e["provisional"] = True
         rows.append(e)
-    # Empfehlung: Median der Vorschlagsfaktoren der letzten 14 fertigen Tage.
+    # Empfehlung: Median der Vorschlags-PR (Open-Meteo) der letzten 14 fertigen Tage.
     # Tage mit vollem Akku (PV evtl. gedeckelt) fließen NICHT ein – ihr Ertrag liegt
     # unter dem Potenzial und würde die Empfehlung verzerren.
     recent = [days[d] for d in sorted(days.keys(), reverse=True)
-              if d < today and days[d].get("suggested_factor")][:14]
+              if d < today and days[d].get("om_suggested_pr")][:14]
     curtailed_days = sum(1 for e in recent if e.get("curtailed"))
-    finals = [e["suggested_factor"] for e in recent if not e.get("curtailed")]
+    finals = [e["om_suggested_pr"] for e in recent if not e.get("curtailed")]
     suggestion = None
     if finals:
         s = sorted(finals)

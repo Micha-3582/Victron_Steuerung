@@ -22,7 +22,8 @@ import os
 
 import store
 import updater
-from datasources import PvForecast, PvForecastOpenMeteo, fetch_tibber_prices
+from datasources import (OPENMETEO_PR, PvForecast, PvForecastOpenMeteo,
+                         fetch_tibber_prices)
 from logic import ESS_CHARGE, ESS_IDLE, Params, decide
 from logic import _parse_iso as logic_parse_iso
 from victron import Cerbo
@@ -61,11 +62,13 @@ class Controller:
         return self._pv
 
     def _om_source(self, cfg):
-        """Zweit-Prognose Open-Meteo (nur fürs Parallel-Logging)."""
-        key = (cfg["pv_latitude"], cfg["pv_longitude"], str(cfg["pv_planes"]))
+        """Primärquelle Open-Meteo für die Regelung. Performance Ratio aus der
+        Config (Standard 0,68), wird bei Änderung neu aufgebaut."""
+        pr = float(cfg.get("openmeteo_pr", OPENMETEO_PR))
+        key = (cfg["pv_latitude"], cfg["pv_longitude"], str(cfg["pv_planes"]), pr)
         if self._om is None or self._om_key != key:
             self._om = PvForecastOpenMeteo(cfg["pv_latitude"], cfg["pv_longitude"],
-                                           cfg["pv_planes"])
+                                           cfg["pv_planes"], pr=pr)
             self._om_key = key
         return self._om
 
@@ -85,38 +88,46 @@ class Controller:
             log.warning("System-Werte nicht lesbar: %s", e)
         prices = fetch_tibber_prices(cfg["tibber_token"])
         pv_note = None
+        # Primärquelle für die Regelung: Open-Meteo (bringt die Performance Ratio
+        # schon mit -> kein zusätzlicher Korrekturfaktor in decide()).
         try:
-            solar_today, solar_tom = self._pv_source(cfg).get()
+            solar_today, solar_tom = self._om_source(cfg).get()
         except Exception as e:                               # noqa: BLE001
             solar_today = solar_tom = 0.0
-            pv_note = f"PV-Prognose nicht verfügbar ({e}) - rechne mit 0 kWh"
+            pv_note = f"PV-Prognose (Open-Meteo) nicht verfügbar ({e}) - rechne mit 0 kWh"
             log.warning(pv_note)
+        # forecast.solar nur noch als Vergleich fürs Logbuch (steuert nichts).
+        try:
+            fs_today, _fs_tom = self._pv_source(cfg).get()
+        except Exception as e:                               # noqa: BLE001
+            fs_today = 0.0
+            log.warning("forecast.solar (Vergleich) nicht verfügbar: %s", e)
 
         now = datetime.now()
         ev = store.active_ev(now)
         forced = bool(cfg.get("manual_override")) or ev is not None
         reason = "Manueller Ladetermin" if ev else "MANUELL"
 
+        # Open-Meteo bringt die Performance Ratio schon mit -> in decide() KEINEN
+        # weiteren Korrekturfaktor anwenden (sonst doppelte Skalierung).
+        params = Params.from_config(cfg)
+        params.pv_korrektur_faktor = 1.0
         state = store.load_state()
         d = decide(soc=soc, price_entries=prices, solar_today_raw=solar_today,
                    solar_tom_raw=solar_tom, state=state, now=now,
                    manual_override=forced, force_reason=reason,
-                   params=Params.from_config(cfg))
+                   params=params)
         store.save_state(state)
         store.log_charge_state(d.ess_mode == ESS_CHARGE, d.strategy, now)
-        # Solar-Logbuch: Tages-Prognose (roh + korrigiert) einfrieren und
-        # vergangene Tage mit dem realen Ertrag abschließen. Zusätzlich – rein
-        # zum Vergleich – die Zweitprognose von Open-Meteo mitloggen (kein Einfluss
-        # auf die Steuerung).
-        if pv_note is None and solar_today > 0:
-            om_today = None
-            try:
-                om_today, _ = self._om_source(cfg).get()
-            except Exception as e:                           # noqa: BLE001
-                log.warning("Open-Meteo-Prognose nicht verfügbar: %s", e)
-            store.record_solar_forecast(raw=solar_today, corr=d.solar_today_korr,
-                                        factor=Params.from_config(cfg).pv_korrektur_faktor,
-                                        now=now, om_kwh=om_today)
+        # Solar-Logbuch: Open-Meteo (Steuerquelle) einfrieren, forecast.solar als
+        # Vergleich mitloggen, vergangene Tage mit dem realen Ertrag abschließen.
+        if solar_today > 0 or fs_today > 0:
+            fs_factor = Params.from_config(cfg).pv_korrektur_faktor
+            fs_corr = round(fs_today * fs_factor, 2) if fs_today else None
+            store.record_solar_forecast(
+                om_kwh=solar_today, pr=float(cfg.get("openmeteo_pr", OPENMETEO_PR)),
+                now=now, fs_raw=(fs_today or None), fs_corr=fs_corr,
+                fs_factor=fs_factor)
 
         dry = bool(cfg.get("dry_run", True))
         wrote = False
@@ -264,7 +275,7 @@ def solar_log_page():
 def api_solar_log():
     cfg = store.load_config()
     data = store.solar_log()
-    data["current_factor"] = Params.from_config(cfg).pv_korrektur_faktor
+    data["current_pr"] = float(cfg.get("openmeteo_pr", OPENMETEO_PR))
     return jsonify(data)
 
 
@@ -440,7 +451,7 @@ def api_config():
     allowed = ["cerbo_host", "cerbo_port", "tibber_token", "pv_latitude",
                "pv_longitude", "pv_planes", "dry_run", "poll_seconds",
                "energy_sample_seconds", "manual_override", "web_port",
-               "chart_energy_hourly", "chart_flow_hourly"] + list(Params().__dict__.keys())
+               "chart_energy_hourly", "chart_flow_hourly", "openmeteo_pr"] + list(Params().__dict__.keys())
     for key in allowed:
         if key in body:
             cfg[key] = body[key]

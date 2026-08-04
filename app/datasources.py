@@ -51,9 +51,11 @@ TIBBER_QUERY_HOURLY = """
 """
 FORECAST_BASE = "https://api.forecast.solar/estimate"
 OPENMETEO_BASE = "https://api.open-meteo.com/v1/forecast"
-# Performance Ratio: GTI (Einstrahlung auf die Modulebene) → AC-Ertrag.
-# Deckt Wechselrichter-, Leitungs- und Temperaturverluste ab (~0,85 typisch).
-OPENMETEO_PR = 0.85
+# Performance Ratio: GTI (Einstrahlung auf die Modulebene) → realer AC-Ertrag.
+# Kalibriert aus dem Parallelvergleich (real/Open-Meteo ≈ 0,68). Über die
+# Einstellungen anpassbar. Deckt Wechselrichter-/Leitungs-/Temperaturverluste,
+# Verschattung und reale Anlagenperformance ab.
+OPENMETEO_PR = 0.68
 
 
 def _post(token, query, timeout):
