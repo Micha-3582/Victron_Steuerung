@@ -21,6 +21,7 @@ ENERGY_PATH = os.path.join(_DIR, "energy.json")
 CHARGE_LOG_PATH = os.path.join(_DIR, "charge_log.json")
 HISTORY_PATH = os.path.join(_DIR, "history.json")
 SOLAR_LOG_PATH = os.path.join(_DIR, "solar_log.json")
+WATCHDOG_PATH = os.path.join(_DIR, "battery_watchdog.json")
 
 _lock = threading.Lock()
 
@@ -628,3 +629,70 @@ def active_ev(now: datetime | None = None):
         if s <= now < e:
             return i
     return None
+
+
+# --- Batterie-Watchdog ------------------------------------------------------
+# Erkennt den Multiplus-Ladealgorithmus-Haenger vom 01.09.2026 (siehe Projekt-
+# Notiz): Batterie laedt/entlaedt praktisch nicht (|Strom| < 0.5 A), obwohl
+# gleichzeitig ein nennenswerter Netzfluss da ist (>150 W) - normalerweise
+# wuerde die Batterie mithelfen. Reine Erkennung + Protokollierung, KEIN
+# automatischer Eingriff (ein manueller ESS-Mode-Befehl blieb beim echten
+# Vorfall wirkungslos, nur ein physischer Reset half).
+def _load_watchdog() -> dict:
+    if os.path.exists(WATCHDOG_PATH):
+        with open(WATCHDOG_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    return {"active": False, "since": None, "notified": False,
+            "last_detail": None, "events": []}
+
+
+def battery_watchdog_update(is_frozen: bool, now: datetime, detail: dict,
+                            threshold_min: float = 15.0) -> dict:
+    """Fuehrt die Zustandsverfolgung fort und persistiert sie. Gibt zurueck,
+    ob der Aufrufer gerade jetzt warnen ('just_warned') bzw. Entwarnung geben
+    soll ('just_resolved', mit Episoden-Details oder None)."""
+    data = _load_watchdog()
+    result = {"just_warned": False, "just_resolved": None}
+    if is_frozen:
+        if not data.get("active"):
+            data["active"] = True
+            data["since"] = now.isoformat(timespec="seconds")
+            data["notified"] = False
+        data["last_detail"] = detail
+        since = datetime.fromisoformat(data["since"])
+        duration_min = (now - since).total_seconds() / 60.0
+        if not data.get("notified") and duration_min >= threshold_min:
+            data["notified"] = True
+            result["just_warned"] = True
+        result["duration_min"] = round(duration_min, 1)
+    else:
+        if data.get("active"):
+            since = datetime.fromisoformat(data["since"])
+            duration_min = (now - since).total_seconds() / 60.0
+            if data.get("notified"):
+                event = {"start": data["since"], "end": now.isoformat(timespec="seconds"),
+                         "duration_min": round(duration_min, 1), "detail": data.get("last_detail")}
+                events = [event] + data.get("events", [])
+                data["events"] = events[:50]
+                result["just_resolved"] = event
+        data["active"] = False
+        data["since"] = None
+        data["notified"] = False
+        data["last_detail"] = None
+    with _lock, open(WATCHDOG_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    return result
+
+
+def battery_watchdog_state() -> dict:
+    """Fuer die UI/API: aktueller Zustand + juengste abgeschlossene Episoden."""
+    data = _load_watchdog()
+    status = {"active": bool(data.get("active")), "since": data.get("since"),
+              "detail": data.get("last_detail")}
+    if status["active"] and status["since"]:
+        try:
+            since = datetime.fromisoformat(status["since"])
+            status["duration_min"] = round((datetime.now() - since).total_seconds() / 60.0, 1)
+        except ValueError:
+            status["duration_min"] = None
+    return {"status": status, "events": data.get("events", [])[:20]}

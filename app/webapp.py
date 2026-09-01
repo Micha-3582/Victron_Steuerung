@@ -218,6 +218,36 @@ class Controller:
                 sleep_s += interval
             self._stop.wait(sleep_s)
 
+    def _check_battery_watchdog(self, system: dict, now: datetime):
+        """Erkennt den Bulk/Absorption-Haenger vom 01.09.2026: Batterie bewegt
+        sich trotz nennenswertem Netzfluss nicht. Nur Erkennung + Log-Warnung,
+        kein automatischer Eingriff (siehe Projekt-Notiz - ein Modbus-Befehl
+        half beim echten Vorfall nachweislich nicht, nur ein physischer Reset)."""
+        try:
+            grid_w = system["grid"]["total"]
+            batt_a = system["battery"]["current"]
+            soc = system["battery"]["soc"]
+        except (KeyError, TypeError):
+            return
+        is_frozen = abs(grid_w) > 150 and abs(batt_a) < 0.5
+        detail = {"grid_w": round(grid_w, 1), "battery_a": round(batt_a, 2), "soc": soc}
+        try:
+            wd = store.battery_watchdog_update(is_frozen, now, detail)
+        except Exception as e:                               # noqa: BLE001
+            log.warning("Batterie-Watchdog: %s", e)
+            return
+        if wd["just_warned"]:
+            log.warning(
+                "Batterie-Watchdog: Batterie reagiert seit >=15 Min nicht (Netz %.0f W, "
+                "Batteriestrom %.2f A, SOC %.1f%%) - moeglicher Ladealgorithmus-Haenger "
+                "am Multiplus, siehe Projekt-Notiz (Vorfall 01.09.2026)",
+                grid_w, batt_a, soc,
+            )
+        if wd["just_resolved"]:
+            ev = wd["just_resolved"]
+            log.info("Batterie-Watchdog: wieder normal nach %.1f Min (seit %s)",
+                     ev["duration_min"], ev["start"])
+
     def run_energy(self):
         """Eigener, feiner Takt nur für die Energie-Messung. Tastet die
         Momentanleistung häufig ab (Standard 10 s) und integriert sie zu kWh -
@@ -229,7 +259,9 @@ class Controller:
                 if store.is_configured(cfg):
                     cerbo = Cerbo(cfg["cerbo_host"], cfg.get("cerbo_port", 502))
                     system = cerbo.read_system()
-                    store.log_energy_sample(system, datetime.now())
+                    now = datetime.now()
+                    store.log_energy_sample(system, now)
+                    self._check_battery_watchdog(system, now)
             except Exception as e:                       # noqa: BLE001
                 log.warning("Energie-Sampler: %s", e)
             try:
@@ -392,6 +424,7 @@ def api_status():
         "energy_min_day": store.energy_min_day(),
         "last_tick": ctrl.last_tick,
         "last_error": ctrl.last_error,
+        "battery_watchdog": store.battery_watchdog_state(),
         "now": datetime.now().isoformat(timespec="seconds"),
     })
 

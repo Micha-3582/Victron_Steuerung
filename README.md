@@ -96,9 +96,11 @@ Restkapazität begrenzt (abzüglich einer PV-Reserve für die Mittagssonne).
 
 ### PV-Berücksichtigung
 
-Die Prognose wird mit einem **Korrekturfaktor** (Erfahrungswert real vs. Prognose,
-Standard 0,68) gedämpft und je nach Tageszeit anteilig auf die verbleibende
-Erzeugung umgerechnet. Viel Sonne ⇒ weniger geplante Netzladung.
+Die Prognose wird mit einem **Korrekturfaktor** (Erfahrungswert real vs. Prognose)
+skaliert und je nach Tageszeit anteilig auf die verbleibende Erzeugung umgerechnet.
+Viel Sonne ⇒ weniger geplante Netzladung. Der passende Faktor lässt sich über das
+**Solarlogbuch** über einige Tage datenbasiert ermitteln (unter 1 dämpft die Prognose,
+über 1 hebt sie an).
 
 ---
 
@@ -116,8 +118,12 @@ Mobile-optimierte Oberfläche, die den kompletten Zustand zeigt und Eingriffe er
   Kosten (€) und dauergewichtetem Ø-Preis – korrekt auch bei Fenstern, die nicht auf dem
   15-Min-Raster beginnen.
 - **Energie-Charts**: Verlauf (Verbrauch/Solar als Balken + SOC-Band) und Energieflüsse
-  (7 Pfade wie in VRM, symmetrisch um 0), 15-Min-Buckets, 35 Tage Historie mit
-  Tages-Navigation.
+  (7 Pfade wie in VRM, symmetrisch um 0), 35 Tage Historie mit Tages-Navigation. Auflösung
+  je Chart umschaltbar (**15-Min** oder **stündlich wie VRM**). Darunter Tages-Bilanz-
+  Kacheln (Zum/Aus dem Netz, Gesamtverbrauch, Solar), die mit dem gewählten Tag mitlaufen.
+- **Solarlogbuch**: hält die Tagesprognose gegen den realen Ertrag, zeigt Abweichung und
+  den Korrekturfaktor, der den Tag exakt getroffen hätte – inklusive gerollter Empfehlung,
+  um den Faktor datenbasiert einzustellen.
 - **Einrichtungsassistent** beim ersten Start (Cerbo-IP, Tibber-Token, Standort,
   Solarflächen) mit Verbindungstest für Cerbo und Tibber.
 - **Admin-Bereich**: alle Anlagen- und Strategie-Parameter frei konfigurierbar, mit
