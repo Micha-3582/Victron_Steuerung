@@ -311,6 +311,16 @@ def api_solar_log():
     return jsonify(data)
 
 
+@app.route("/watchdog")
+def watchdog_page():
+    return render_template("watchdog.html")
+
+
+@app.route("/api/watchdog")
+def api_watchdog():
+    return jsonify(store.battery_watchdog_state())
+
+
 def _next15(iso):
     return (datetime.fromisoformat(iso) + timedelta(minutes=15)).isoformat(timespec="minutes")
 
