@@ -165,6 +165,9 @@
     <nav>
       <a href="/">Dashboard</a>
       <a href="/admin">Einstellungen</a>
+      <form action="/logout" method="post" style="display:inline;margin:0">
+        <button type="submit" class="ghost" style="padding:7px 12px;font-size:14px;font-weight:400;border-radius:8px">Abmelden</button>
+      </form>
     </nav>
   </header>
   <main>{% block content %}{% endblock %}</main>

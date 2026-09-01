@@ -317,6 +317,20 @@
 </div>
 
 <div class="card">
+  <h2><svg class="h2i" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Konto &amp; Zugang</h2>
+  <div class="grid2">
+    <div><label>Aktuelles Passwort</label><input id="pw-current" type="password" autocomplete="current-password"></div>
+    <div></div>
+    <div><label>Neues Passwort</label><input id="pw-new" type="password" autocomplete="new-password"></div>
+    <div><label>Neues Passwort wiederholen</label><input id="pw-new2" type="password" autocomplete="new-password"></div>
+  </div>
+  <div style="margin-top:12px">
+    <button id="btn-pw">Passwort ändern</button>
+    <span id="pw-msg" class="muted" style="margin-left:12px"></span>
+  </div>
+</div>
+
+<div class="card">
   <button id="btn-save">Speichern</button>
   <span id="saved" class="muted" style="margin-left:12px"></span>
 </div>
@@ -466,6 +480,28 @@ document.getElementById('btn-update').addEventListener('click', async () => {
       st.innerHTML = '<span style="color:var(--vexp)">Update fehlgeschlagen.</span>';
     }
   } catch (e) { st.textContent = 'Fehler beim Update.'; }
+});
+
+document.getElementById('btn-pw').addEventListener('click', async () => {
+  const msg = document.getElementById('pw-msg');
+  const body = {
+    current: document.getElementById('pw-current').value,
+    new: document.getElementById('pw-new').value,
+    new2: document.getElementById('pw-new2').value,
+  };
+  if (!body.new || body.new.length < 8) { msg.textContent = 'Neues Passwort: mind. 8 Zeichen.'; return; }
+  msg.textContent = 'Ändere …';
+  try {
+    const r = await fetch('/api/password', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const d = await r.json();
+    if (r.ok) {
+      msg.textContent = 'Geändert ✓';
+      ['pw-current','pw-new','pw-new2'].forEach(id => document.getElementById(id).value = '');
+    } else {
+      msg.textContent = d.error || 'Fehler';
+    }
+  } catch (e) { msg.textContent = 'Fehler beim Ändern.'; }
+  setTimeout(() => msg.textContent = '', 4000);
 });
 
 init();

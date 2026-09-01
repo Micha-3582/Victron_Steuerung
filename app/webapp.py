@@ -15,13 +15,16 @@ import logging
 import threading
 import time
 from datetime import datetime, timedelta
+from functools import wraps
 
-from flask import Flask, jsonify, redirect, render_template, request
+from flask import (Flask, g, jsonify, redirect, render_template, request,
+                   session, url_for)
 
 import os
 
 import store
 import updater
+from auth import UserError, UserStore, new_secret_key
 from datasources import (OPENMETEO_PR, PvForecast, PvForecastOpenMeteo,
                          fetch_tibber_prices)
 from logic import ESS_CHARGE, ESS_IDLE, Params, decide
@@ -33,7 +36,127 @@ logging.basicConfig(level=logging.INFO,
                     datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger("webapp")
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_USERNAME = "Micha3582"
+
 app = Flask(__name__)
+app.secret_key = new_secret_key(os.path.join(BASE_DIR, "secret.key"))
+app.permanent_session_lifetime = timedelta(days=365)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=bool(store.load_config().get("cookie_secure", False)),
+)
+
+users = UserStore(os.path.join(BASE_DIR, "users.json"))
+_initial_pw = users.ensure_initial_user(DEFAULT_USERNAME, BASE_DIR)
+if _initial_pw:
+    print("=" * 68, flush=True)
+    print("  ERSTSTART: Zugang wurde angelegt", flush=True)
+    print(f"    Benutzer: {DEFAULT_USERNAME}", flush=True)
+    print(f"    Passwort: {_initial_pw}", flush=True)
+    print("  Steht auch in initial-password.txt", flush=True)
+    print("  Bitte nach der ersten Anmeldung unter Einstellungen aendern!", flush=True)
+    print("=" * 68, flush=True)
+
+PUBLIC_ENDPOINTS = {"login", "static"}
+
+_attempts: dict[str, list] = {}
+_attempts_lock = threading.Lock()
+
+
+def client_ip() -> str:
+    # Hinter Cloudflare Tunnel steht die echte IP im Header.
+    return (
+        request.headers.get("CF-Connecting-IP")
+        or (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        or request.remote_addr
+        or "?"
+    )
+
+
+def too_many_attempts(ip: str) -> bool:
+    """Einfache Bremse gegen Passwort-Raten (max. 10 Versuche / 5 Min pro IP)."""
+    window, limit = 300, 10
+    now = time.time()
+    with _attempts_lock:
+        tries = [t for t in _attempts.get(ip, []) if now - t < window]
+        _attempts[ip] = tries
+        return len(tries) >= limit
+
+
+def note_failed_attempt(ip: str) -> None:
+    with _attempts_lock:
+        _attempts.setdefault(ip, []).append(time.time())
+
+
+@app.before_request
+def _require_login():
+    if request.endpoint in PUBLIC_ENDPOINTS:
+        return None
+    username = session.get("user")
+    user = users.get(username) if username else None
+    if not user:
+        session.clear()
+        if request.path.startswith("/api/"):
+            return jsonify(error="Nicht angemeldet.", login_required=True), 401
+        return redirect(url_for("login", next=request.path))
+    g.user = username
+    g.user_display = user["username"]
+    return None
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "GET":
+        if session.get("user") and users.get(session["user"]):
+            return redirect(url_for("index"))
+        return render_template("login.html", error=None)
+
+    ip = client_ip()
+    if too_many_attempts(ip):
+        return render_template(
+            "login.html", error="Zu viele Fehlversuche. Bitte einige Minuten warten."
+        ), 429
+
+    username = (request.form.get("username") or "").strip()
+    password = request.form.get("password") or ""
+    remember = bool(request.form.get("remember"))
+
+    user = users.verify(username, password)
+    if not user:
+        note_failed_attempt(ip)
+        return render_template("login.html", error="Benutzername oder Passwort falsch."), 401
+
+    session.clear()
+    session["user"] = username.strip().lower()
+    session.permanent = remember
+    target = request.args.get("next") or url_for("index")
+    if not target.startswith("/"):
+        target = url_for("index")
+    return redirect(target)
+
+
+@app.post("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+@app.post("/api/password")
+def api_change_own_password():
+    """Eigenes Passwort aendern."""
+    body = request.json or {}
+    if not users.verify(g.user, body.get("current") or ""):
+        return jsonify(error="Aktuelles Passwort ist falsch."), 400
+    if body.get("new") != body.get("new2"):
+        return jsonify(error="Die Passwörter stimmen nicht überein."), 400
+    try:
+        users.update_password(g.user, body.get("new") or "")
+    except UserError as exc:
+        return jsonify(error=str(exc)), 400
+    return jsonify(ok=True)
+
 
 ESS_TEXT = {ESS_CHARGE: "Netzladen", ESS_IDLE: "Normal / Warten"}
 

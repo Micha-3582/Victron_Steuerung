@@ -11,6 +11,10 @@ app/history.json
 app/solar_log.json
 app/pv_cache.json
 app/pv_cache_openmeteo.json
+app/battery_watchdog.json
+app/users.json
+app/secret.key
+app/initial-password.txt
 app/.venv/
 app/__pycache__/
 **/__pycache__/
