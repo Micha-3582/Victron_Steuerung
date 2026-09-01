@@ -59,7 +59,7 @@ if _initial_pw:
     print("  Bitte nach der ersten Anmeldung unter Einstellungen aendern!", flush=True)
     print("=" * 68, flush=True)
 
-PUBLIC_ENDPOINTS = {"login", "static"}
+PUBLIC_ENDPOINTS = {"login", "static", "service_worker"}
 
 _attempts: dict[str, list] = {}
 _attempts_lock = threading.Lock()
@@ -141,6 +141,15 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+@app.get("/sw.js")
+def service_worker():
+    """Service Worker MUSS vom Wurzelpfad kommen, sonst gilt er nur fuer /static/."""
+    resp = app.send_static_file("sw.js")
+    resp.headers["Service-Worker-Allowed"] = "/"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
 
 
 @app.post("/api/password")
