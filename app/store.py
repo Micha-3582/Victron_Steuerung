@@ -700,7 +700,11 @@ def pv_forecast_range(forecast_kwh: float | None, now: datetime | None = None) -
               and not days[d].get("curtailed")][:14]
     if len(recent) < _AUTO_PR_MIN_DAYS:
         return None
-    devs = sorted(e["om_deviation_pct"] for e in recent)
+    # Einzelne Tage kappen: bei sehr kleiner Prognose (kleiner Nenner) kann die
+    # Prozent-Abweichung durch einen einzigen Wetterdaten-Ausreisser auf absurde
+    # Werte schnellen (z.B. +700%, wenn die Prognose an dem Tag nur 3 kWh war).
+    # Ohne Kappung reisst so ein einzelner Tag die ganze Spanne unrealistisch weit.
+    devs = sorted(max(-60.0, min(60.0, e["om_deviation_pct"])) for e in recent)
     n = len(devs)
 
     def _pct(p):
