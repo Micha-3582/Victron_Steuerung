@@ -52,6 +52,16 @@
   </div>
 </div>
 
+<div class="card full" style="margin-bottom:14px">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <h2 style="margin:0">Wochenrückblick</h2>
+    <button id="w-prev" class="ghost daytab" title="Vorherige Woche">◀</button>
+    <span id="w-range" style="min-width:150px;text-align:center;font-size:14px">Diese Woche</span>
+    <button id="w-next" class="ghost daytab" title="Nächste Woche">▶</button>
+  </div>
+  <div class="table-scroll"><table id="week-table"></table></div>
+</div>
+
 <div class="dash">
   <div class="card">
     <h2>Tibber</h2>
@@ -599,28 +609,132 @@ async function load() {
 function w(v) { return (v > 0 ? '+' : '') + Math.round(v) + ' W'; }
 function kv(rows) { return rows.map(r => `<div class="kv"><span class="k">${r[0]}</span><span class="v">${r[1]}</span></div>`).join(''); }
 function phases(o) { return kv([['L1', Math.round(o.l1) + ' W'], ['L2', Math.round(o.l2) + ' W'], ['L3', Math.round(o.l3) + ' W']]); }
-function renderSystem(sys) {
+let tileDragActive = false;   // waehrend Verschieben: renderSystem() pausieren
+function getTileOrder() {
+  try { return JSON.parse(localStorage.getItem('sysTileOrder')) || []; } catch (e) { return []; }
+}
+function saveTileOrder(order) {
+  try { localStorage.setItem('sysTileOrder', JSON.stringify(order)); } catch (e) { /* egal, nur Komfort */ }
+}
+
+function renderSystem(sys, batteryUsableKwh) {
+  if (tileDragActive) return;   // Nutzer verschiebt gerade eine Kachel - nicht dazwischenfunken
   const g = $('sysgrid');
   if (!sys) { g.innerHTML = '<div class="muted">Keine Verbindung zum Cerbo.</div>'; return; }
   const b = sys.battery;
   const stateTxt = { 0: 'Ruhe', 1: 'Laden', 2: 'Entladen' }[b.state] || '–';
   const gridColor = sys.grid.total > 5 ? 'var(--vexp)' : (sys.grid.total < -5 ? 'var(--cheap)' : 'var(--fg)');
-  const tile = (title, big, sub, color) => `
-    <div class="systile">
+  const tiles = [];
+  const tile = (id, title, big, sub, color) => tiles.push({ id, html: `
+    <div class="systile" data-tile-id="${id}">
       <div class="systile-t">${title}</div>
       <div class="systile-v" ${color ? `style="color:${color}"` : ''}>${big}</div>
       <div class="systile-s">${sub || ''}</div>
-    </div>`;
+    </div>` });
   const sun = '<span class="sun-ico">☀︎</span>';
-  g.innerHTML =
-    tile('⚡ Netz', w(sys.grid.total), phases(sys.grid), gridColor) +
-    tile('🏠 Gesamtverbrauch', Math.round(sys.loads.total) + ' W', phases(sys.loads), '#e0761f') +
-    tile(sun + ' PV-Wechselrichter', Math.round(sys.pv_inverter.total) + ' W', phases(sys.pv_inverter), 'var(--timer)') +
-    tile(sun + ' PV-Ladegerät (MPPT)', Math.round(sys.pv_charger) + ' W', kv([['DC-Strom', sys.pv_charger_current.toFixed(1) + ' A']]), 'var(--timer)') +
-    tile(sun + ' Gesamt Solar', Math.round(sys.solar_total) + ' W', kv([['Quelle', 'PV-WR + MPPT']]), 'var(--timer)') +
-    tile('🔋 Batterie', b.soc + ' %',
-         kv([['Status', stateTxt], ['Leistung', w(b.power)], ['Spannung', b.voltage.toFixed(2) + ' V'], ['Strom', b.current.toFixed(1) + ' A']]),
-         b.state === 1 ? 'var(--cheap)' : (b.state === 2 ? 'var(--exp)' : 'var(--fg)'));
+  tile('grid', '⚡ Netz', w(sys.grid.total), phases(sys.grid), gridColor);
+  tile('loads', '🏠 Gesamtverbrauch', Math.round(sys.loads.total) + ' W', phases(sys.loads), '#e0761f');
+  tile('pv_inverter', sun + ' PV-Wechselrichter', Math.round(sys.pv_inverter.total) + ' W', phases(sys.pv_inverter), 'var(--timer)');
+  tile('mppt', sun + ' PV-Ladegerät (MPPT)', Math.round(sys.pv_charger) + ' W', kv([['DC-Strom', sys.pv_charger_current.toFixed(1) + ' A']]), 'var(--timer)');
+  tile('solar_total', sun + ' Gesamt Solar', Math.round(sys.solar_total) + ' W', kv([['Quelle', 'PV-WR + MPPT']]), 'var(--timer)');
+  const kwhInfo = batteryUsableKwh > 0
+    ? [['Geladen', (batteryUsableKwh * b.soc / 100).toFixed(1) + ' kWh']] : [];
+  tile('battery', '🔋 Batterie', b.soc + ' %',
+       kv([...kwhInfo, ['Status', stateTxt], ['Leistung', w(b.power)], ['Spannung', b.voltage.toFixed(2) + ' V'], ['Strom', b.current.toFixed(1) + ' A']]),
+       b.state === 1 ? 'var(--cheap)' : (b.state === 2 ? 'var(--exp)' : 'var(--fg)'));
+
+  // Gespeicherte Reihenfolge anwenden: bekannte IDs zuerst in gemerkter
+  // Reihenfolge, neue/unbekannte IDs haengen sich hinten an.
+  const order = getTileOrder();
+  tiles.sort((a, b2) => {
+    const ia = order.indexOf(a.id), ib = order.indexOf(b2.id);
+    if (ia === -1 && ib === -1) return 0;
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+  g.innerHTML = tiles.map(t => t.html).join('');
+}
+
+/* Kacheln per langem Klick/Tippen verschiebbar machen (Pointer Events decken
+   Maus, Touch und Stift einheitlich ab). Ablauf: pointerdown startet einen
+   500-ms-Timer; bewegt sich der Zeiger vorher zu weit, wird abgebrochen
+   (normales Scrollen/Tippen). Feuert der Timer, startet der Verschiebe-Modus:
+   Kachel folgt dem Zeiger optisch nicht direkt, stattdessen wird sie beim
+   Ueberfahren einer anderen Kachel sofort an deren Stelle einsortiert - der
+   Rest rutscht auf (Standard-Drag-Reorder-Verhalten, keine Bibliothek noetig). */
+function initTileDragging() {
+  const g = $('sysgrid');
+  if (!g) return;
+  const LONG_PRESS_MS = 500, MOVE_TOLERANCE = 10;
+  let pending = null;   // {el, x, y, timer}
+  let dragEl = null;
+
+  function cancelPending() {
+    if (pending) {
+      clearTimeout(pending.timer);
+      pending = null;
+      if (!dragEl) tileDragActive = false;   // Geste beendet, ohne dass ein Drag scharf wurde
+    }
+  }
+
+  function armDrag(el) {
+    dragEl = el;
+    g.classList.add('reordering');
+    el.classList.add('dragging');
+    if (navigator.vibrate) navigator.vibrate(15);   // kurzes haptisches Feedback, falls verfuegbar
+  }
+
+  function moveOver(clientX, clientY) {
+    if (!dragEl) return;
+    const els = [...g.querySelectorAll('.systile')];
+    const target = els.find(el => {
+      if (el === dragEl) return false;
+      const r = el.getBoundingClientRect();
+      return clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
+    });
+    if (!target) return;
+    const dragIdx = els.indexOf(dragEl), targetIdx = els.indexOf(target);
+    if (dragIdx < targetIdx) g.insertBefore(dragEl, target.nextSibling);
+    else g.insertBefore(dragEl, target);
+  }
+
+  function endDrag() {
+    if (!dragEl) return;
+    dragEl.classList.remove('dragging');
+    g.classList.remove('reordering');
+    const order = [...g.querySelectorAll('.systile')].map(el => el.dataset.tileId);
+    saveTileOrder(order);
+    dragEl = null;
+    tileDragActive = false;
+  }
+
+  g.addEventListener('pointerdown', (e) => {
+    const el = e.target.closest('.systile');
+    if (!el) return;
+    cancelPending();
+    // Ab hier schon blockieren, nicht erst wenn der Long-Press-Timer feuert:
+    // sonst koennte ein Live-Update genau waehrend der Wartezeit das Grid neu
+    // aufbauen und die spaeter gegriffene Kachel-Referenz wird zum Geist-Duplikat.
+    tileDragActive = true;
+    pending = {
+      el, x: e.clientX, y: e.clientY,
+      timer: setTimeout(() => { pending = null; armDrag(el); }, LONG_PRESS_MS),
+    };
+  });
+  g.addEventListener('pointermove', (e) => {
+    if (pending) {
+      if (Math.abs(e.clientX - pending.x) > MOVE_TOLERANCE || Math.abs(e.clientY - pending.y) > MOVE_TOLERANCE) {
+        cancelPending();
+      }
+      return;
+    }
+    if (dragEl) { e.preventDefault(); moveOver(e.clientX, e.clientY); }
+  }, { passive: false });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev =>
+    g.addEventListener(ev, () => { cancelPending(); endDrag(); }));
+  // Waehrend des laengeren Drucks nicht gleichzeitig die Seite scrollen lassen.
+  g.addEventListener('contextmenu', (e) => { if (pending || dragEl) e.preventDefault(); });
 }
 
 /* Tages-Bilanz-Kacheln (Netz/Solar) – an den im Energieverlauf gewählten Tag
@@ -644,11 +758,19 @@ function renderEnergyTiles(history, day) {
       <div class="systile-v" ${color ? `style="color:${color}"` : ''}>${big}</div>
       <div class="systile-s">${sub || ''}</div>
     </div>`;
+  // Autarkiegrad: Anteil des Verbrauchs, der aus eigener PV/Batterie gedeckt
+  // wurde statt aus dem Netz bezogen zu werden. 100 % = komplett autark.
+  const autarky = verbrauch > 0 ? Math.max(0, Math.min(100, (1 - imp / verbrauch) * 100)) : null;
+  const autarkyColor = autarky === null ? 'var(--muted)'
+    : autarky >= 70 ? 'var(--cheap)' : autarky >= 40 ? 'var(--accent)' : 'var(--exp)';
   el.innerHTML =
     tile('← Zum Netz', exp.toFixed(1) + ' kWh', kv([[tag + ' eingespeist', '']]), 'var(--cheap)') +
     tile('→ Aus dem Netz', imp.toFixed(1) + ' kWh', kv([[tag + ' bezogen', '']]), 'var(--vexp)') +
     tile('🏠 Gesamtverbrauch', verbrauch.toFixed(1) + ' kWh', kv([[tag + ' verbraucht', '']]), '#e0761f') +
-    tile(sun + ' Solar', solar.toFixed(1) + ' kWh', kv([[tag + ' erzeugt', '']]), 'var(--timer)');
+    tile(sun + ' Solar', solar.toFixed(1) + ' kWh', kv([[tag + ' erzeugt', '']]), 'var(--timer)') +
+    tile('🧭 Autarkiegrad',
+      autarky === null ? '–' : Math.round(autarky) + ' %',
+      kv([[tag + (autarky === null ? ' noch keine Daten' : ' aus eigener Erzeugung'), '']]), autarkyColor);
 }
 
 /* Schnelle Live-Aktualisierung (unabhängig vom 5-Min-Regelzyklus) */
@@ -656,7 +778,7 @@ async function loadLive() {
   try {
     const l = await (await fetch('/api/live')).json();
     if (!l.ok) return;
-    renderSystem(l.system);
+    renderSystem(l.system, l.battery_usable_kwh);
   } catch (e) { /* still */ }
 }
 
@@ -803,13 +925,61 @@ function renderOverview(items) {
   t.innerHTML = COLGROUP + head + rows + totalRow(items.map(i => ({ kwh: i.kwh, cost: i.cost })));
 }
 
+/* Wochenrückblick: 7-Tage-Bloecke, Solar/Verbrauch/Netz/Autarkie/Kosten,
+   blaetterbar (Rohdaten bleiben laenger vorrätig, als eine einzelne Woche
+   anzeigt - sonst waere die Statistik nach 7 Tagen einfach weg). */
+const WEEKDAY_NAMES = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+let weekOffset = 0;
+function renderWeek(data) {
+  const t = $('week-table');
+  $('w-prev').disabled = !data.can_go_older;
+  $('w-next').disabled = weekOffset === 0;
+  const first = data.days[0].day, last = data.days[data.days.length - 1].day;
+  $('w-range').textContent = weekOffset === 0 ? 'Diese Woche'
+    : first.slice(8, 10) + '.' + first.slice(5, 7) + '. – ' + last.slice(8, 10) + '.' + last.slice(5, 7) + '.';
+  if (!data || !data.days || !data.days.length) { t.innerHTML = ''; return; }
+  const head = `<tr class="thead"><td>Tag</td><td>Solar</td><td>Verbrauch</td>` +
+    `<td>Netzbezug</td><td>Autarkie</td><td>Kosten</td></tr>`;
+  const todayIso = todayStr();
+  const rows = data.days.map(d => {
+    const dt = new Date(d.day + 'T00:00:00');
+    const label = (d.day === todayIso ? 'Heute' : WEEKDAY_NAMES[dt.getDay()] + ' ' + d.day.slice(8, 10) + '.' + d.day.slice(5, 7) + '.');
+    return `<tr>
+      <td>${label}</td>
+      <td>${d.solar.toFixed(1)} kWh</td>
+      <td>${d.verbrauch.toFixed(1)} kWh</td>
+      <td>${d.import.toFixed(1)} kWh</td>
+      <td>${d.autarky != null ? Math.round(d.autarky) + ' %' : '–'}</td>
+      <td>${d.cost_eur.toFixed(2)} €</td>
+    </tr>`;
+  }).join('');
+  const tot = data.totals;
+  const totalRow = `<tr class="total">
+    <td>Summe</td>
+    <td>${tot.solar.toFixed(1)} kWh</td>
+    <td>${tot.verbrauch.toFixed(1)} kWh</td>
+    <td>${tot.import.toFixed(1)} kWh</td>
+    <td>${tot.autarky != null ? Math.round(tot.autarky) + ' %' : '–'}</td>
+    <td>${tot.cost_eur.toFixed(2)} €</td>
+  </tr>`;
+  t.innerHTML = head + rows + totalRow;
+}
+async function loadWeek() {
+  try { renderWeek(await (await fetch('/api/week?offset=' + weekOffset)).json()); } catch (e) {}
+}
+$('w-prev').addEventListener('click', () => { weekOffset++; loadWeek(); });
+$('w-next').addEventListener('click', () => { if (weekOffset > 0) { weekOffset--; loadWeek(); } });
+
 buildChart();
 buildEnergyChart();
 buildFlowChart();
 updateWidth();
+initTileDragging();
 load();
 loadLive();
+loadWeek();
 setInterval(load, 15000);      // Plan/Preise/Termine (langsamer)
 setInterval(loadLive, 2000);   // Live-Werte vom Cerbo (wie Victron: alle 2 s)
+setInterval(loadWeek, 300000); // Wochenrückblick (ändert sich langsam)
 </script>
 {% endblock %}
