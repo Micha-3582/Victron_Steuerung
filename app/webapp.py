@@ -318,6 +318,8 @@ class Controller:
                 "charge_power_w": Params.from_config(cfg).charge_power_w,
                 "pv_today": d.solar_today_korr,
                 "pv_tom": d.solar_tom_korr,
+                "pv_today_range": store.pv_forecast_range(d.solar_today_korr, now),
+                "pv_tom_range": store.pv_forecast_range(d.solar_tom_korr, now),
                 "dry_run": dry,
                 "wrote": wrote,
                 "ev_active": ev,

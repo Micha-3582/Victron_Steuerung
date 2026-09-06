@@ -589,7 +589,8 @@ async function load() {
     $('meta').innerHTML =
       `<div style="font-size:15px;font-weight:600;color:${ok ? 'var(--cheap)' : 'var(--exp)'}" title="${tip}">`
       + `${ok ? '✓' : '⚠'} ${balTxt} <span style="opacity:.55;font-weight:400;cursor:help">ⓘ</span></div>`
-      + `<div class="muted" style="margin-top:4px">Sonne heute ${s.pv_today} / morgen ${s.pv_tom} kWh · Stand ${d.last_tick || '–'}`
+      + `<div class="muted" style="margin-top:4px">Sonne heute ${pvRangeTxt(s.pv_today, s.pv_today_range)} / `
+      + `morgen ${pvRangeTxt(s.pv_tom, s.pv_tom_range)} kWh · Stand ${d.last_tick || '–'}`
       + (s.pv_note ? ` · ⚠ ${s.pv_note}` : '') + `</div>`;
     // planline wird tag-genau in applyDay() gesetzt
     if (!overrideBusy) $('override').checked = !!s.override;
@@ -606,6 +607,12 @@ async function load() {
   // damit sie nicht im 15-s-Takt gelöscht und neu aufgebaut werden (Flackern).
 }
 
+// Prognose als Spanne zeigen (wie Victron), sobald genug Logbuch-Tage fuer
+// eine ehrliche Unsicherheits-Bandbreite vorliegen - sonst die reine Zahl.
+function pvRangeTxt(point, range) {
+  if (range && range.low != null && range.high != null) return `${range.low}–${range.high}`;
+  return point;
+}
 function w(v) { return (v > 0 ? '+' : '') + Math.round(v) + ' W'; }
 function kv(rows) { return rows.map(r => `<div class="kv"><span class="k">${r[0]}</span><span class="v">${r[1]}</span></div>`).join(''); }
 function phases(o) { return kv([['L1', Math.round(o.l1) + ' W'], ['L2', Math.round(o.l2) + ' W'], ['L3', Math.round(o.l3) + ' W']]); }

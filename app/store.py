@@ -681,6 +681,39 @@ def solar_log(now: datetime | None = None) -> dict:
             "curtailed_days": curtailed_days}
 
 
+def pv_forecast_range(forecast_kwh: float | None, now: datetime | None = None) -> dict | None:
+    """Unsicherheits-Spanne (kWh) um eine Tagesprognose - aus der tatsaechlichen
+    Streuung der letzten Tage (25./75. Perzentil der Abweichung, Abregelungstage
+    ausgeschlossen), nicht geraten. So wie Victron eine Spanne statt einer
+    scheinbar exakten Einzelzahl zeigt: die Tag-zu-Tag-Wetterunsicherheit ist
+    real und laesst sich nicht wegrechnen, nur ehrlich mit anzeigen.
+    None, wenn keine Prognose oder zu wenig Datenbasis vorliegt."""
+    if not forecast_kwh or forecast_kwh <= 0:
+        return None
+    now = now or datetime.now()
+    data = _load_solar_log()
+    days = data["days"]
+    _finalize_solar_days(days, now)
+    today = now.date().isoformat()
+    recent = [days[d] for d in sorted(days.keys(), reverse=True)
+              if d < today and days[d].get("om_deviation_pct") is not None
+              and not days[d].get("curtailed")][:14]
+    if len(recent) < _AUTO_PR_MIN_DAYS:
+        return None
+    devs = sorted(e["om_deviation_pct"] for e in recent)
+    n = len(devs)
+
+    def _pct(p):
+        idx = min(n - 1, max(0, round(p / 100 * (n - 1))))
+        return devs[idx]
+
+    low = round(max(0.0, forecast_kwh * (1 + _pct(25) / 100)), 1)
+    high = round(max(0.0, forecast_kwh * (1 + _pct(75) / 100)), 1)
+    if high < low:
+        low, high = high, low
+    return {"low": low, "high": high}
+
+
 _AUTO_PR_MIN_DAYS = 5      # erst ab dieser Anzahl robuster Tage der Empfehlung vertrauen
 _AUTO_PR_MAX_STEP = 0.03   # pro Tag hoechstens so viel aendern - kein Sprung, sanft angleichen
 _AUTO_PR_BOUNDS = (0.3, 1.2)
