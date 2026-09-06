@@ -940,10 +940,14 @@ function renderWeek(data) {
   if (!data || !data.days || !data.days.length) { t.innerHTML = ''; return; }
   const head = `<tr class="thead"><td>Tag</td><td>Solar</td><td>Verbrauch</td>` +
     `<td>Netzbezug</td><td>Autarkie</td><td>Kosten</td></tr>`;
-  const todayIso = todayStr();
-  const rows = data.days.map(d => {
+  // "Heute" ist per Konstruktion immer der letzte Tag der aktuellen Woche
+  // (offset 0) - nicht ueber Datumsvergleich mit der (evtl. im Hintergrund
+  // veralteten) Browser-Uhr ermitteln, das lief nach Mitternacht sonst
+  // ein paar Minuten auf den Vortag fehlbeschriftet.
+  const rows = data.days.map((d, i) => {
     const dt = new Date(d.day + 'T00:00:00');
-    const label = (d.day === todayIso ? 'Heute' : WEEKDAY_NAMES[dt.getDay()] + ' ' + d.day.slice(8, 10) + '.' + d.day.slice(5, 7) + '.');
+    const isToday = weekOffset === 0 && i === data.days.length - 1;
+    const label = isToday ? 'Heute' : WEEKDAY_NAMES[dt.getDay()] + ' ' + d.day.slice(8, 10) + '.' + d.day.slice(5, 7) + '.';
     return `<tr>
       <td>${label}</td>
       <td>${d.solar.toFixed(1)} kWh</td>
