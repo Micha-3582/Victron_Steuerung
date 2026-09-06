@@ -681,12 +681,20 @@ def solar_log(now: datetime | None = None) -> dict:
             "curtailed_days": curtailed_days}
 
 
-def pv_forecast_range(forecast_kwh: float | None, now: datetime | None = None) -> dict | None:
+def pv_forecast_range(forecast_kwh: float | None, day_iso: str,
+                       now: datetime | None = None) -> dict | None:
     """Unsicherheits-Spanne (kWh) um eine Tagesprognose - aus der tatsaechlichen
     Streuung der letzten Tage (25./75. Perzentil der Abweichung, Abregelungstage
-    ausgeschlossen), nicht geraten. So wie Victron eine Spanne statt einer
-    scheinbar exakten Einzelzahl zeigt: die Tag-zu-Tag-Wetterunsicherheit ist
-    real und laesst sich nicht wegrechnen, nur ehrlich mit anzeigen.
+    ausgeschlossen), nicht geraten.
+
+    Fuer HEUTE wird der bereits real gemessene Ertrag (aus history.json) als
+    fester Sockel behandelt - der ist ja keine Prognose mehr, sondern schon
+    passiert. Die Unsicherheit wird nur noch auf den REST der Tagesprognose
+    angewendet. Ohne das bliebe "heute" den ganzen Tag ueber so unsicher wie
+    ein Tag im Voraus, obwohl z.B. nachmittags schon 80% der Sonne gemessen
+    wurde - genau das macht Victrons eigene Anzeige so viel enger als unsere.
+    Fuer "morgen" (noch nichts gemessen) bleibt es die volle Tagesspanne.
+
     None, wenn keine Prognose oder zu wenig Datenbasis vorliegt."""
     if not forecast_kwh or forecast_kwh <= 0:
         return None
@@ -711,8 +719,10 @@ def pv_forecast_range(forecast_kwh: float | None, now: datetime | None = None) -
         idx = min(n - 1, max(0, round(p / 100 * (n - 1))))
         return devs[idx]
 
-    low = round(max(0.0, forecast_kwh * (1 + _pct(25) / 100)), 1)
-    high = round(max(0.0, forecast_kwh * (1 + _pct(75) / 100)), 1)
+    actual_so_far = _solar_actual_for_day(day_iso) if day_iso == today else 0.0
+    remaining = max(0.0, forecast_kwh - actual_so_far)
+    low = round(actual_so_far + remaining * (1 + _pct(25) / 100), 1)
+    high = round(actual_so_far + remaining * (1 + _pct(75) / 100), 1)
     if high < low:
         low, high = high, low
     return {"low": low, "high": high}
