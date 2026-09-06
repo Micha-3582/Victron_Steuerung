@@ -681,6 +681,44 @@ def solar_log(now: datetime | None = None) -> dict:
             "curtailed_days": curtailed_days}
 
 
+_AUTO_PR_MIN_DAYS = 5      # erst ab dieser Anzahl robuster Tage der Empfehlung vertrauen
+_AUTO_PR_MAX_STEP = 0.03   # pro Tag hoechstens so viel aendern - kein Sprung, sanft angleichen
+_AUTO_PR_BOUNDS = (0.3, 1.2)
+
+
+def auto_adjust_pr(now: datetime | None = None) -> float | None:
+    """Passt die Performance Ratio (openmeteo_pr) einmal pro Tag leise Richtung
+    der Solarlogbuch-Empfehlung an - in kleinen Schritten, erst ab ausreichend
+    Datenbasis, Tage mit vollem Akku ausgeschlossen (siehe solar_log()). Laeuft
+    komplett automatisch im Hintergrund, wie bei Victron: nur der Standort wird
+    eingerichtet, die Kalibrierung passiert von selbst. Gibt den neuen Wert
+    zurueck, falls angepasst wurde, sonst None."""
+    now = now or datetime.now()
+    today = now.date().isoformat()
+    data = _load_solar_log()
+    if data.get("auto_pr_date") == today:
+        return None   # heute schon gelaufen
+    data["auto_pr_date"] = today
+    with _lock, open(SOLAR_LOG_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+    log = solar_log(now)
+    if log["days_used"] < _AUTO_PR_MIN_DAYS or log["suggestion"] is None:
+        return None
+
+    cfg = load_config()
+    current = float(cfg.get("openmeteo_pr", 0.68))
+    target = max(_AUTO_PR_BOUNDS[0], min(_AUTO_PR_BOUNDS[1], log["suggestion"]))
+    diff = target - current
+    if abs(diff) < 0.005:
+        return None
+    step = max(-_AUTO_PR_MAX_STEP, min(_AUTO_PR_MAX_STEP, diff))
+    new_pr = round(current + step, 3)
+    cfg["openmeteo_pr"] = new_pr
+    save_config(cfg)
+    return new_pr
+
+
 def energy_grid_charge_buckets(day: str) -> dict:
     """{slot_key 'YYYY-MM-DDTHH:MM': gemessene Netz→Batterie-kWh} eines Tages.
     Basis für die tatsächliche (statt geschätzte) Lademenge in den Ladevorgängen."""

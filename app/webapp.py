@@ -284,6 +284,13 @@ class Controller:
                 om_kwh=solar_today, pr=float(cfg.get("openmeteo_pr", OPENMETEO_PR)),
                 now=now, fs_raw=(fs_today or None), fs_corr=fs_corr,
                 fs_factor=fs_factor)
+            # Einmal pro Tag die PR leise Richtung Logbuch-Empfehlung nachziehen -
+            # ab hier laeuft die Kalibrierung von selbst, kein manuelles Nachtragen
+            # mehr noetig (siehe store.auto_adjust_pr).
+            new_pr = store.auto_adjust_pr(now)
+            if new_pr is not None:
+                cfg["openmeteo_pr"] = new_pr
+                log.info("PV-Prognose: Performance Ratio automatisch auf %.3f angepasst", new_pr)
 
         dry = bool(cfg.get("dry_run", True))
         wrote = False

@@ -193,9 +193,11 @@
       <ol>
         <li><b>Performance Ratio (Open-Meteo)</b> – <b>steuert die Anlage.</b> Open-Meteo liefert die
           Einstrahlung auf die Module; die PR rechnet sie in realen Ertrag um (Wechselrichter-,
-          Leitungs-, Temperaturverluste, Verschattung). <code>0.68</code> ist der aus dem Logbuch
-          kalibrierte Startwert. Höher = optimistischere Prognose = weniger geplante Netzladung.
-          Über die „Empfehlung PR" im Solarlogbuch datenbasiert nachjustieren.</li>
+          Leitungs-, Temperaturverluste, Verschattung). <code>0.68</code> ist der Startwert -
+          danach passt die App den Wert <b>automatisch, in kleinen Schritten pro Tag</b> an die
+          Empfehlung aus dem Solarlogbuch an, sobald genug Tage vorliegen. Kein manuelles
+          Nachtragen mehr nötig; von Hand geänderte Werte werden mit der Zeit wieder
+          Richtung Empfehlung gezogen.</li>
         <li><b>Morgen-Faktor</b> – wie viel der morgigen Vormittags-PV schon eingeplant wird.
           Saisonal: Winter niedrig (~0.05), Sommer höher (~0.25).</li>
         <li><b>Korrekturfaktor (forecast.solar)</b> – wirkt nur noch auf die <b>Vergleichsspalte</b>
@@ -204,7 +206,9 @@
     </div>
   </details>
   <div class="grid2">
-    <div><label>Performance Ratio – Open-Meteo (steuert)</label><input id="openmeteo_pr" type="number" step="0.01" min="0"></div>
+    <div><label>Performance Ratio – Open-Meteo (steuert, automatisch kalibriert)</label>
+      <input id="openmeteo_pr" type="number" step="0.01" min="0" readonly style="opacity:.7;cursor:default">
+      <small class="hint">Passt sich täglich selbst an, siehe Solarlogbuch.</small></div>
     <div><label>Morgen-Faktor (0–1)</label><input id="pv_tom_morning_factor" type="number" step="0.01"></div>
   </div>
   <div class="grid2" style="margin-top:10px">
