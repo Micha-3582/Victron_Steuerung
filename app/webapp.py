@@ -11,6 +11,7 @@ Start:
   pip install -r requirements.txt
   python webapp.py            # http://<host>:5005
 """
+import json
 import logging
 import threading
 import time
@@ -59,7 +60,14 @@ if _initial_pw:
     print("  Bitte nach der ersten Anmeldung unter Einstellungen aendern!", flush=True)
     print("=" * 68, flush=True)
 
-PUBLIC_ENDPOINTS = {"login", "static", "service_worker"}
+@app.context_processor
+def inject_app_display_name():
+    """Personalisierbarer Anzeigename (Kopfzeile/Titel) - fuer alle Templates
+    verfuegbar, auch die Login-Seite (kein DB-Zugriff, nur die lokale Datei)."""
+    return {"app_display_name": store.load_config().get("app_display_name") or "Victron Steuerung"}
+
+
+PUBLIC_ENDPOINTS = {"login", "static", "service_worker", "manifest"}
 
 _attempts: dict[str, list] = {}
 _attempts_lock = threading.Lock()
@@ -148,6 +156,22 @@ def service_worker():
     """Service Worker MUSS vom Wurzelpfad kommen, sonst gilt er nur fuer /static/."""
     resp = app.send_static_file("sw.js")
     resp.headers["Service-Worker-Allowed"] = "/"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+@app.get("/manifest.webmanifest")
+def manifest():
+    """PWA-Manifest mit personalisiertem Namen - nuetzlich, wenn mehrere
+    installierte Instanzen unterscheidbar sein sollen."""
+    path = os.path.join(app.static_folder, "manifest.webmanifest")
+    with open(path, encoding="utf-8") as f:
+        m = json.load(f)
+    name = store.load_config().get("app_display_name") or "Victron Steuerung"
+    m["name"] = name
+    m["short_name"] = name
+    resp = jsonify(m)
+    resp.headers["Content-Type"] = "application/manifest+json"
     resp.headers["Cache-Control"] = "no-cache"
     return resp
 
@@ -392,7 +416,9 @@ class Controller:
                     cerbo = Cerbo(cfg["cerbo_host"], cfg.get("cerbo_port", 502))
                     system = cerbo.read_system()
                     now = datetime.now()
-                    store.log_energy_sample(system, now)
+                    with self.lock:
+                        price_ct = self.status.get("now_price") if self.status.get("ok") else None
+                    store.log_energy_sample(system, now, price_ct=price_ct)
                     self._check_battery_watchdog(system, now)
             except Exception as e:                       # noqa: BLE001
                 log.warning("Energie-Sampler: %s", e)
@@ -583,6 +609,18 @@ def api_history():
     })
 
 
+@app.route("/api/week")
+def api_week():
+    """Wochenrueckblick: Solar/Verbrauch/Netz/Kosten einer 7-Tage-Woche.
+    ?offset=0 aktuelle Woche (Default), 1 die davor, usw. - so bleibt
+    Aelteres ueber die Pfeile erreichbar statt aus der Anzeige zu fallen."""
+    try:
+        offset = max(0, int(request.args.get("offset", 0)))
+    except (TypeError, ValueError):
+        offset = 0
+    return jsonify(store.energy_week_summary(offset_weeks=offset))
+
+
 _live_cache = {"ts": 0.0, "data": None}
 _live_lock = threading.Lock()
 
@@ -604,6 +642,8 @@ def api_live():
             data = {"ok": True, "soc": round(cerbo.read_soc(), 1),
                     "ess_mode": cerbo.read_ess_mode(),
                     "system": system,
+                    "battery_usable_kwh": cfg.get("battery_usable_kwh"),
+                    "grid_today": store.energy_grid_today(),
                     "now": datetime.now().isoformat(timespec="seconds")}
         except Exception as e:                           # noqa: BLE001
             data = {"ok": False, "reason": str(e)}
@@ -620,10 +660,11 @@ def api_config():
         defaults = Params().__dict__
         for k, v in defaults.items():
             cfg.setdefault(k, v)
+        cfg.setdefault("app_display_name", "Victron Steuerung")
         return jsonify(cfg)
     body = request.get_json(silent=True) or {}
     cfg = store.load_config()
-    allowed = ["cerbo_host", "cerbo_port", "tibber_token", "pv_latitude",
+    allowed = ["app_display_name", "cerbo_host", "cerbo_port", "tibber_token", "pv_latitude",
                "pv_longitude", "pv_planes", "dry_run", "poll_seconds",
                "energy_sample_seconds", "manual_override", "web_port",
                "chart_energy_hourly", "chart_flow_hourly", "openmeteo_pr"] + list(Params().__dict__.keys())
@@ -639,22 +680,15 @@ def api_config():
 
 @app.route("/api/grid-adjust", methods=["POST"])
 def api_grid_adjust():
-    """Setzt die heutigen Netzwerte manuell (z.B. aus der Victron-App).
-    Liest die aktuellen Gesamtzähler vom Cerbo und rechnet die Tages-Basis um."""
+    """Setzt die heutigen Netzwerte manuell (z.B. aus der Victron-App), falls
+    sie z.B. wegen einer Pause der App nicht vollstaendig erfasst wurden."""
     body = request.get_json(silent=True) or {}
     try:
         imp_today = float(body.get("import", 0))
         exp_today = float(body.get("export", 0))
     except (TypeError, ValueError):
         return jsonify({"error": "Ungültige Zahlen"}), 400
-    cfg = store.load_config()
-    try:
-        cerbo = Cerbo(cfg["cerbo_host"], cfg.get("cerbo_port", 502))
-        tot = cerbo.read_system().get("grid_energy_total") or {}
-    except Exception as e:                               # noqa: BLE001
-        return jsonify({"error": f"Cerbo nicht erreichbar: {e}"}), 502
-    result = store.set_grid_today(imp_today, exp_today,
-                                  tot.get("import", 0), tot.get("export", 0))
+    result = store.set_grid_today(imp_today, exp_today)
     with _live_lock:                                     # Live-Cache invalidieren
         _live_cache["ts"] = 0
     return jsonify({"ok": True, "grid_today": result})

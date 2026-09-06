@@ -168,10 +168,9 @@ def toggle_ev(eid, enabled):
     return None
 
 
-def grid_today(import_total, export_total, now: datetime | None = None):
-    """Tages-Netzwerte aus den kumulierten Zählern (kWh).
-    Merkt sich den Zählerstand um Mitternacht (persistent) und gibt die Differenz
-    seit heute 00:00 zurück - genau wie die Victron-App."""
+def get_grid_correction(now: datetime | None = None) -> dict:
+    """Manuelle Tages-Korrektur (kWh) fuer Netzbezug/-einspeisung, sofern
+    heute eine gesetzt wurde (siehe set_grid_today)."""
     now = now or datetime.now()
     today = now.date().isoformat()
     data = {}
@@ -181,29 +180,23 @@ def grid_today(import_total, export_total, now: datetime | None = None):
                 data = json.load(f)
         except (ValueError, OSError):
             data = {}
-    # Neuer Tag ODER Zählerrücksetzung (z.B. Cerbo-Neustart) -> Baseline neu setzen
-    reset = (data.get("stamp") != today
-             or import_total < data.get("import_base", 0)
-             or export_total < data.get("export_base", 0))
-    if reset:
-        data = {"stamp": today, "import_base": import_total, "export_base": export_total}
-        with _lock, open(ENERGY_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-    return {
-        "import": round(max(0.0, import_total - data["import_base"]), 2),
-        "export": round(max(0.0, export_total - data["export_base"]), 2),
-    }
+    if data.get("stamp") != today:
+        return {"import": 0.0, "export": 0.0}
+    return {"import": data.get("import_adj", 0.0), "export": data.get("export_adj", 0.0)}
 
 
-def set_grid_today(import_today, export_today, import_total, export_total, now=None):
-    """Setzt die Tages-Basis so, dass die heutigen Netzwerte den angegebenen
-    Werten entsprechen (z.B. aus der Victron-App übernommen). Danach zählt die
-    App vom Cerbo-Gesamtzähler korrekt weiter."""
+def set_grid_today(import_today, export_today, now=None):
+    """Speichert eine Korrektur, damit die heutigen Netzwerte (Import/Export)
+    den angegebenen Werten (z.B. aus der Victron-App) entsprechen. Die Korrektur
+    wird als Aufschlag auf die selbst gemessene Tagessumme (energy_grid_today,
+    aus den erfassten Leistungsfluessen) gespeichert - die Cerbo-Zaehlerregister
+    zaehlen auf manchen Anlagen unzuverlaessig und werden dafuer nicht genutzt."""
     now = now or datetime.now()
+    imp, exp = _raw_grid_sum(now)
     data = {
         "stamp": now.date().isoformat(),
-        "import_base": round(import_total - import_today, 3),
-        "export_base": round(export_total - export_today, 3),
+        "import_adj": round(import_today - imp, 3),
+        "export_adj": round(export_today - exp, 3),
     }
     with _lock, open(ENERGY_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
@@ -314,7 +307,7 @@ def _flows_from_system(system: dict) -> dict:
 
 def _new_bucket(soc: float) -> dict:
     b = {"verbrauch": 0.0, "solar": 0.0, "soc_min": soc, "soc_max": soc,
-         "soc_sum": 0.0, "soc_n": 0}
+         "soc_sum": 0.0, "soc_n": 0, "grid_cost_ct": 0.0}
     for k in _FLOW_KEYS:
         b[k] = 0.0
     return b
@@ -333,9 +326,11 @@ def _load_history() -> dict:
     return {"hours": {}, "last": None}
 
 
-def log_energy_sample(system: dict | None, now: datetime | None = None):
+def log_energy_sample(system: dict | None, now: datetime | None = None,
+                       price_ct: float | None = None):
     """Integriert Momentanleistung zu Stunden-kWh auf: Verbrauch, Solar, die 7
-    Energieflüsse (VRM-Stil) und SOC (Min/Ø/Max). Nur echte Messwerte.
+    Energieflüsse (VRM-Stil), SOC (Min/Ø/Max) und - falls price_ct übergeben -
+    die Netzbezugskosten (ct), fuer den Wochenrueckblick. Nur echte Messwerte.
     Wird bei jedem Regelzyklus aufgerufen."""
     if not system:
         return
@@ -372,6 +367,10 @@ def log_energy_sample(system: dict | None, now: datetime | None = None):
                                         last["bc"], last["bd"])
             for k in _FLOW_KEYS:
                 b[k] += (flow_last[k] + flow_now[k]) / 2.0 / 1000.0 * h
+            if price_ct is not None:
+                import_inc = ((flow_last["g_load"] + flow_now["g_load"]) / 2.0 / 1000.0 * h
+                              + (flow_last["g_batt"] + flow_now["g_batt"]) / 2.0 / 1000.0 * h)
+                b["grid_cost_ct"] = b.get("grid_cost_ct", 0.0) + import_inc * price_ct
 
     # SOC-Statistik (jedes Sample zählt)
     b["soc_min"] = min(b["soc_min"], soc)
@@ -408,9 +407,10 @@ def _row_from_bucket(label: str, b: dict | None) -> dict:
         }
         for k in _FLOW_KEYS:
             row[k] = round(b.get(k, 0.0), 3)
+        row["grid_cost_ct"] = round(b.get("grid_cost_ct", 0.0), 2)
     else:
         row = {"hour": label, "verbrauch": 0.0, "solar": 0.0,
-               "soc_avg": None, "soc_min": None, "soc_max": None}
+               "soc_avg": None, "soc_min": None, "soc_max": None, "grid_cost_ct": 0.0}
         for k in _FLOW_KEYS:
             row[k] = 0.0
     return row
@@ -431,6 +431,14 @@ def energy_history_for_day(day: str, now: datetime | None = None) -> list:
     while t <= end:
         out.append(_row_from_bucket(f"{t:%H:%M}", hours.get(_slot_key(t))))
         t += timedelta(minutes=15)
+    # Manuelle Netz-Korrektur (falls fuer diesen Tag gesetzt) in den ersten
+    # Slot einrechnen, damit sie in Kacheln und Chart tatsaechlich ankommt.
+    if day == now.date().isoformat() and out:
+        corr = get_grid_correction(now)
+        if corr["import"] or corr["export"]:
+            out[0] = dict(out[0])
+            out[0]["g_load"] = out[0].get("g_load", 0.0) + corr["import"]
+            out[0]["s_grid"] = out[0].get("s_grid", 0.0) + corr["export"]
     return out
 
 
@@ -450,15 +458,80 @@ def energy_min_day() -> str | None:
 def energy_grid_today(now: datetime | None = None) -> dict:
     """Tages-Netzbezug/-Einspeisung aus der integrierten Netzleistung (nicht aus
     den kumulierten Zählerregistern, die unzuverlässig zählen). Aus/Zum Netz =
-    Summe der heutigen Netz-Flüsse. Reset um Mitternacht ergibt sich automatisch."""
+    Summe der heutigen Netz-Flüsse plus manuelle Korrektur (siehe set_grid_today).
+    Reset um Mitternacht ergibt sich automatisch."""
     now = now or datetime.now()
+    imp, exp = _raw_grid_sum(now)
+    corr = get_grid_correction(now)
+    return {"import": round(imp + corr["import"], 2), "export": round(exp + corr["export"], 2)}
+
+
+def _raw_grid_sum(now: datetime) -> tuple:
+    """Reine Tagessumme der gemessenen Netz-Fluesse, ohne manuelle Korrektur."""
     today = now.strftime("%Y-%m-%d")
     imp = exp = 0.0
     for k, b in _load_history().get("hours", {}).items():
         if k[:10] == today:
             imp += b.get("g_load", 0.0) + b.get("g_batt", 0.0)   # Netz→Verbrauch/Batterie
             exp += b.get("s_grid", 0.0) + b.get("b_grid", 0.0)   # Solar/Batterie→Netz
-    return {"import": round(imp, 2), "export": round(exp, 2)}
+    return imp, exp
+
+
+def energy_week_summary(now: datetime | None = None, days: int = 7, offset_weeks: int = 0) -> dict:
+    """Tagesweise Bilanz (Solar/Verbrauch/Netz/Kosten) einer 7-Tage-Woche fuer
+    den Wochenrueckblick. offset_weeks=0 ist die aktuelle Woche (bis heute),
+    1 die davor usw. - so bleibt die Statistik blaetterbar, statt beim naechsten
+    Tag aus der Anzeige zu verschwinden (Rohdaten bleiben ohnehin
+    _HISTORY_KEEP_DAYS Tage erhalten). Kosten sind so genau wie der Preis, der
+    beim jeweiligen Sample gerade bekannt war (siehe log_energy_sample) - bei
+    Tagen vor Einfuehrung dieser Auswertung fehlen sie und stehen als 0."""
+    now = now or datetime.now()
+    hours = _load_history().get("hours", {})
+    end_day = now.date() - timedelta(days=days * offset_weeks)
+    day_keys = [(end_day - timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
+    per_day = {d: {"solar": 0.0, "verbrauch": 0.0, "import": 0.0, "export": 0.0, "cost_ct": 0.0}
+               for d in day_keys}
+    for k, b in hours.items():
+        d = k[:10]
+        if d not in per_day:
+            continue
+        row = per_day[d]
+        row["solar"] += b.get("solar", 0.0)
+        row["verbrauch"] += b.get("verbrauch", 0.0)
+        row["import"] += b.get("g_load", 0.0) + b.get("g_batt", 0.0)
+        row["export"] += b.get("s_grid", 0.0) + b.get("b_grid", 0.0)
+        row["cost_ct"] += b.get("grid_cost_ct", 0.0)
+    corr = get_grid_correction(now)
+    today_iso = now.date().isoformat()
+    if today_iso in per_day and (corr["import"] or corr["export"]):
+        per_day[today_iso]["import"] += corr["import"]
+        per_day[today_iso]["export"] += corr["export"]
+    days_out = []
+    totals = {"solar": 0.0, "verbrauch": 0.0, "import": 0.0, "export": 0.0, "cost_ct": 0.0}
+    for d in day_keys:
+        row = per_day[d]
+        autarky = (round(max(0.0, min(100.0, (1 - row["import"] / row["verbrauch"]) * 100)), 0)
+                   if row["verbrauch"] > 0 else None)
+        days_out.append({
+            "day": d,
+            "solar": round(row["solar"], 2), "verbrauch": round(row["verbrauch"], 2),
+            "import": round(row["import"], 2), "export": round(row["export"], 2),
+            "cost_eur": round(row["cost_ct"] / 100.0, 2), "autarky": autarky,
+        })
+        for key in totals:
+            totals[key] += row[key]
+    total_autarky = (round(max(0.0, min(100.0, (1 - totals["import"] / totals["verbrauch"]) * 100)), 0)
+                      if totals["verbrauch"] > 0 else None)
+    min_day = energy_min_day()
+    can_go_older = bool(min_day) and min_day < day_keys[0]
+    return {
+        "days": days_out,
+        "totals": {"solar": round(totals["solar"], 2), "verbrauch": round(totals["verbrauch"], 2),
+                   "import": round(totals["import"], 2), "export": round(totals["export"], 2),
+                   "cost_eur": round(totals["cost_ct"] / 100.0, 2), "autarky": total_autarky},
+        "offset_weeks": offset_weeks,
+        "can_go_older": can_go_older,
+    }
 
 
 # --- Solar-Logbuch (Prognose vs. reale Erzeugung) -------------------------

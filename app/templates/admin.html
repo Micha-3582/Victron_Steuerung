@@ -47,6 +47,8 @@
 
 <div class="card">
   <h2><svg class="h2i" viewBox="0 0 24 24"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>Betrieb</h2>
+  <label>Anzeigename</label>
+  <input id="app_display_name" placeholder="Victron Steuerung" style="margin-bottom:16px">
   <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px">
     <label class="switch" style="margin:0"><input type="checkbox" id="dry_run"><span class="slider"></span></label>
     <div><b>Dry-Run</b><div class="muted">An = nur beobachten, der Cerbo wird nicht geschaltet.
@@ -358,6 +360,7 @@ const PARAM_KEYS = ['battery_usable_kwh','daily_usage_kwh','charge_power_w','pv_
 
 async function init() {
   cfg = await (await fetch('/api/config')).json();
+  document.getElementById('app_display_name').value = cfg.app_display_name || '';
   document.getElementById('dry_run').checked = !!cfg.dry_run;
   document.getElementById('poll_seconds').value = cfg.poll_seconds;
   document.getElementById('energy_sample_seconds').value = cfg.energy_sample_seconds ?? 10;
@@ -396,6 +399,7 @@ function collectPlanes() {
 
 document.getElementById('btn-save').addEventListener('click', async () => {
   const body = {
+    app_display_name: document.getElementById('app_display_name').value.trim(),
     dry_run: document.getElementById('dry_run').checked,
     poll_seconds: parseInt(document.getElementById('poll_seconds').value) || 300,
     energy_sample_seconds: parseInt(document.getElementById('energy_sample_seconds').value) || 10,
@@ -412,6 +416,8 @@ document.getElementById('btn-save').addEventListener('click', async () => {
   PARAM_KEYS.forEach(k => { const v = numDE(document.getElementById(k).value); if (!isNaN(v)) body[k] = v; });
   await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify(body)});
+  const h1 = document.querySelector('header h1');
+  if (h1 && body.app_display_name) h1.textContent = body.app_display_name;
   const el = document.getElementById('saved'); el.textContent = 'Gespeichert ✓';
   setTimeout(() => el.textContent = '', 2500);
 });
@@ -420,9 +426,9 @@ document.getElementById('btn-save').addEventListener('click', async () => {
 (async () => {
   try {
     const l = await (await fetch('/api/live')).json();
-    if (l.ok && l.system && l.system.grid_today) {
-      document.getElementById('grid_import').value = l.system.grid_today.import;
-      document.getElementById('grid_export').value = l.system.grid_today.export;
+    if (l.ok && l.grid_today) {
+      document.getElementById('grid_import').value = l.grid_today.import;
+      document.getElementById('grid_export').value = l.grid_today.export;
     }
   } catch (e) {}
 })();
