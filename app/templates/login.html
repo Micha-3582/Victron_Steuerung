@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Anmelden · Victron Steuerung</title>
+  <title>Anmelden · {{ app_display_name }}</title>
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
   <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.ico') }}">
   <meta name="theme-color" content="#1c2027">
@@ -38,7 +38,7 @@
   <form class="card" method="post" autocomplete="on">
     <div class="brand">
       <span class="sun">🔆</span>
-      <h1>Victron Steuerung</h1>
+      <h1>{{ app_display_name }}</h1>
     </div>
 
     {% if error %}
