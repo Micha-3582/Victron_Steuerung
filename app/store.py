@@ -11,6 +11,7 @@ import uuid
 from dataclasses import asdict
 from datetime import datetime, timedelta
 
+from datasources import DEFAULT_BUCKET_FACTORS, PV_BUCKETS, bucket_sums
 from logic import PersistentState
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
@@ -561,6 +562,14 @@ def solar_measured_today(now: datetime | None = None) -> float:
     return _solar_actual_for_day(now.date().isoformat())
 
 
+def _bucket_actual_for_day(day: str) -> dict[str, float]:
+    """Realer Ertrag (kWh) eines Tages, aufgeteilt in Tageszeit-Buckets - fuer
+    die Bucket-Kalibrierung (siehe auto_adjust_bucket_factors)."""
+    hours = _load_history().get("hours", {})
+    hourly = {k: b.get("solar", 0.0) for k, b in hours.items() if k[:10] == day}
+    return bucket_sums(hourly)
+
+
 # Akku gilt als "voll" (MPPT drosselt evtl. → Ertrag gedeckelt) ab diesem SOC.
 _SOC_FULL_THRESHOLD = 99.0
 
@@ -587,6 +596,29 @@ def _finalize_om_pr(e: dict):
         e["om_suggested_pr"] = round(pr_used * actual / om, 2)
 
 
+def _finalize_bucket_ratios(e: dict, day: str):
+    """Tageszeit-Bucket-Abweichung eines abgeschlossenen Tages: wie stark weicht
+    JEDER Bucket vom Tages-DURCHSCHNITT ab (nicht vom Rohwert) - die globale
+    PR-Kalibrierung (auto_adjust_pr) faengt das Tages-Gesamtniveau schon ab,
+    hier geht es nur um die INNERTAG-Form (z.B. eine Flaeche, die nur morgens
+    beschattet ist). bucket_forecast wird einmalig beim ersten Tick des Tages
+    eingefroren (siehe record_solar_forecast), daher hier nur lesen."""
+    bf = e.get("bucket_forecast")
+    om = e.get("om_forecast")
+    dev_pct = e.get("om_deviation_pct")
+    if not bf or not om or dev_pct is None:
+        return
+    ba = _bucket_actual_for_day(day)
+    day_factor = 1 + dev_pct / 100          # Tages-Gesamtabweichung, zum Rausrechnen
+    ratios = {}
+    for name, forecast_kwh in bf.items():
+        actual_kwh = ba.get(name, 0.0)
+        if forecast_kwh and forecast_kwh >= 0.3 and day_factor > 0:
+            ratios[name] = round((actual_kwh / forecast_kwh) / day_factor, 3)
+    e["bucket_actual"] = ba
+    e["bucket_ratio_norm"] = ratios or None
+
+
 def _finalize_solar_days(days: dict, now: datetime):
     """Schließt vergangene Tage ab: realer Ertrag, Abweichung und Vorschlagswerte
     für beide Quellen. Markiert Tage mit vollem Akku (PV evtl. gedeckelt)."""
@@ -602,6 +634,7 @@ def _finalize_solar_days(days: dict, now: datetime):
             e["suggested_factor"] = round(actual / raw, 2) if raw else None
             # Open-Meteo (Steuerquelle): Abweichung + Vorschlags-PR
             _finalize_om_pr(e)
+            _finalize_bucket_ratios(e, day)
             smax = _solar_socmax_for_day(day)
             e["soc_max"] = round(smax, 1) if smax is not None else None
             e["curtailed"] = bool(smax is not None and smax >= _SOC_FULL_THRESHOLD)
@@ -614,16 +647,23 @@ def _finalize_solar_days(days: dict, now: datetime):
                     e["curtailed"] = bool(smax >= _SOC_FULL_THRESHOLD)
             if e.get("om_suggested_pr") is None:
                 _finalize_om_pr(e)
+            if e.get("bucket_ratio_norm") is None and e.get("bucket_forecast"):
+                _finalize_bucket_ratios(e, day)
 
 
 def record_solar_forecast(om_kwh: float | None, pr: float,
                           now: datetime | None = None,
                           fs_raw: float | None = None, fs_corr: float | None = None,
-                          fs_factor: float | None = None):
+                          fs_factor: float | None = None,
+                          hourly_today: dict | None = None):
     """Friert die Tages-Prognose EINMAL pro Tag ein und finalisiert vergangene Tage.
     Primärquelle = Open-Meteo (om_kwh mit Performance Ratio pr, steuert die Anlage);
     forecast.solar (fs_*) läuft nur als Vergleich mit. Überschreibt einen bereits
-    eingefrorenen Tag nicht, trägt aber eine anfangs fehlende Quelle einmal nach."""
+    eingefrorenen Tag nicht, trägt aber eine anfangs fehlende Quelle einmal nach.
+
+    hourly_today (optional): die Open-Meteo-Stundenkurve vom ERSTEN Tick des Tages -
+    wird als 'bucket_forecast' eingefroren (Tageszeit-Buckets, siehe datasources.
+    bucket_sums), Grundlage fuer auto_adjust_bucket_factors()."""
     now = now or datetime.now()
     today = now.date().isoformat()
     data = _load_solar_log()
@@ -640,6 +680,8 @@ def record_solar_forecast(om_kwh: float | None, pr: float,
             "forecast_corr": round(fs_corr, 2) if fs_corr else None,
             "factor": round(fs_factor, 2) if fs_factor else None,
             "actual": None, "deviation_pct": None, "suggested_factor": None,
+            "bucket_forecast": bucket_sums(hourly_today) if hourly_today else None,
+            "bucket_actual": None, "bucket_ratio_norm": None,
         }
     else:
         e = days[today]
@@ -650,6 +692,8 @@ def record_solar_forecast(om_kwh: float | None, pr: float,
             e["forecast_raw"] = round(fs_raw, 2)
             e["forecast_corr"] = round(fs_corr, 2) if fs_corr else None
             e["factor"] = round(fs_factor, 2) if fs_factor else None
+        if hourly_today and e.get("bucket_forecast") is None:
+            e["bucket_forecast"] = bucket_sums(hourly_today)
     with _lock, open(SOLAR_LOG_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
@@ -784,6 +828,75 @@ def auto_adjust_pr(now: datetime | None = None) -> float | None:
     cfg["openmeteo_pr"] = new_pr
     save_config(cfg)
     return new_pr
+
+
+_AUTO_BUCKET_MIN_DAYS = 5        # dieselbe Mindest-Datenbasis wie bei auto_adjust_pr
+_AUTO_BUCKET_MAX_STEP = 0.05     # etwas groesserer Schritt als PR - wirkt nur auf die
+                                 # relative Form, nicht das Gesamtniveau (siehe unten)
+_AUTO_BUCKET_BOUNDS = (0.5, 1.5)
+
+
+def bucket_log(now: datetime | None = None) -> dict:
+    """Analog zu solar_log(), aber je Tageszeit-Bucket: Median der normierten
+    Bucket-Abweichung (bucket_ratio_norm) der letzten 14 abgeschlossenen, nicht
+    gedeckelten Tage - Empfehlung fuer auto_adjust_bucket_factors()."""
+    now = now or datetime.now()
+    today = now.date().isoformat()
+    data = _load_solar_log()
+    days = data["days"]
+    _finalize_solar_days(days, now)
+    recent = [days[d] for d in sorted(days.keys(), reverse=True)
+              if d < today and not days[d].get("curtailed")
+              and days[d].get("bucket_ratio_norm")][:14]
+    suggestions, days_used = {}, {}
+    for name, _, _ in PV_BUCKETS:
+        vals = sorted(e["bucket_ratio_norm"][name] for e in recent
+                      if name in e["bucket_ratio_norm"])
+        n = len(vals)
+        days_used[name] = n
+        if n:
+            suggestions[name] = round(
+                (vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2), 3)
+    return {"suggestions": suggestions, "days_used": days_used}
+
+
+def auto_adjust_bucket_factors(now: datetime | None = None) -> dict | None:
+    """Passt die Tageszeit-Bucket-Faktoren (pv_bucket_factors) einmal pro Tag
+    leise Richtung der bucket_log()-Empfehlung an - gleiches Prinzip wie
+    auto_adjust_pr(), nur je Tageszeit-Bucket statt fuer den ganzen Tag. Laeuft
+    NACH auto_adjust_pr in der gleichen Tick-Runde (siehe webapp.tick()); beide
+    schreiben in dieselbe config.json, das ist unproblematisch, da sie
+    unterschiedliche Felder setzen. Gibt die geaenderten Faktoren zurueck, falls
+    angepasst wurde, sonst None."""
+    now = now or datetime.now()
+    today = now.date().isoformat()
+    data = _load_solar_log()
+    if data.get("auto_bucket_date") == today:
+        return None
+    data["auto_bucket_date"] = today
+    with _lock, open(SOLAR_LOG_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+    log = bucket_log(now)
+    cfg = load_config()
+    current = dict(DEFAULT_BUCKET_FACTORS)
+    current.update(cfg.get("pv_bucket_factors", {}))
+    changed = {}
+    for name, target in log["suggestions"].items():
+        if log["days_used"].get(name, 0) < _AUTO_BUCKET_MIN_DAYS:
+            continue
+        target = max(_AUTO_BUCKET_BOUNDS[0], min(_AUTO_BUCKET_BOUNDS[1], target))
+        diff = target - current[name]
+        if abs(diff) < 0.005:
+            continue
+        step = max(-_AUTO_BUCKET_MAX_STEP, min(_AUTO_BUCKET_MAX_STEP, diff))
+        current[name] = round(current[name] + step, 3)
+        changed[name] = current[name]
+    if not changed:
+        return None
+    cfg["pv_bucket_factors"] = current
+    save_config(cfg)
+    return current
 
 
 def energy_grid_charge_buckets(day: str) -> dict:

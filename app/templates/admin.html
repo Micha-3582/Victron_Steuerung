@@ -215,6 +215,13 @@
     <div><label>Korrekturfaktor – forecast.solar (nur Vergleich)</label><input id="pv_korrektur_faktor" type="number" step="0.01" min="0"></div>
     <div></div>
   </div>
+  <div style="margin-top:10px">
+    <label>Tageszeit-Feinkorrektur (automatisch gelernt, readonly)</label>
+    <div id="pv_bucket_factors" class="muted" style="margin-top:2px">–</div>
+    <small class="hint">Gleicht z.B. eine nur morgens verschattete Fläche aus, die ein
+      einzelner Tages-Faktor nicht abbilden kann – zieht sich zusätzlich zur PR aus dem
+      Solarlogbuch nach. 1,00 = keine Korrektur nötig.</small>
+  </div>
   <div style="margin-top:12px">
     <a href="/solar-log"><button type="button" class="ghost">☀︎ Solarlogbuch öffnen</button></a>
     <span class="muted" style="margin-left:8px">Prognose vs. realer Ertrag der letzten Tage – zum datenbasierten Einstellen der PR.</span>
@@ -371,6 +378,10 @@ async function init() {
   document.getElementById('chart_energy_hourly').checked = !!cfg.chart_energy_hourly;
   document.getElementById('chart_flow_hourly').checked = !!cfg.chart_flow_hourly;
   document.getElementById('openmeteo_pr').value = cfg.openmeteo_pr ?? 0.68;
+  const bf = cfg.pv_bucket_factors;
+  document.getElementById('pv_bucket_factors').textContent = bf
+    ? `Morgen ${bf.morgen ?? 1.0} · Mittag ${bf.mittag ?? 1.0} · Nachmittag ${bf.nachmittag ?? 1.0}`
+    : 'Noch keine Daten – braucht mehrere Logbuch-Tage.';
   document.getElementById('cerbo_host').value = cfg.cerbo_host || '';
   document.getElementById('cerbo_port').value = cfg.cerbo_port || 502;
   document.getElementById('tibber_token').value = cfg.tibber_token || '';

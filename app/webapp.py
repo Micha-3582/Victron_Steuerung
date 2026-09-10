@@ -273,9 +273,15 @@ class Controller:
         # UNTEN ans Solarlogbuch gemeldete Wert bleibt die reine, unkorrigierte
         # Tagesprognose (sonst wuerde sich die Kalibrierungsbasis selbst verfaelschen,
         # da record_solar_forecast() den Wert vom ERSTEN Tick des Tages einfriert).
+        # Zusaetzlich zur globalen Performance Ratio (die den ganzen Tag gleich
+        # behandelt) eine gelernte Tageszeit-Korrektur anwenden - faengt z.B. eine
+        # nur morgens verschattete Flaeche ab, die ein einzelner Tages-Faktor
+        # verschmieren wuerde (siehe store.auto_adjust_bucket_factors).
+        bucket_factors = cfg.get("pv_bucket_factors")
         solar_today_for_control = solar_today
         try:
-            om_remaining = self._om_source(cfg).get_remaining_today(now)
+            om_remaining = self._om_source(cfg).get_remaining_today(
+                now, bucket_factors=bucket_factors)
             solar_today_for_control = round(
                 store.solar_measured_today(now) + om_remaining, 2)
         except Exception as e:                               # noqa: BLE001
@@ -301,7 +307,8 @@ class Controller:
             store.record_solar_forecast(
                 om_kwh=solar_today, pr=float(cfg.get("openmeteo_pr", OPENMETEO_PR)),
                 now=now, fs_raw=(fs_today or None), fs_corr=fs_corr,
-                fs_factor=fs_factor)
+                fs_factor=fs_factor,
+                hourly_today=self._om_source(cfg).get_hourly_today())
             # Einmal pro Tag die PR leise Richtung Logbuch-Empfehlung nachziehen -
             # ab hier laeuft die Kalibrierung von selbst, kein manuelles Nachtragen
             # mehr noetig (siehe store.auto_adjust_pr).
@@ -309,6 +316,14 @@ class Controller:
             if new_pr is not None:
                 cfg["openmeteo_pr"] = new_pr
                 log.info("PV-Prognose: Performance Ratio automatisch auf %.3f angepasst", new_pr)
+            # Dieselbe taegliche Nachjustierung fuer die Tageszeit-Buckets (siehe
+            # store.auto_adjust_bucket_factors) - laeuft unabhaengig von der PR-
+            # Anpassung, beide schreiben nur unterschiedliche Config-Felder.
+            new_buckets = store.auto_adjust_bucket_factors(now)
+            if new_buckets is not None:
+                cfg["pv_bucket_factors"] = new_buckets
+                log.info("PV-Prognose: Tageszeit-Faktoren automatisch angepasst auf %s",
+                          new_buckets)
 
         dry = bool(cfg.get("dry_run", True))
         wrote = False
@@ -338,7 +353,8 @@ class Controller:
                 "pv_tom": d.solar_tom_korr,
                 "pv_today_range": store.pv_forecast_range(
                     d.solar_today_korr, now.date().isoformat(), now,
-                    remaining_forecast_kwh=self._om_source(cfg).get_remaining_today(now)),
+                    remaining_forecast_kwh=self._om_source(cfg).get_remaining_today(
+                        now, bucket_factors=bucket_factors)),
                 "pv_tom_range": store.pv_forecast_range(
                     d.solar_tom_korr, (now.date() + timedelta(days=1)).isoformat(), now),
                 "dry_run": dry,

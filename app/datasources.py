@@ -165,6 +165,48 @@ class PvForecast:
         return sum_t, sum_m
 
 
+# Tageszeit-Buckets für die feinere Kalibrierung (siehe store.auto_adjust_bucket_factors):
+# ein einzelner Performance-Ratio-Wert fuer den ganzen Tag verschmiert z.B. eine
+# Fläche, die nur morgens verschattet ist. Grenzen bewusst grob (3 Buckets) - fuer
+# eine einzelne Hausanlage mit ueberschaubarer Logbuch-Datenmenge reicht das, ein
+# feineres Raster (z.B. je Stunde) waere mit den paar Dutzend Tagen kaum stabil
+# schaetzbar. Randstunden (vor 6 / nach 20 Uhr) bleiben unkalibriert (Ertrag dort
+# ohnehin vernachlässigbar).
+PV_BUCKETS = (("morgen", 6, 10), ("mittag", 10, 15), ("nachmittag", 15, 20))
+DEFAULT_BUCKET_FACTORS = {name: 1.0 for name, _, _ in PV_BUCKETS}
+
+
+def bucket_for_hour(hour: int) -> str | None:
+    for name, start, end in PV_BUCKETS:
+        if start <= hour < end:
+            return name
+    return None
+
+
+def bucket_sums(hourly: dict) -> dict[str, float]:
+    """Fasst ein {'YYYY-MM-DDTHH:MM': kWh}-Dict zu Tageszeit-Buckets zusammen
+    (Stunde wird direkt aus dem Zeitstempel gelesen - die Open-Meteo-Zeiten sind
+    bereits in Europe/Berlin, siehe 'timezone'-Parameter beim Abruf)."""
+    sums: dict[str, float] = {name: 0.0 for name, _, _ in PV_BUCKETS}
+    for t, v in hourly.items():
+        b = bucket_for_hour(int(t[11:13]))
+        if b:
+            sums[b] += v
+    return {k: round(v, 3) for k, v in sums.items()}
+
+
+def apply_bucket_factors(hourly: dict, factors: dict | None) -> float:
+    """Summiert ein Stunden-Dict zu kWh, gewichtet jede Stunde mit dem Faktor
+    ihres Tageszeit-Buckets (Default 1.0, falls kein Faktor gelernt/übergeben)."""
+    factors = factors or {}
+    total = 0.0
+    for t, v in hourly.items():
+        b = bucket_for_hour(int(t[11:13]))
+        f = factors.get(b, 1.0) if b else 1.0
+        total += v * f
+    return round(total, 2)
+
+
 class PvForecastOpenMeteo:
     """Zweit-Prognose über Open-Meteo (kostenlos, kein Key). Liefert
     (today_kwh, tomorrow_kwh) roh (ohne Korrekturfaktor). Holt je Fläche die
@@ -257,22 +299,36 @@ class PvForecastOpenMeteo:
         self._save_disk()
         return self._cache[1], self._cache[2]
 
-    def get_remaining_today(self, now_dt=None):
+    def get_hourly_today(self) -> dict:
+        """Gibt die zuletzt abgerufene Stundenkurve fuer HEUTE zurueck (leer, wenn
+        noch kein Abruf gelaufen oder der Cache von einem anderen Tag ist) - fuer
+        die einmalige Sockel-Aufzeichnung in store.record_solar_forecast() und die
+        Tageszeit-Bucket-Kalibrierung (siehe store.auto_adjust_bucket_factors)."""
+        try:
+            self.get()
+        except Exception:                                      # noqa: BLE001
+            pass
+        if not self._cache or len(self._cache) < 5 or self._cache[3] != date.today().isoformat():
+            return {}
+        return dict(self._cache[4] or {})
+
+    def get_remaining_today(self, now_dt=None, bucket_factors: dict | None = None):
         """Nur noch der laut Stundenkurve zu erwartende REST-Ertrag von jetzt bis
         Tagesende - nicht 'Tagesprognose minus bisher gemessen'. Nach Sonnenuntergang
         liefert die Open-Meteo-Kurve dort ohnehin 0 (keine Einstrahlung mehr), die
         Prognose-Spanne muss also nicht extra am Tageslicht-Ende gekappt werden.
-        Fällt ohne (frischen) Stundencache auf 0 zurück, statt zu raten."""
+        Fällt ohne (frischen) Stundencache auf 0 zurück, statt zu raten.
+
+        bucket_factors (optional): gelernte Tageszeit-Korrektur (siehe PV_BUCKETS/
+        apply_bucket_factors) - wird zusaetzlich zur schon eingerechneten globalen
+        Performance Ratio auf jede Stunde angewandt, um z.B. eine nur morgens
+        verschattete Flaeche feiner zu treffen als ein einzelner Tages-Faktor."""
         now_dt = now_dt or datetime.now()
-        try:
-            self.get()      # sorgt fuer einen (ggf. gecachten) Abruf
-        except Exception:                                      # noqa: BLE001
-            pass
-        if not self._cache or len(self._cache) < 5:
+        hourly = self.get_hourly_today()
+        if not hourly:
             return 0.0
-        today = date.today().isoformat()
-        if self._cache[3] != today:
-            return 0.0
-        hourly = self._cache[4] or {}
         cur_hour = now_dt.strftime("%Y-%m-%dT%H:00")
-        return round(sum(v for t, v in hourly.items() if t >= cur_hour), 2)
+        remaining = {t: v for t, v in hourly.items() if t >= cur_hour}
+        if bucket_factors:
+            return apply_bucket_factors(remaining, bucket_factors)
+        return round(sum(remaining.values()), 2)
