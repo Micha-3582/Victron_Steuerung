@@ -319,7 +319,8 @@ class Controller:
                 "pv_today": d.solar_today_korr,
                 "pv_tom": d.solar_tom_korr,
                 "pv_today_range": store.pv_forecast_range(
-                    d.solar_today_korr, now.date().isoformat(), now),
+                    d.solar_today_korr, now.date().isoformat(), now,
+                    remaining_forecast_kwh=self._om_source(cfg).get_remaining_today(now)),
                 "pv_tom_range": store.pv_forecast_range(
                     d.solar_tom_korr, (now.date() + timedelta(days=1)).isoformat(), now),
                 "dry_run": dry,

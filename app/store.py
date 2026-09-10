@@ -682,18 +682,27 @@ def solar_log(now: datetime | None = None) -> dict:
 
 
 def pv_forecast_range(forecast_kwh: float | None, day_iso: str,
-                       now: datetime | None = None) -> dict | None:
+                       now: datetime | None = None,
+                       remaining_forecast_kwh: float | None = None) -> dict | None:
     """Unsicherheits-Spanne (kWh) um eine Tagesprognose - aus der tatsaechlichen
     Streuung der letzten Tage (25./75. Perzentil der Abweichung, Abregelungstage
     ausgeschlossen), nicht geraten.
 
     Fuer HEUTE wird der bereits real gemessene Ertrag (aus history.json) als
     fester Sockel behandelt - der ist ja keine Prognose mehr, sondern schon
-    passiert. Die Unsicherheit wird nur noch auf den REST der Tagesprognose
-    angewendet. Ohne das bliebe "heute" den ganzen Tag ueber so unsicher wie
-    ein Tag im Voraus, obwohl z.B. nachmittags schon 80% der Sonne gemessen
-    wurde - genau das macht Victrons eigene Anzeige so viel enger als unsere.
-    Fuer "morgen" (noch nichts gemessen) bleibt es die volle Tagesspanne.
+    passiert. Die Unsicherheit wird nur noch auf den REST des Tages angewendet.
+
+    Dieser Rest kommt, wenn vorhanden, aus remaining_forecast_kwh - dem laut
+    Stundenkurve (Open-Meteo GTI) noch zu erwartenden Ertrag von JETZT bis
+    Tagesende. Das ist wichtig: "Tagesprognose minus bisher gemessen" allein
+    wird nachts nicht automatisch klein, wenn die urspruengliche Tagesprognose
+    zu hoch war - die Spanne blieb dadurch bis Mitternacht unrealistisch breit,
+    obwohl laengst klar ist, dass nichts mehr dazukommt (0 Einstrahlung nachts).
+    Ohne remaining_forecast_kwh (z.B. alter Aufrufer, kein Stundencache) faellt
+    es auf die alte "Prognose minus gemessen"-Rechnung zurueck.
+
+    Fuer "morgen" (noch nichts gemessen, remaining_forecast_kwh irrelevant)
+    bleibt es die volle Tagesspanne.
 
     None, wenn keine Prognose oder zu wenig Datenbasis vorliegt."""
     if not forecast_kwh or forecast_kwh <= 0:
@@ -720,7 +729,10 @@ def pv_forecast_range(forecast_kwh: float | None, day_iso: str,
         return devs[idx]
 
     actual_so_far = _solar_actual_for_day(day_iso) if day_iso == today else 0.0
-    remaining = max(0.0, forecast_kwh - actual_so_far)
+    if day_iso == today and remaining_forecast_kwh is not None:
+        remaining = max(0.0, remaining_forecast_kwh)
+    else:
+        remaining = max(0.0, forecast_kwh - actual_so_far)
     low = round(actual_so_far + remaining * (1 + _pct(25) / 100), 1)
     high = round(actual_so_far + remaining * (1 + _pct(75) / 100), 1)
     if high < low:

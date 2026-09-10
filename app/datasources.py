@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import requests
 
@@ -186,7 +186,8 @@ class PvForecastOpenMeteo:
         try:
             with open(_OM_CACHE_FILE, encoding="utf-8") as f:
                 d = json.load(f)
-            self._cache = (d["ts"], d["today"], d["tomorrow"], d.get("day", ""))
+            self._cache = (d["ts"], d["today"], d["tomorrow"], d.get("day", ""),
+                           d.get("hourly_today", {}))
         except Exception:                                     # noqa: BLE001
             pass
 
@@ -194,7 +195,8 @@ class PvForecastOpenMeteo:
         try:
             with open(_OM_CACHE_FILE, "w", encoding="utf-8") as f:
                 json.dump({"ts": self._cache[0], "today": self._cache[1],
-                           "tomorrow": self._cache[2], "day": self._cache[3]}, f)
+                           "tomorrow": self._cache[2], "day": self._cache[3],
+                           "hourly_today": self._cache[4]}, f)
         except Exception:                                     # noqa: BLE001
             pass
 
@@ -213,6 +215,7 @@ class PvForecastOpenMeteo:
                 return self._cache[1], self._cache[2]
             raise RuntimeError("Open-Meteo im Backoff, noch kein Wert vorhanden")
         sum_t = sum_m = 0.0
+        hourly_today = {}
         try:
             for p in self.planes:
                 params = {
@@ -234,6 +237,7 @@ class PvForecastOpenMeteo:
                     kwh = (g / 1000.0) * kwp * self.pr      # 1 Stundenwert = g Wh/m²
                     if day == today:
                         sum_t += kwh
+                        hourly_today[t] = hourly_today.get(t, 0.0) + kwh
                     elif day == tomorrow:
                         sum_m += kwh
         except Exception as e:                                # noqa: BLE001
@@ -249,6 +253,26 @@ class PvForecastOpenMeteo:
             raise
         self._backoff = 0
         self._next_try = 0.0
-        self._cache = (now, round(sum_t, 2), round(sum_m, 2), today)
+        self._cache = (now, round(sum_t, 2), round(sum_m, 2), today, hourly_today)
         self._save_disk()
         return self._cache[1], self._cache[2]
+
+    def get_remaining_today(self, now_dt=None):
+        """Nur noch der laut Stundenkurve zu erwartende REST-Ertrag von jetzt bis
+        Tagesende - nicht 'Tagesprognose minus bisher gemessen'. Nach Sonnenuntergang
+        liefert die Open-Meteo-Kurve dort ohnehin 0 (keine Einstrahlung mehr), die
+        Prognose-Spanne muss also nicht extra am Tageslicht-Ende gekappt werden.
+        Fällt ohne (frischen) Stundencache auf 0 zurück, statt zu raten."""
+        now_dt = now_dt or datetime.now()
+        try:
+            self.get()      # sorgt fuer einen (ggf. gecachten) Abruf
+        except Exception:                                      # noqa: BLE001
+            pass
+        if not self._cache or len(self._cache) < 5:
+            return 0.0
+        today = date.today().isoformat()
+        if self._cache[3] != today:
+            return 0.0
+        hourly = self._cache[4] or {}
+        cur_hour = now_dt.strftime("%Y-%m-%dT%H:00")
+        return round(sum(v for t, v in hourly.items() if t >= cur_hour), 2)
