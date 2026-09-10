@@ -553,6 +553,14 @@ def _solar_actual_for_day(day: str) -> float:
     return round(sum(b.get("solar", 0.0) for k, b in hours.items() if k[:10] == day), 2)
 
 
+def solar_measured_today(now: datetime | None = None) -> float:
+    """Oeffentlicher Zugriff auf den bisher heute real gemessenen Solarertrag
+    (kWh) - fuer die Regelung (siehe webapp.tick(): loest die reine
+    Tagesprognose ab, sobald ein Teil des Tages schon gemessen ist)."""
+    now = now or datetime.now()
+    return _solar_actual_for_day(now.date().isoformat())
+
+
 # Akku gilt als "voll" (MPPT drosselt evtl. → Ertrag gedeckelt) ab diesem SOC.
 _SOC_FULL_THRESHOLD = 99.0
 

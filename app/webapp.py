@@ -264,12 +264,30 @@ class Controller:
         forced = bool(cfg.get("manual_override")) or ev is not None
         reason = "Manueller Ladetermin" if ev else "MANUELL"
 
+        # Fuer die REGELUNG den Tagesrest um das bereits real Gemessene ersetzen -
+        # sonst plant decide() nachmittags noch mit der ungenauen Morgen-Tagesprognose
+        # weiter, obwohl laengst klar ist, wie viel Sonne heute tatsaechlich kam.
+        # Gleiches Prinzip wie bei der Anzeige-Spanne (store.pv_forecast_range):
+        # gemessen + laut Stundenkurve noch zu erwartender Rest von JETZT bis
+        # Tagesende (nachts automatisch 0). Betrifft nur decide() - der WEITER
+        # UNTEN ans Solarlogbuch gemeldete Wert bleibt die reine, unkorrigierte
+        # Tagesprognose (sonst wuerde sich die Kalibrierungsbasis selbst verfaelschen,
+        # da record_solar_forecast() den Wert vom ERSTEN Tick des Tages einfriert).
+        solar_today_for_control = solar_today
+        try:
+            om_remaining = self._om_source(cfg).get_remaining_today(now)
+            solar_today_for_control = round(
+                store.solar_measured_today(now) + om_remaining, 2)
+        except Exception as e:                               # noqa: BLE001
+            log.warning("PV-Rest-Korrektur fuer die Regelung fehlgeschlagen (%s) - "
+                        "nutze die reine Tagesprognose", e)
+
         # Open-Meteo bringt die Performance Ratio schon mit -> in decide() KEINEN
         # weiteren Korrekturfaktor anwenden (sonst doppelte Skalierung).
         params = Params.from_config(cfg)
         params.pv_korrektur_faktor = 1.0
         state = store.load_state()
-        d = decide(soc=soc, price_entries=prices, solar_today_raw=solar_today,
+        d = decide(soc=soc, price_entries=prices, solar_today_raw=solar_today_for_control,
                    solar_tom_raw=solar_tom, state=state, now=now,
                    manual_override=forced, force_reason=reason,
                    params=params)
