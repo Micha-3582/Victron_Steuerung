@@ -3,6 +3,8 @@ Datenquellen: Tibber-Preise (API) und PV-Prognose (forecast.solar).
 Ersetzt tibberlink + pvforecast-Adapter. Mit Caching für forecast.solar
 (Rate-Limit ~12 Abrufe/Stunde/IP).
 """
+from __future__ import annotations
+
 import json
 import logging
 import os
