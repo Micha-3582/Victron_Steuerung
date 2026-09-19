@@ -456,14 +456,17 @@ function slotAtX(clientX) {
   const idx = Math.floor(((x - area.left) / (area.right - area.left)) * prices.length);
   return Math.max(0, Math.min(prices.length - 1, idx));
 }
-function startDrag(clientX) { const i = slotAtX(clientX); if (i === null) return false; drag = { from: i, to: i }; chart.update('none'); return true; }
+function startDrag(clientX) { const i = slotAtX(clientX); if (i === null) return false; drag = { from: i, to: i }; chart.update('none'); showSel(); return true; }
 function moveDrag(clientX) { if (!drag) return; const i = slotAtX(clientX); if (i === null || i === drag.to) return; drag.to = i; chart.update('none'); showSel(); }
 function showSel() {
   if (!drag) return;
   const a = Math.min(drag.from, drag.to), b = Math.max(drag.from, drag.to);
   if (!prices[a] || !prices[b]) return;
   const dur = (b - a + 1) * 15;
-  $('drag-hint').textContent = `Auswahl: ${prices[a].label}–${endLabel(b)} · ${Math.floor(dur/60)}:${pad(dur%60)} h`;
+  // Live-Schaetzung waehrend des Ziehens (bevor "Termin anlegen" gedrueckt wird):
+  // gleiche Rechnung wie windowStats() - Anzahl Viertelstunden * Ladeleistung.
+  const kwh = (dur / 60) * (chargePowerW / 1000);
+  $('drag-hint').textContent = `Auswahl: ${prices[a].label}–${endLabel(b)} · ${Math.floor(dur/60)}:${pad(dur%60)} h · ~${kwh.toFixed(1)} kWh`;
 }
 function endLabel(b) { const d = new Date(prices[b].start); d.setMinutes(d.getMinutes() + 15); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
 
