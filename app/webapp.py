@@ -678,13 +678,10 @@ def api_week():
 
 @app.route("/api/month")
 def api_month():
-    """Monatsueberblick: Solar/Verbrauch/Netz/Kosten eines Kalendermonats.
-    ?offset=0 aktueller Monat (Default), 1 der davor, usw."""
-    try:
-        offset = max(0, int(request.args.get("offset", 0)))
-    except (TypeError, ValueError):
-        offset = 0
-    return jsonify(store.energy_month_summary(offset_months=offset))
+    """Monatsuebersicht: eine Zeile je Kalendermonat (Solar/Verbrauch/Netz/
+    Autarkie/Kosten), aus dem dauerhaften Monats-Archiv (nicht auf die 35-Tage-
+    Historie beschraenkt - siehe store.monthly_overview)."""
+    return jsonify(store.monthly_overview())
 
 
 _live_cache = {"ts": 0.0, "data": None}
