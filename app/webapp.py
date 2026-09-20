@@ -297,6 +297,10 @@ class Controller:
                    solar_tom_raw=solar_tom, state=state, now=now,
                    manual_override=forced, force_reason=reason,
                    params=params)
+        log.info("DEBUG-PV: solar_today=%s solar_tom=%s solar_today_for_control=%s "
+                 "d.solar_today_korr=%s d.solar_tom_korr=%s forced=%s",
+                 solar_today, solar_tom, solar_today_for_control,
+                 d.solar_today_korr, d.solar_tom_korr, forced)
         store.save_state(state)
         store.log_charge_state(d.ess_mode == ESS_CHARGE, d.strategy, now)
         # Solar-Logbuch: Open-Meteo (Steuerquelle) einfrieren, forecast.solar als

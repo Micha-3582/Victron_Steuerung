@@ -248,6 +248,16 @@ def decide(soc: float, price_entries: list, solar_today_raw: float,
     min_price = min(prices) if prices else 0.0
     now_price = next((s.price for s in slots_all if s.name == now_slot_name), avg_price)
 
+    # PV-Korrektur schon hier berechnen (nicht erst weiter unten), damit auch die
+    # fruehen Return-Zweige (Ladesperre/manueller Override) die echten Sonnenwerte
+    # mitgeben koennen, statt stillschweigend auf den Decision-Dataclass-Default
+    # 0.0 zurueckzufallen - sonst zeigt das Dashboard "Sonne heute/morgen 0 kWh",
+    # sobald ein manueller Ladetermin oder Sofort-Override aktiv ist, obwohl die
+    # Prognose intern laengst da ist (gefunden 20.09., Michael meldete faelschlich
+    # vermutete PV-Prognose-Ausfaelle).
+    solar_today = round(solar_today_raw * p.pv_korrektur_faktor, 2)
+    solar_tom = round(solar_tom_raw * p.pv_korrektur_faktor, 2)
+
     # --- Harte Ladesperre: nie über das SOC-Limit laden, auch nicht manuell ---
     # Mit Hysterese (state.charge_limit_hit als Riegel, wie bei Nacht-Puffer/
     # Morgen-Bruecke): ohne das flackert die Sperre bei jedem Tick einzeln an/aus,
@@ -265,10 +275,12 @@ def decide(soc: float, price_entries: list, solar_today_raw: float,
             limit_txt = f"Ladelimit {int(p.max_charge_soc)}% erreicht"
             return Decision(allow_now=False, ess_mode=ESS_IDLE,
                             now_slot=now_slot_name, now_price=round(now_price, 3),
-                            reason=limit_txt, strategy=limit_txt, balance=0.0)
+                            reason=limit_txt, strategy=limit_txt, balance=0.0,
+                            solar_today_korr=solar_today, solar_tom_korr=solar_tom)
         return Decision(allow_now=True, ess_mode=ESS_CHARGE,
                         now_slot=now_slot_name, now_price=round(now_price, 3),
-                        reason=force_reason, strategy=force_reason, balance=0.0)
+                        reason=force_reason, strategy=force_reason, balance=0.0,
+                        solar_today_korr=solar_today, solar_tom_korr=solar_tom)
 
     if not slots_all:
         return Decision(allow_now=False, ess_mode=ESS_IDLE, now_slot=now_slot_name,
