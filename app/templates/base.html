@@ -92,6 +92,12 @@
     /* Beide Ladetabellen exakt gleiche Spaltenausrichtung */
     #charge-log, #ev-list { table-layout: fixed; }
     #charge-log td, #ev-list td { overflow: hidden; text-overflow: ellipsis; }
+    /* Wochenrückblick + Monatsüberblick: gleiche Spaltenbreiten, egal wie lang der
+       Zeilentext ist (z.B. "September 2026 (läuft)" ist viel länger als "Mo 14.09."
+       und würde die erste Spalte sonst je Tabelle unterschiedlich breit ziehen) */
+    #week-table, #month-table { table-layout: fixed; }
+    #week-table td, #month-table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #week-table td:first-child, #month-table td:first-child { width: 20%; }
     tr.total td { border-top: 2px solid var(--muted); border-bottom: none;
       font-weight: 700; padding-top: 10px; }
     tr.total td:first-child { color: var(--muted); text-transform: uppercase;
