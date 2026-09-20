@@ -34,6 +34,7 @@ PEAK_AVOID_PRICE = 37.0
 NIGHT_SAFETY_SOC = 30.0
 TARGET_SAFE_SOC = 35.0
 MAX_CHARGE_SOC = 90.0   # harte Ladesperre: nie über diesen SOC aus dem Netz laden
+ABSOLUTE_CHEAP_PRICE = 0.0   # Gegenstück: unter diesem Preis (ct/kWh) IMMER laden, 0 = aus
 
 ESS_CHARGE = 9
 ESS_IDLE = 10
@@ -59,6 +60,7 @@ class Params:
     night_safety_soc: float = NIGHT_SAFETY_SOC
     target_safe_soc: float = TARGET_SAFE_SOC
     max_charge_soc: float = MAX_CHARGE_SOC
+    absolute_cheap_price: float = ABSOLUTE_CHEAP_PRICE
 
     @classmethod
     def from_config(cls, cfg: dict) -> "Params":
@@ -382,6 +384,18 @@ def decide(soc: float, price_entries: list, solar_today_raw: float,
         state.commit_slot = ""
     if committed == now_slot_name:
         allow_now = True
+
+    # --- Absolute Günstig-Schwelle: IMMER laden, unabhängig von jeder Strategie ---
+    # Faengt Preise ab, die an dem Tag mit hoher Sicherheit nicht mehr unterboten werden
+    # (z.B. ein kurzer Ausreisser weit unter dem sonstigen Niveau) - das soll bedingungslos
+    # genutzt werden, auch wenn gerade KEINE Strategie ueberhaupt Bedarf sieht (Bilanz
+    # positiv, kein Peak in Sicht etc.). Deshalb bewusst NACH dem Preislimit-Gate oben
+    # (das wuerde sonst genau die knapp-am-Schwellenwert-Faelle wieder als "Warte auf
+    # guenstig" wegfiltern) - aber weiterhin VOR der harten SOC-Ladesperre direkt danach,
+    # die hat immer das letzte Wort ("immer laden" heisst nicht "auch ueber dem Ladelimit").
+    if p.absolute_cheap_price and now_price <= p.absolute_cheap_price:
+        allow_now = True
+        strategy = f"Supergünstig (≤ {p.absolute_cheap_price:.0f} ct)"
 
     # --- Harte Ladesperre (Automatik): über dem SOC-Limit nie laden ---
     # Gleicher Hysterese-Riegel wie im manual_override-Zweig oben (state.charge_limit_hit
