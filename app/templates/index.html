@@ -1025,10 +1025,28 @@ function renderMonth(data) {
   if (!rows.length) { t.innerHTML = ''; return; }
   const head = `<tr class="thead"><td>Monat</td><td>Solar</td><td>Verbrauch</td>` +
     `<td>Netzbezug</td><td>Autarkie</td><td>Kosten</td></tr>`;
-  const body = rows.map((m, i) => {
+  // Zeilen sind neuester Monat zuerst - je Jahr eine "Summe <Jahr>"-Zwischensumme
+  // einfuegen, sobald das Jahr wechselt (bzw. am Ende fuer das letzte/aelteste Jahr).
+  const yearRow = (year, acc) => {
+    const autarky = acc.verbrauch > 0
+      ? Math.round(Math.max(0, Math.min(100, (1 - acc.import / acc.verbrauch) * 100))) : null;
+    return `<tr class="total">
+      <td>Summe ${year}</td>
+      <td>${acc.solar.toFixed(1)} kWh</td>
+      <td>${acc.verbrauch.toFixed(1)} kWh</td>
+      <td>${acc.import.toFixed(1)} kWh</td>
+      <td>${autarky != null ? autarky + ' %' : '–'}</td>
+      <td>${acc.cost_eur.toFixed(2)} €</td>
+    </tr>`;
+  };
+  let body = '', curYear = null, acc = null;
+  rows.forEach((m, i) => {
+    if (curYear !== null && m.year !== curYear) { body += yearRow(curYear, acc); acc = null; }
+    if (!acc) { acc = { solar: 0, verbrauch: 0, import: 0, cost_eur: 0 }; curYear = m.year; }
+    acc.solar += m.solar; acc.verbrauch += m.verbrauch; acc.import += m.import; acc.cost_eur += m.cost_eur;
     const label = i === 0 ? `${MONTH_NAMES[m.month_num - 1]} ${m.year} (läuft)`
       : `${MONTH_NAMES[m.month_num - 1]} ${m.year}`;
-    return `<tr>
+    body += `<tr>
       <td>${label}</td>
       <td>${m.solar.toFixed(1)} kWh</td>
       <td>${m.verbrauch.toFixed(1)} kWh</td>
@@ -1036,7 +1054,8 @@ function renderMonth(data) {
       <td>${m.autarky != null ? Math.round(m.autarky) + ' %' : '–'}</td>
       <td>${m.cost_eur.toFixed(2)} €</td>
     </tr>`;
-  }).join('');
+  });
+  if (acc) body += yearRow(curYear, acc);
   t.innerHTML = head + body;
 }
 async function loadMonth() {
