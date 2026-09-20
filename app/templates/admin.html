@@ -95,16 +95,13 @@
       Beide Diagramme lassen sich unabhängig umstellen.
     </div>
   </details>
-  <hr style="border-color:var(--border);margin:14px 0">
-  <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
-    <label class="switch" style="margin:0"><input type="checkbox" id="show_week_overview"><span class="slider"></span></label>
-    <div><b>Wochenrückblick anzeigen</b><div class="muted">Tabelle mit Solar/Verbrauch/Netz/Autarkie/Kosten der letzten 7 Tage.</div></div>
-  </div>
-  <div style="display:flex;align-items:center;gap:14px">
-    <label class="switch" style="margin:0"><input type="checkbox" id="show_month_overview"><span class="slider"></span></label>
-    <div><b>Monatsüberblick anzeigen</b><div class="muted">Gleiche Tabelle für den Kalendermonat. Rohdaten reichen nur 35 Tage zurück –
-      ältere Monate zeigen daher überwiegend 0.</div></div>
-  </div>
+</div>
+
+<div class="card">
+  <h2><svg class="h2i" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Kacheln</h2>
+  <div class="muted" style="margin-bottom:12px">Jede Dashboard-Kachel einzeln ein-/ausblendbar – so lässt sich die Startseite
+    auf das Wesentliche zuschneiden.</div>
+  <div id="tile-toggles" style="display:flex;flex-direction:column;gap:10px"></div>
 </div>
 
 <div class="card">
@@ -385,6 +382,28 @@ const PARAM_KEYS = ['battery_usable_kwh','daily_usage_kwh','charge_power_w','pv_
   'evening_peak_start','evening_peak_end','min_peak_soc','peak_avoid_price',
   'night_safety_soc','target_safe_soc','hysterese_soc'];
 
+// Muss exakt zu TILE_IDS in index.html passen (Schluessel = Config-Feld/Checkbox-ID).
+const TILE_DEFS = [
+  { key: 'show_live_values', label: 'Live-Werte (Victron)', hint: 'Momentanwerte von Netz/Verbrauch/Solar/Batterie.' },
+  { key: 'show_energy_chart', label: 'Energie (Verlauf)', hint: 'Balken-Diagramm Verbrauch/Solar/Batterie-SOC.' },
+  { key: 'show_flow_chart', label: 'Energieflüsse', hint: 'Woher der Strom kam und wohin er ging.' },
+  { key: 'show_week_overview', label: 'Wochenrückblick', hint: 'Solar/Verbrauch/Netz/Autarkie/Kosten der letzten 7 Tage.' },
+  { key: 'show_month_overview', label: 'Monatsüberblick', hint: 'Gleiche Werte je Kalendermonat, dauerhaft archiviert.' },
+  { key: 'show_tibber_card', label: 'Tibber-Kachel', hint: 'Preis jetzt, ESS-Modus, Bilanz.' },
+  { key: 'show_override_card', label: 'Sofort laden (Override)', hint: 'Erzwingt Netzladen unabhängig vom Preis.' },
+  { key: 'show_price_plan', label: 'Strompreis & Ladeplan', hint: 'Preiskurve mit Ladeplan, manuelle Termine markieren.' },
+  { key: 'show_charge_log', label: 'Ladevorgänge (heute)', hint: 'Protokoll geplanter/durchgeführter Ladungen.' },
+  { key: 'show_ev_card', label: 'Manuelle Ladetermine', hint: 'Formular zum Anlegen eines Ladetermins.' },
+];
+function renderTileToggles() {
+  document.getElementById('tile-toggles').innerHTML = TILE_DEFS.map(t => `
+    <div style="display:flex;align-items:center;gap:14px">
+      <label class="switch" style="margin:0"><input type="checkbox" id="${t.key}"><span class="slider"></span></label>
+      <div><b>${t.label}</b><div class="muted">${t.hint}</div></div>
+    </div>`).join('');
+}
+renderTileToggles();
+
 async function init() {
   cfg = await (await fetch('/api/config')).json();
   document.getElementById('app_display_name').value = cfg.app_display_name || '';
@@ -393,8 +412,7 @@ async function init() {
   document.getElementById('energy_sample_seconds').value = cfg.energy_sample_seconds ?? 10;
   document.getElementById('chart_energy_hourly').checked = !!cfg.chart_energy_hourly;
   document.getElementById('chart_flow_hourly').checked = !!cfg.chart_flow_hourly;
-  document.getElementById('show_week_overview').checked = cfg.show_week_overview !== false;
-  document.getElementById('show_month_overview').checked = cfg.show_month_overview !== false;
+  TILE_DEFS.forEach(t => { document.getElementById(t.key).checked = cfg[t.key] !== false; });
   document.getElementById('openmeteo_pr').value = cfg.openmeteo_pr ?? 0.68;
   const bf = cfg.pv_bucket_factors;
   document.getElementById('pv_bucket_factors').textContent = bf
@@ -438,8 +456,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     energy_sample_seconds: parseInt(document.getElementById('energy_sample_seconds').value) || 10,
     chart_energy_hourly: document.getElementById('chart_energy_hourly').checked,
     chart_flow_hourly: document.getElementById('chart_flow_hourly').checked,
-    show_week_overview: document.getElementById('show_week_overview').checked,
-    show_month_overview: document.getElementById('show_month_overview').checked,
+    ...Object.fromEntries(TILE_DEFS.map(t => [t.key, document.getElementById(t.key).checked])),
     openmeteo_pr: numDE(document.getElementById('openmeteo_pr').value) || 0.68,
     cerbo_host: document.getElementById('cerbo_host').value.trim(),
     cerbo_port: parseInt(document.getElementById('cerbo_port').value) || 502,

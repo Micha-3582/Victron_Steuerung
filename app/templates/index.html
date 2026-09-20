@@ -3,14 +3,14 @@
 
 <div id="banner"></div>
 
-<div class="card full" style="margin-bottom:14px">
+<div class="card full" id="live-card" style="margin-bottom:14px">
   <h2>Live-Werte (Victron)</h2>
   <div class="sysgrid" id="sysgrid">
     <div class="muted">lädt …</div>
   </div>
 </div>
 
-<div class="card full" style="margin-bottom:14px">
+<div class="card full" id="energy-card" style="margin-bottom:14px">
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <h2 style="margin:0">Energie (Verlauf)</h2>
     <button id="e-prev" class="ghost daytab" title="Vorheriger Tag">◀</button>
@@ -30,7 +30,7 @@
   <div class="sysgrid" id="energy-tiles" style="margin-top:12px"></div>
 </div>
 
-<div class="card full" style="margin-bottom:14px">
+<div class="card full" id="flow-card" style="margin-bottom:14px">
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <h2 style="margin:0">Energieflüsse</h2>
     <button id="f-prev" class="ghost daytab" title="Vorheriger Tag">◀</button>
@@ -68,7 +68,7 @@
 </div>
 
 <div class="dash">
-  <div class="card">
+  <div class="card" id="tibber-card">
     <h2>Tibber</h2>
     <div class="row">
       <div class="metric"><div class="val" id="price">–</div><div class="lbl">Preis jetzt (ct/kWh)</div></div>
@@ -78,7 +78,7 @@
     <div class="muted" id="meta" style="margin-top:6px"></div>
   </div>
 
-  <div class="card">
+  <div class="card" id="override-card">
     <h2>Sofort laden (Override)</h2>
     <div style="display:flex;align-items:center;gap:14px">
       <label class="switch" style="margin:0">
@@ -89,7 +89,7 @@
     <div class="muted" id="override-note" style="margin-top:10px"></div>
   </div>
 
-  <div class="card full">
+  <div class="card full" id="price-plan-card">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <h2 style="margin:0">Strompreis & Ladeplan</h2>
       <button id="day-today" class="ghost daytab active">Heute</button>
@@ -114,13 +114,13 @@
   </div>
 </div>
 
-<div class="card">
+<div class="card" id="charge-log-card">
   <h2>Ladevorgänge (heute)</h2>
   <div class="muted" style="margin-bottom:8px">Geplante Ladefenster und tatsächlich durchgeführte – mit Preis, Menge und Kosten. Reset um Mitternacht.</div>
   <div class="table-scroll"><table id="charge-log"></table></div>
 </div>
 
-<div class="card">
+<div class="card" id="ev-card">
   <h2>Manuelle Ladetermine</h2>
   <div id="ev-form" class="ev-form">
     <div class="grid2">
@@ -146,6 +146,21 @@ const LEVEL_COLORS = {
   VERY_CHEAP: '#35c07a', CHEAP: '#35c07a', NORMAL: '#4da3ff',
   EXPENSIVE: '#f0a63c', VERY_EXPENSIVE: '#e5544a'
 };
+// Jede Dashboard-Kachel einzeln ein-/ausblendbar (Einstellungen -> Kacheln),
+// Schluessel muessen exakt zu den ui.show_*-Feldern aus /api/status passen.
+const TILE_IDS = {
+  show_live_values: 'live-card', show_energy_chart: 'energy-card',
+  show_flow_chart: 'flow-card', show_week_overview: 'week-card',
+  show_month_overview: 'month-card', show_tibber_card: 'tibber-card',
+  show_override_card: 'override-card', show_price_plan: 'price-plan-card',
+  show_charge_log: 'charge-log-card', show_ev_card: 'ev-card',
+};
+function applyTileVisibility(ui) {
+  for (const [key, id] of Object.entries(TILE_IDS)) {
+    const el = $(id);
+    if (el) el.hidden = ui[key] === false;
+  }
+}
 let chart, energyChart, flowChart, prices = [], allPrices = [], schedules = [], nowSlot = '', nowIso = '';
 let energyDay = '', energyMinDay = '';
 let activeDay = 'today', chargePowerW = 3500, overrideBusy = false;
@@ -561,8 +576,7 @@ async function load() {
   // Chart-Auflösung aus den Einstellungen übernehmen (15-Min vs. stündlich)
   if (d.ui) {
     energyHourly = !!d.ui.chart_energy_hourly; flowHourly = !!d.ui.chart_flow_hourly;
-    $('week-card').hidden = d.ui.show_week_overview === false;
-    $('month-card').hidden = d.ui.show_month_overview === false;
+    applyTileVisibility(d.ui);
   }
   // Energie-Charts: Live-Refresh nur wenn der heutige Tag angezeigt wird
   energyMinDay = d.energy_min_day || energyMinDay;

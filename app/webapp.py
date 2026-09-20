@@ -637,8 +637,18 @@ def api_status():
         "status": status,
         "ui": {"chart_energy_hourly": bool(cfg.get("chart_energy_hourly", False)),
                "chart_flow_hourly": bool(cfg.get("chart_flow_hourly", False)),
+               # Alle Dashboard-Kacheln einzeln ein-/ausblendbar (Einstellungen ->
+               # Kacheln), Default ueberall an - siehe TILE_IDS in index.html.
+               "show_live_values": bool(cfg.get("show_live_values", True)),
+               "show_energy_chart": bool(cfg.get("show_energy_chart", True)),
+               "show_flow_chart": bool(cfg.get("show_flow_chart", True)),
                "show_week_overview": bool(cfg.get("show_week_overview", True)),
-               "show_month_overview": bool(cfg.get("show_month_overview", True))},
+               "show_month_overview": bool(cfg.get("show_month_overview", True)),
+               "show_tibber_card": bool(cfg.get("show_tibber_card", True)),
+               "show_override_card": bool(cfg.get("show_override_card", True)),
+               "show_price_plan": bool(cfg.get("show_price_plan", True)),
+               "show_charge_log": bool(cfg.get("show_charge_log", True)),
+               "show_ev_card": bool(cfg.get("show_ev_card", True))},
         "prices": prices,
         "ev_schedules": store.list_ev(),
         "charge_log": charge,
@@ -731,7 +741,10 @@ def api_config():
                "pv_longitude", "pv_planes", "dry_run", "poll_seconds",
                "energy_sample_seconds", "manual_override", "web_port",
                "chart_energy_hourly", "chart_flow_hourly", "openmeteo_pr",
-               "show_week_overview", "show_month_overview"] + list(Params().__dict__.keys())
+               "show_live_values", "show_energy_chart", "show_flow_chart",
+               "show_week_overview", "show_month_overview", "show_tibber_card",
+               "show_override_card", "show_price_plan", "show_charge_log",
+               "show_ev_card"] + list(Params().__dict__.keys())
     for key in allowed:
         if key in body:
             cfg[key] = body[key]
