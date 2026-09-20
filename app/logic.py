@@ -285,10 +285,8 @@ def decide(soc: float, price_entries: list, solar_today_raw: float,
     if not slots_all:
         return Decision(allow_now=False, ess_mode=ESS_IDLE, now_slot=now_slot_name,
                         now_price=0.0, reason="Keine Preisdaten",
-                        strategy="", balance=0.0)
-
-    solar_today = round(solar_today_raw * p.pv_korrektur_faktor, 2)
-    solar_tom = round(solar_tom_raw * p.pv_korrektur_faktor, 2)
+                        strategy="", balance=0.0,
+                        solar_today_korr=solar_today, solar_tom_korr=solar_tom)
 
     # --- Gesamtbilanz bis zum NÄCHSTEN Mittag (wenn die PV wieder trägt) ---
     # Vor 12 Uhr ist das der heutige Mittag (~Stunden), ab 12 Uhr der morgige.
