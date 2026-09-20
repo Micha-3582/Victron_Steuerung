@@ -331,7 +331,7 @@ class Controller:
             wrote = cerbo.write_ess_mode(d.ess_mode, dry_run=dry)
 
         with self.lock:
-            self.prices = self._prep_prices(prices, d)
+            self.prices = self._prep_prices(prices, d, Params.from_config(cfg).absolute_cheap_price)
             self.status = {
                 "ok": True,
                 "soc": round(soc, 1),
@@ -371,7 +371,7 @@ class Controller:
         self.last_tick = now.isoformat(timespec="seconds")
         self.last_error = None
 
-    def _prep_prices(self, entries, decision):
+    def _prep_prices(self, entries, decision, absolute_cheap_price=0.0):
         # Datums-genauer Abgleich: geplante Slots über den vollen Zeitstempel
         # markieren, NICHT nur über die Uhrzeit - sonst würde z.B. 13:45 an
         # heute UND morgen als geplant erscheinen.
@@ -382,12 +382,19 @@ class Controller:
                 start = logic_parse_iso(item["startsAt"])
             except (KeyError, ValueError):
                 continue
+            ct = round(item["total"] * 100, 2)
             out.append({
                 "start": start.isoformat(timespec="seconds"),
                 "label": f"{start:%H:%M}",
-                "ct": round(item["total"] * 100, 2),
+                "ct": ct,
                 "level": item.get("level", "NORMAL"),
                 "planned": start.isoformat(timespec="minutes") in planned,
+                # Rein optische Vorschau der "Immer laden unter"-Schwelle (siehe
+                # logic.decide()) - im Unterschied zu "planned" KEIN Ergebnis der
+                # eigentlichen Planung, sondern nur "dieser Slot WUERDE die Regel
+                # ausloesen, sobald er dran ist". Reagiert die Steuerung ja ohnehin
+                # erst live pro Tick, aber so sieht man vorab, wo es greifen wird.
+                "cheap_lock": bool(absolute_cheap_price) and ct <= absolute_cheap_price,
             })
         return out
 

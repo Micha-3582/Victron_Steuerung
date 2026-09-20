@@ -101,6 +101,7 @@
       <span><i class="sw sw-exp"></i>teuer</span>
       <span><i class="sw sw-vexp"></i>sehr teuer</span>
       <span><i class="sw sw-plan"></i>geplantes Ladefenster</span>
+      <span><i class="sw" style="background:transparent;border:2px solid #22d3ee"></i>Preisschwelle greift</span>
       <span><i class="sw" style="background:rgba(255,213,74,.4);border:1px solid #ffd54a"></i>dein Termin</span>
       <span class="muted" style="margin-left:auto" id="price-stats"></span>
     </div>
@@ -218,7 +219,8 @@ function buildChart() {
         legend: { display: false },
         tooltip: { callbacks: {
           title: items => { const p = prices[items[0].dataIndex]; return p ? p.label : ''; },
-          label: item => { const p = prices[item.dataIndex]; return p ? `${p.ct} ct/kWh${p.planned ? ' · eingeplant' : ''}` : ''; }
+          label: item => { const p = prices[item.dataIndex];
+            return p ? `${p.ct} ct/kWh${p.planned ? ' · eingeplant' : ''}${p.cheap_lock ? ' · Preisschwelle greift' : ''}` : ''; }
         } }
       },
       scales: {
@@ -238,8 +240,11 @@ function renderChart() {
   const ds = chart.data.datasets[0];
   ds.data = prices.map(p => p.ct);
   ds.backgroundColor = prices.map(p => LEVEL_COLORS[p.level] || '#4da3ff');
-  ds.borderColor = prices.map(p => p.planned ? '#b072f5' : 'transparent');
-  ds.borderWidth = prices.map(p => p.planned ? 2 : 0);
+  // "cheap_lock" (Schwellen-Vorschau der "Immer laden unter"-Regel) bekommt eine
+  // eigene Farbe (Cyan) statt des lila "geplant"-Rahmens - beides kann fachlich
+  // unabhaengig voneinander zutreffen, cheap_lock hat optisch Vorrang.
+  ds.borderColor = prices.map(p => p.cheap_lock ? '#22d3ee' : (p.planned ? '#b072f5' : 'transparent'));
+  ds.borderWidth = prices.map(p => p.cheap_lock || p.planned ? 2 : 0);
   chart.update('none');
 }
 
