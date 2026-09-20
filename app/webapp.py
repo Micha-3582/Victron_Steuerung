@@ -636,7 +636,9 @@ def api_status():
     return jsonify({
         "status": status,
         "ui": {"chart_energy_hourly": bool(cfg.get("chart_energy_hourly", False)),
-               "chart_flow_hourly": bool(cfg.get("chart_flow_hourly", False))},
+               "chart_flow_hourly": bool(cfg.get("chart_flow_hourly", False)),
+               "show_week_overview": bool(cfg.get("show_week_overview", True)),
+               "show_month_overview": bool(cfg.get("show_month_overview", True))},
         "prices": prices,
         "ev_schedules": store.list_ev(),
         "charge_log": charge,
@@ -672,6 +674,17 @@ def api_week():
     except (TypeError, ValueError):
         offset = 0
     return jsonify(store.energy_week_summary(offset_weeks=offset))
+
+
+@app.route("/api/month")
+def api_month():
+    """Monatsueberblick: Solar/Verbrauch/Netz/Kosten eines Kalendermonats.
+    ?offset=0 aktueller Monat (Default), 1 der davor, usw."""
+    try:
+        offset = max(0, int(request.args.get("offset", 0)))
+    except (TypeError, ValueError):
+        offset = 0
+    return jsonify(store.energy_month_summary(offset_months=offset))
 
 
 _live_cache = {"ts": 0.0, "data": None}
@@ -720,7 +733,8 @@ def api_config():
     allowed = ["app_display_name", "cerbo_host", "cerbo_port", "tibber_token", "pv_latitude",
                "pv_longitude", "pv_planes", "dry_run", "poll_seconds",
                "energy_sample_seconds", "manual_override", "web_port",
-               "chart_energy_hourly", "chart_flow_hourly", "openmeteo_pr"] + list(Params().__dict__.keys())
+               "chart_energy_hourly", "chart_flow_hourly", "openmeteo_pr",
+               "show_week_overview", "show_month_overview"] + list(Params().__dict__.keys())
     for key in allowed:
         if key in body:
             cfg[key] = body[key]

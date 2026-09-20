@@ -535,6 +535,74 @@ def energy_week_summary(now: datetime | None = None, days: int = 7, offset_weeks
     }
 
 
+def energy_month_summary(now: datetime | None = None, offset_months: int = 0) -> dict:
+    """Kalendermonatsweise Bilanz (Solar/Verbrauch/Netz/Kosten) fuer den
+    Monatsueberblick - gleiche Aggregation wie energy_week_summary(), aber echte
+    Kalendermonate statt gleitender 7-Tage-Fenster. offset_months=0 ist der
+    laufende Monat (bis heute), 1 der Monat davor usw.
+
+    WICHTIG: history.json haelt nur _HISTORY_KEEP_DAYS (35) Tage rollierend vor.
+    Monate, die weiter zurueckliegen als dieses Fenster, zeigen deshalb ueberwiegend
+    0 kWh - das ist keine Rechenschwaeche, sondern schlicht nicht mehr vorhandene
+    Rohdaten (gleiche Einschraenkung wie beim Wochenrueckblick, dort durch die
+    kuerzere 7-Tage-Fensterbreite bisher seltener spuerbar)."""
+    now = now or datetime.now()
+    idx = (now.year * 12 + (now.month - 1)) - offset_months
+    y2, m2 = divmod(idx, 12)
+    m2 += 1
+    first = datetime(y2, m2, 1).date()
+    next_first = datetime(y2 + 1, 1, 1).date() if m2 == 12 else datetime(y2, m2 + 1, 1).date()
+    last = next_first - timedelta(days=1)
+    if offset_months == 0:
+        last = min(last, now.date())
+    day_keys = [(first + timedelta(days=i)).isoformat() for i in range((last - first).days + 1)]
+    hours = _load_history().get("hours", {})
+    per_day = {d: {"solar": 0.0, "verbrauch": 0.0, "import": 0.0, "export": 0.0, "cost_ct": 0.0}
+               for d in day_keys}
+    for k, b in hours.items():
+        d = k[:10]
+        if d not in per_day:
+            continue
+        row = per_day[d]
+        row["solar"] += b.get("solar", 0.0)
+        row["verbrauch"] += b.get("verbrauch", 0.0)
+        row["import"] += b.get("g_load", 0.0) + b.get("g_batt", 0.0)
+        row["export"] += b.get("s_grid", 0.0) + b.get("b_grid", 0.0)
+        row["cost_ct"] += b.get("grid_cost_ct", 0.0)
+    corr = get_grid_correction(now)
+    today_iso = now.date().isoformat()
+    if today_iso in per_day and (corr["import"] or corr["export"]):
+        per_day[today_iso]["import"] += corr["import"]
+        per_day[today_iso]["export"] += corr["export"]
+    days_out = []
+    totals = {"solar": 0.0, "verbrauch": 0.0, "import": 0.0, "export": 0.0, "cost_ct": 0.0}
+    for d in day_keys:
+        row = per_day[d]
+        autarky = (round(max(0.0, min(100.0, (1 - row["import"] / row["verbrauch"]) * 100)), 0)
+                   if row["verbrauch"] > 0 else None)
+        days_out.append({
+            "day": d,
+            "solar": round(row["solar"], 2), "verbrauch": round(row["verbrauch"], 2),
+            "import": round(row["import"], 2), "export": round(row["export"], 2),
+            "cost_eur": round(row["cost_ct"] / 100.0, 2), "autarky": autarky,
+        })
+        for key in totals:
+            totals[key] += row[key]
+    total_autarky = (round(max(0.0, min(100.0, (1 - totals["import"] / totals["verbrauch"]) * 100)), 0)
+                      if totals["verbrauch"] > 0 else None)
+    min_day = energy_min_day()
+    can_go_older = bool(min_day) and min_day < day_keys[0]
+    return {
+        "days": days_out,
+        "totals": {"solar": round(totals["solar"], 2), "verbrauch": round(totals["verbrauch"], 2),
+                   "import": round(totals["import"], 2), "export": round(totals["export"], 2),
+                   "cost_eur": round(totals["cost_ct"] / 100.0, 2), "autarky": total_autarky},
+        "offset_months": offset_months,
+        "month": m2, "year": y2,
+        "can_go_older": can_go_older,
+    }
+
+
 # --- Solar-Logbuch (Prognose vs. reale Erzeugung) -------------------------
 def _load_solar_log() -> dict:
     if os.path.exists(SOLAR_LOG_PATH):

@@ -52,7 +52,7 @@
   </div>
 </div>
 
-<div class="card full" style="margin-bottom:14px">
+<div class="card full" id="week-card" style="margin-bottom:14px">
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <h2 style="margin:0">Wochenrückblick</h2>
     <button id="w-prev" class="ghost daytab" title="Vorherige Woche">◀</button>
@@ -60,6 +60,16 @@
     <button id="w-next" class="ghost daytab" title="Nächste Woche">▶</button>
   </div>
   <div class="table-scroll"><table id="week-table"></table></div>
+</div>
+
+<div class="card full" id="month-card" style="margin-bottom:14px">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <h2 style="margin:0">Monatsüberblick</h2>
+    <button id="m-prev" class="ghost daytab" title="Vorheriger Monat">◀</button>
+    <span id="m-range" style="min-width:150px;text-align:center;font-size:14px">Dieser Monat</span>
+    <button id="m-next" class="ghost daytab" title="Nächster Monat">▶</button>
+  </div>
+  <div class="table-scroll"><table id="month-table"></table></div>
 </div>
 
 <div class="dash">
@@ -554,7 +564,11 @@ async function load() {
   applyDay();
   renderOverview(d.charge_overview);
   // Chart-Auflösung aus den Einstellungen übernehmen (15-Min vs. stündlich)
-  if (d.ui) { energyHourly = !!d.ui.chart_energy_hourly; flowHourly = !!d.ui.chart_flow_hourly; }
+  if (d.ui) {
+    energyHourly = !!d.ui.chart_energy_hourly; flowHourly = !!d.ui.chart_flow_hourly;
+    $('week-card').hidden = d.ui.show_week_overview === false;
+    $('month-card').hidden = d.ui.show_month_overview === false;
+  }
   // Energie-Charts: Live-Refresh nur wenn der heutige Tag angezeigt wird
   energyMinDay = d.energy_min_day || energyMinDay;
   if (!energyDay) energyDay = todayStr();
@@ -989,6 +1003,50 @@ async function loadWeek() {
 $('w-prev').addEventListener('click', () => { weekOffset++; loadWeek(); });
 $('w-next').addEventListener('click', () => { if (weekOffset > 0) { weekOffset--; loadWeek(); } });
 
+/* Monatsüberblick: gleiche Tabelle wie der Wochenrückblick, aber echte
+   Kalendermonate statt gleitender 7-Tage-Fenster (siehe store.energy_month_summary -
+   Rohdaten reichen nur 35 Tage zurueck, aeltere Monate zeigen daher ueberwiegend 0). */
+const MONTH_NAMES = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli',
+  'August', 'September', 'Oktober', 'November', 'Dezember'];
+let monthOffset = 0;
+function renderMonth(data) {
+  const t = $('month-table');
+  $('m-prev').disabled = !data.can_go_older;
+  $('m-next').disabled = monthOffset === 0;
+  $('m-range').textContent = monthOffset === 0 ? 'Dieser Monat' : `${MONTH_NAMES[data.month - 1]} ${data.year}`;
+  if (!data || !data.days || !data.days.length) { t.innerHTML = ''; return; }
+  const head = `<tr class="thead"><td>Tag</td><td>Solar</td><td>Verbrauch</td>` +
+    `<td>Netzbezug</td><td>Autarkie</td><td>Kosten</td></tr>`;
+  const rows = data.days.map((d, i) => {
+    const dt = new Date(d.day + 'T00:00:00');
+    const isToday = monthOffset === 0 && i === data.days.length - 1;
+    const label = isToday ? 'Heute' : WEEKDAY_NAMES[dt.getDay()] + ' ' + d.day.slice(8, 10) + '.' + d.day.slice(5, 7) + '.';
+    return `<tr>
+      <td>${label}</td>
+      <td>${d.solar.toFixed(1)} kWh</td>
+      <td>${d.verbrauch.toFixed(1)} kWh</td>
+      <td>${d.import.toFixed(1)} kWh</td>
+      <td>${d.autarky != null ? Math.round(d.autarky) + ' %' : '–'}</td>
+      <td>${d.cost_eur.toFixed(2)} €</td>
+    </tr>`;
+  }).join('');
+  const tot = data.totals;
+  const totalRow = `<tr class="total">
+    <td>Summe</td>
+    <td>${tot.solar.toFixed(1)} kWh</td>
+    <td>${tot.verbrauch.toFixed(1)} kWh</td>
+    <td>${tot.import.toFixed(1)} kWh</td>
+    <td>${tot.autarky != null ? Math.round(tot.autarky) + ' %' : '–'}</td>
+    <td>${tot.cost_eur.toFixed(2)} €</td>
+  </tr>`;
+  t.innerHTML = head + rows + totalRow;
+}
+async function loadMonth() {
+  try { renderMonth(await (await fetch('/api/month?offset=' + monthOffset)).json()); } catch (e) {}
+}
+$('m-prev').addEventListener('click', () => { monthOffset++; loadMonth(); });
+$('m-next').addEventListener('click', () => { if (monthOffset > 0) { monthOffset--; loadMonth(); } });
+
 buildChart();
 buildEnergyChart();
 buildFlowChart();
@@ -997,8 +1055,10 @@ initTileDragging();
 load();
 loadLive();
 loadWeek();
+loadMonth();
 setInterval(load, 15000);      // Plan/Preise/Termine (langsamer)
 setInterval(loadLive, 2000);   // Live-Werte vom Cerbo (wie Victron: alle 2 s)
-setInterval(loadWeek, 300000); // Wochenrückblick (ändert sich langsam)
+setInterval(loadWeek, 300000);  // Wochenrückblick (ändert sich langsam)
+setInterval(loadMonth, 300000); // Monatsüberblick (ändert sich langsam)
 </script>
 {% endblock %}

@@ -95,6 +95,16 @@
       Beide Diagramme lassen sich unabhängig umstellen.
     </div>
   </details>
+  <hr style="border-color:var(--border);margin:14px 0">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
+    <label class="switch" style="margin:0"><input type="checkbox" id="show_week_overview"><span class="slider"></span></label>
+    <div><b>Wochenrückblick anzeigen</b><div class="muted">Tabelle mit Solar/Verbrauch/Netz/Autarkie/Kosten der letzten 7 Tage.</div></div>
+  </div>
+  <div style="display:flex;align-items:center;gap:14px">
+    <label class="switch" style="margin:0"><input type="checkbox" id="show_month_overview"><span class="slider"></span></label>
+    <div><b>Monatsüberblick anzeigen</b><div class="muted">Gleiche Tabelle für den Kalendermonat. Rohdaten reichen nur 35 Tage zurück –
+      ältere Monate zeigen daher überwiegend 0.</div></div>
+  </div>
 </div>
 
 <div class="card">
@@ -383,6 +393,8 @@ async function init() {
   document.getElementById('energy_sample_seconds').value = cfg.energy_sample_seconds ?? 10;
   document.getElementById('chart_energy_hourly').checked = !!cfg.chart_energy_hourly;
   document.getElementById('chart_flow_hourly').checked = !!cfg.chart_flow_hourly;
+  document.getElementById('show_week_overview').checked = cfg.show_week_overview !== false;
+  document.getElementById('show_month_overview').checked = cfg.show_month_overview !== false;
   document.getElementById('openmeteo_pr').value = cfg.openmeteo_pr ?? 0.68;
   const bf = cfg.pv_bucket_factors;
   document.getElementById('pv_bucket_factors').textContent = bf
@@ -426,6 +438,8 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     energy_sample_seconds: parseInt(document.getElementById('energy_sample_seconds').value) || 10,
     chart_energy_hourly: document.getElementById('chart_energy_hourly').checked,
     chart_flow_hourly: document.getElementById('chart_flow_hourly').checked,
+    show_week_overview: document.getElementById('show_week_overview').checked,
+    show_month_overview: document.getElementById('show_month_overview').checked,
     openmeteo_pr: numDE(document.getElementById('openmeteo_pr').value) || 0.68,
     cerbo_host: document.getElementById('cerbo_host').value.trim(),
     cerbo_port: parseInt(document.getElementById('cerbo_port').value) || 502,
