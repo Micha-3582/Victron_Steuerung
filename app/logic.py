@@ -83,6 +83,7 @@ class PersistentState:
     commit_slot: str = ""
     morning_bridge: bool = False
     night_buffer: bool = False
+    charge_limit_hit: bool = False
 
 
 @dataclass
@@ -246,8 +247,19 @@ def decide(soc: float, price_entries: list, solar_today_raw: float,
     now_price = next((s.price for s in slots_all if s.name == now_slot_name), avg_price)
 
     # --- Harte Ladesperre: nie über das SOC-Limit laden, auch nicht manuell ---
+    # Mit Hysterese (state.charge_limit_hit als Riegel, wie bei Nacht-Puffer/
+    # Morgen-Bruecke): ohne das flackert die Sperre bei jedem Tick einzeln an/aus,
+    # sobald der SOC-Messwert im Rauschen um die Schwelle pendelt (z.B. 89,8/90,1/
+    # 89,9 %) - das erzeugt viele winzige Ladevorgaenge statt einmal sauber zu stoppen.
+    # Erst wieder freigeben, wenn der SOC um hysterese_soc UNTER die Schwelle faellt.
     if manual_override:
+        limit_hit = state.charge_limit_hit
         if soc >= p.max_charge_soc:
+            limit_hit = True
+        elif soc <= (p.max_charge_soc - p.hysterese_soc):
+            limit_hit = False
+        state.charge_limit_hit = limit_hit
+        if limit_hit:
             limit_txt = f"Ladelimit {int(p.max_charge_soc)}% erreicht"
             return Decision(allow_now=False, ess_mode=ESS_IDLE,
                             now_slot=now_slot_name, now_price=round(now_price, 3),
@@ -372,7 +384,15 @@ def decide(soc: float, price_entries: list, solar_today_raw: float,
         allow_now = True
 
     # --- Harte Ladesperre (Automatik): über dem SOC-Limit nie laden ---
+    # Gleicher Hysterese-Riegel wie im manual_override-Zweig oben (state.charge_limit_hit
+    # ist bewusst dasselbe Feld - pro Tick laeuft ohnehin nur einer der beiden Zweige).
+    limit_hit = state.charge_limit_hit
     if soc >= p.max_charge_soc:
+        limit_hit = True
+    elif soc <= (p.max_charge_soc - p.hysterese_soc):
+        limit_hit = False
+    state.charge_limit_hit = limit_hit
+    if limit_hit:
         allow_now = False
         strategy = f"Ladelimit {int(p.max_charge_soc)}%"
 
