@@ -226,8 +226,8 @@ def _num(v, lo, hi, what):
 
 def update(dev_id: str, name: str | None = None, icon: str | None = None,
            show: bool | None = None, auto: bool | None = None, power_w=None,
-           min_on_min=None, min_off_min=None) -> bool:
-    """Name, Symbol, Dashboard-Sichtbarkeit und Ueberschuss-Automatik eines Geraets aendern."""
+           min_on_min=None, min_off_min=None, switchable: bool | None = None) -> bool:
+    """Name, Symbol, Dashboard-Sichtbarkeit, Schaltbarkeit und Ueberschuss-Automatik eines Geraets aendern."""
     if icon is not None and icon not in ICONS:
         raise ShellyError("Unbekanntes Symbol")
     items = load_devices()
@@ -239,13 +239,19 @@ def update(dev_id: str, name: str | None = None, icon: str | None = None,
                 d["min_on_min"] = _num(min_on_min, 0, 1440, "Mindest-Einschaltdauer")
             if min_off_min is not None:
                 d["min_off_min"] = _num(min_off_min, 0, 1440, "Mindest-Pause")
+            sw = d.get("switchable", True) if switchable is None else bool(switchable)
+            if auto and not sw:
+                raise ShellyError("Nur-Überwachung: ein nicht schaltbares Gerät kann nicht in der Automatik verwendet werden")
+            d["switchable"] = sw
+            if not sw:
+                d["auto"] = False               # Nur-Ueberwachung: nie automatisch schalten
             if name is not None:
                 d["name"] = name.strip()[:60] or d["name"]
             if icon is not None:
                 d["icon"] = icon
             if show is not None:
                 d["show"] = bool(show)
-            if auto is not None:
+            if auto is not None and sw:
                 d["auto"] = bool(auto)
                 if auto and not d.get("prio"):      # neu in der Automatik: ans Ende der Prioritaet
                     d["prio"] = max([x.get("prio") or 0 for x in items]) + 1
@@ -313,6 +319,8 @@ def set_state(dev_id: str, on: bool) -> dict:
     d = _find(dev_id)
     if not d:
         raise ShellyError("Gerät nicht gefunden")
+    if d.get("switchable") is False:
+        raise ShellyError("Dieses Gerät ist nur zur Überwachung eingestellt und nicht schaltbar")
     if d.get("kind") == "tuya":
         try:
             return tuya.set_state(d, on)
@@ -344,6 +352,7 @@ def list_with_status(only_shown: bool = False) -> list[dict]:
         pub.setdefault("icon", DEFAULT_ICON)
         pub.setdefault("show", False)
         pub.setdefault("auto", False)
+        pub.setdefault("switchable", True)
         pub.setdefault("prio", 0)
         pub.setdefault("power_w", 0)
         pub.setdefault("min_on_min", 5)

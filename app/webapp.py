@@ -1025,7 +1025,8 @@ def api_shelly_modify(dev_id):
             ok = shelly.update(dev_id, name=body.get("name"), icon=body.get("icon"),
                                show=body.get("show"), auto=body.get("auto"),
                                power_w=body.get("power_w"), min_on_min=body.get("min_on_min"),
-                               min_off_min=body.get("min_off_min"))
+                               min_off_min=body.get("min_off_min"),
+                               switchable=body.get("switchable"))
         except shelly.ShellyError as e:
             return jsonify(error=str(e)), 400
     return jsonify(ok=True) if ok else (jsonify(error="nicht gefunden"), 404)

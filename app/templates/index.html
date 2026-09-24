@@ -1098,13 +1098,15 @@ async function loadShelly() {
   card.hidden = false;
   $('shelly-grid').innerHTML = list.map(d => {
     const stat = !d.online ? 'nicht erreichbar'
-      : (d.on ? 'an' : 'aus') + (d.power != null ? ` · ${Math.round(d.power)} W` : '') + (d.auto ? ' · Auto' : '');
+      : (d.on ? 'an' : 'aus') + (d.power != null && d.switchable !== false ? ` · ${Math.round(d.power)} W` : '') + (d.auto ? ' · Auto' : '') + (d.switchable === false ? ' · Überwachung' : '');
     return `<div class="systile" data-tile-id="${escH(d.id)}" ${d.online ? '' : 'style="opacity:.55"'}>
       <div class="systile-t">${escH(d.name)}</div>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
         <span style="font-size:30px;line-height:1.1">${escH(d.icon)}</span>
-        <label class="switch"><input type="checkbox" ${d.on ? 'checked' : ''} ${d.online ? '' : 'disabled'}
-          onchange="shellySwitch('${escH(d.id)}', this.checked, this)"><span class="slider"></span></label>
+        ${d.switchable === false
+          ? `<span style="font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;color:${d.on ? 'var(--green)' : 'var(--muted)'}">${d.online ? (d.power != null ? Math.round(d.power) + ' W' : (d.on ? 'an' : 'aus')) : '–'}</span>`
+          : `<label class="switch"><input type="checkbox" ${d.on ? 'checked' : ''} ${d.online ? '' : 'disabled'}
+          onchange="shellySwitch('${escH(d.id)}', this.checked, this)"><span class="slider"></span></label>`}
       </div>
       <div class="systile-s">${stat}</div></div>`;
   }).join('');

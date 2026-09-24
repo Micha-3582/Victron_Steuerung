@@ -696,7 +696,7 @@ async function refreshShellyStatus() {
       if (row.dataset.dev !== d.id) return;
       row.querySelector('.dev-stat').textContent = shellyStatText(d);
       const b = row.querySelector('.dev-power');
-      if (b) { b.dataset.on = d.on ? '1' : '0'; b.disabled = !d.online; b.style.cssText = d.on ? POWER_ON_STYLE : ''; }
+      if (b) { b.dataset.on = d.on ? '1' : '0'; b.disabled = !d.online || d.switchable === false; b.style.cssText = d.on ? POWER_ON_STYLE : ''; }
     });
   }
 }
@@ -714,14 +714,17 @@ async function loadShellyAdmin() {
         <div style="flex:1;min-width:150px"><b>${escH(d.name)}</b>
           <div class="muted">${escH(d.model)} · ${escH(d.ip)} · <span class="dev-stat">${shellyStatText(d)}</span></div></div>
         <button class="ghost" onclick="shellyRename('${id}', this)" data-name="${escH(d.name)}" title="Umbenennen">✎</button>
-        <button class="ghost dev-power" data-on="${d.on ? '1' : '0'}" style="${d.on ? POWER_ON_STYLE : ''}" onclick="shellyTest('${id}', this)" ${d.online ? '' : 'disabled'} title="Testschalten">⏻</button>
+        <button class="ghost dev-power" data-on="${d.on ? '1' : '0'}" style="${d.on ? POWER_ON_STYLE : ''}" onclick="shellyTest('${id}', this)" ${d.online && d.switchable !== false ? '' : 'disabled'} title="${d.switchable === false ? 'Nur Überwachung – nicht schaltbar' : 'Testschalten'}">⏻</button>
         <button class="ghost" onclick="shellyRemove('${id}')" title="Entfernen">✕</button>
       </div>
       <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
         <label class="switch" style="margin:0"><input type="checkbox" ${d.show ? 'checked' : ''} onchange="shellyField('${id}', 'show', this.checked)"><span class="slider"></span></label>
         <span>Auf dem Dashboard anzeigen</span></div>
       <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
-        <label class="switch" style="margin:0"><input type="checkbox" ${d.auto ? 'checked' : ''} onchange="shellyField('${id}', 'auto', this.checked)"><span class="slider"></span></label>
+        <label class="switch" style="margin:0"><input type="checkbox" ${d.switchable !== false ? 'checked' : ''} onchange="shellyField('${id}', 'switchable', this.checked)"><span class="slider"></span></label>
+        <span>Schaltbar <span class="muted">(aus = nur Überwachung: Leistung und Status anzeigen, nicht schalten)</span></span></div>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px;${d.switchable === false ? 'opacity:.45' : ''}">
+        <label class="switch" style="margin:0"><input type="checkbox" ${d.auto ? 'checked' : ''} ${d.switchable === false ? 'disabled' : ''} onchange="shellyField('${id}', 'auto', this.checked)"><span class="slider"></span></label>
         <span>In der Überschuss-Automatik verwenden</span></div>
       <div id="icons-${id}" style="display:none;flex-wrap:wrap;gap:6px;margin-top:10px;max-height:230px;overflow-y:auto">
         ${shellyIcons.map(i => `<button class="ghost" style="font-size:22px;padding:4px 8px" onclick="shellySetIcon('${id}', '${i}')">${i}</button>`).join('')}

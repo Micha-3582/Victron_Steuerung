@@ -86,7 +86,8 @@ class SurplusController:
             hold = dict(self._hold_until)
             last = dict(self._last_change)
         autos = [d for d in devices
-                 if d.get("auto") and float(d.get("power_w") or 0) > 0 and d.get("online")
+                 if d.get("auto") and d.get("switchable", True) and float(d.get("power_w") or 0) > 0
+                 and d.get("online")
                  and hold.get(d["id"], now) <= now]
 
         def waited(d, key, default_min):
