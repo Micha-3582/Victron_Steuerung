@@ -852,7 +852,7 @@ async function shellyAddIp(ip) {
     try { await shellyApi('/api/shelly', 'POST', { ip, password }); }
     catch (e2) { shellyMsg(e2.message, true); return; }
   }
-  shellyMsg('Hinzugefügt.'); document.getElementById('shelly-ip').value = ''; document.getElementById('shelly-found').innerHTML = '';
+  document.getElementById('shelly-ip').value = ''; foundAdded(ip);
   loadShellyAdmin();
 }
 document.getElementById('shelly-add').addEventListener('click', () => {
@@ -864,7 +864,7 @@ document.getElementById('shelly-scan').addEventListener('click', async e => {
     const found = await shellyApi('/api/shelly/scan', 'POST');
     const fresh = found.filter(f => !f.known);
     shellyMsg(found.length ? `${found.length} Shelly gefunden, ${fresh.length} noch nicht angelegt.` : 'Keine Shelly-Geräte gefunden.');
-    document.getElementById('shelly-found').innerHTML = fresh.map(f => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    document.getElementById('shelly-found').innerHTML = fresh.map(f => `<div data-key="${escH(f.ip)}" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <div style="flex:1;min-width:150px"><b>${escH(f.name)}</b><div class="muted">${escH(f.model)} · Gen${f.gen} · ${escH(f.ip)}${f.auth ? ' · 🔒' : ''}</div></div>
       <button onclick="shellyAddIp('${escH(f.ip)}')">Hinzufügen</button></div>`).join('');
   } catch (err) { shellyMsg(err.message, true); }
@@ -894,13 +894,21 @@ document.getElementById('tuya-scan').addEventListener('click', async e => {
     const found = await shellyApi('/api/tuya/scan', 'POST');
     const fresh = found.filter(f => !f.known);
     shellyMsg(found.length ? `${found.length} Tuya-Gerät(e) im Konto, ${fresh.length} noch nicht angelegt.` : 'Im Tuya-Konto wurden keine Geräte gefunden.');
-    document.getElementById('shelly-found').innerHTML = fresh.map(f => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    document.getElementById('shelly-found').innerHTML = fresh.map(f => `<div data-key="${escH(f.dev_id)}" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <div style="flex:1;min-width:150px"><b>${escH(f.name)}</b><div class="muted">${escH(f.model)} · ${f.found_local ? escH(f.ip) + ' · Protokoll ' + escH(f.version) : '<span style="color:#e5544a">im Heimnetz nicht gefunden</span>'}</div></div>
       ${f.found_local ? `<button onclick="tuyaAdd('${escH(f.dev_id)}')">Hinzufügen</button>`
         : `<button class="ghost" onclick="tuyaAddManual('${escH(f.dev_id)}')">IP eintragen</button>`}</div>`).join('');
   } catch (err) { shellyMsg(err.message, true); }
   b.disabled = false;
 });
+/* Nach dem Anlegen bleibt die Trefferliste stehen - nur die erledigte Zeile verschwindet. */
+function foundAdded(key) {
+  const box = document.getElementById('shelly-found');
+  box.querySelectorAll('[data-key]').forEach(r => { if (r.dataset.key === key) r.remove(); });
+  const left = box.querySelectorAll('[data-key]').length;
+  shellyMsg(left ? `Hinzugefügt ✓ – noch ${left} weitere in der Liste.` : 'Hinzugefügt ✓ – keine weiteren Treffer.');
+  savedToast('Hinzugefügt ✓');
+}
 async function tuyaAddManual(devId) {
   const ip = await uiDialog({ title: 'IP-Adresse eintragen', message: 'Die App prüft, ob das Gerät dort mit seinem Schlüssel antwortet.', label: 'IP-Adresse des Geräts', okText: 'Hinzufügen' });
   if (ip) tuyaAdd(devId, ip);
@@ -908,7 +916,7 @@ async function tuyaAddManual(devId) {
 async function tuyaAdd(devId, ip) {
   try { await shellyApi('/api/tuya/add', 'POST', { dev_id: devId, ip: ip || '' }); }
   catch (e) { shellyMsg(e.message, true); return; }
-  shellyMsg('Hinzugefügt.'); document.getElementById('shelly-found').innerHTML = ''; loadShellyAdmin();
+  foundAdded(devId); loadShellyAdmin();
 }
 loadTuyaInfo();
 
@@ -944,6 +952,7 @@ const ADMIN_TABS = [
     // Speichern-Leiste ueberall ausser bei 'Geraete' (dort speichert jede Aenderung sofort)
     cards.forEach(c => { c.hidden = c.dataset.tab === '*' ? id === 'geraete' : c.dataset.tab !== id; });
     bar.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+    if (id !== 'geraete') { const f = document.getElementById('shelly-found'); if (f) f.innerHTML = ''; }   // Suchergebnisse nur solange man im Reiter bleibt
     bar.querySelector('.active')?.scrollIntoView({ inline: 'center', block: 'nearest' });
     try { localStorage.setItem('adminTab', id); } catch (e) { /* nur Komfort */ }
     if (location.hash !== '#' + id) history.replaceState(null, '', '#' + id);
