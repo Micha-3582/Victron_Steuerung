@@ -25,6 +25,7 @@ import os
 
 import shelly
 import store
+import surplus
 import updater
 from auth import UserError, UserStore, new_secret_key
 from datasources import (OPENMETEO_PR, PvForecast, PvForecastOpenMeteo,
@@ -37,6 +38,7 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)-5s %(name)s | %(message)s",
                     datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger("webapp")
+surplus_ctrl = surplus.SurplusController()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_USERNAME = "Micha3582"
@@ -210,6 +212,9 @@ class Controller:
         self._om = None
         self._om_key = None
         self._stop = threading.Event()
+        self.last_system = None          # letzte Cerbo-Messung (vom Energie-Sampler)
+        self.last_system_ts = 0.0
+        self._surplus_dry_on: dict[str, bool] = {}   # Trockenlauf: gedachter Schaltzustand
 
     def _pv_source(self, cfg):
         key = (cfg["pv_latitude"], cfg["pv_longitude"], str(cfg["pv_planes"]))
@@ -473,6 +478,7 @@ class Controller:
                     with self.lock:
                         price_ct = self.status.get("now_price") if self.status.get("ok") else None
                     store.log_energy_sample(system, now, price_ct=price_ct)
+                    self.last_system, self.last_system_ts = system, time.time()
                     self._check_battery_watchdog(system, now)
             except Exception as e:                       # noqa: BLE001
                 log.warning("Energie-Sampler: %s", e)
@@ -482,11 +488,53 @@ class Controller:
                 iv = 10
             self._stop.wait(iv)
 
+    def run_surplus(self):
+        """Ueberschuss-Automatik fuer Shelly-Geraete (alle 10 s). Nutzt die Messwerte
+        des Energie-Samplers; ohne frische Werte wird nichts geschaltet."""
+        while not self._stop.is_set():
+            try:
+                cfg = store.load_config()
+                if cfg.get("surplus_enabled"):
+                    system = self.last_system if time.time() - self.last_system_ts < 45 else None
+                    if system:
+                        dry = bool(cfg.get("surplus_dry_run"))
+                        devs = shelly.list_with_status()
+                        if dry:      # Trockenlauf: mit gedachtem statt echtem Zustand rechnen
+                            for d in devs:
+                                if d["id"] in self._surplus_dry_on:
+                                    d["on"] = self._surplus_dry_on[d["id"]]
+                        act = surplus_ctrl.step(datetime.now(), system, cfg, devs)
+                        if act:
+                            self._apply_surplus(act, dry)
+                else:
+                    surplus_ctrl.reset_timers()
+                    self._surplus_dry_on.clear()
+            except Exception as e:                       # noqa: BLE001
+                log.warning("Ueberschuss-Automatik: %s", e)
+            self._stop.wait(10)
+
+    def _apply_surplus(self, act, dry: bool):
+        action, dev, why = act
+        on = action == "on"
+        verb = "eingeschaltet" if on else "ausgeschaltet"
+        if dry:
+            self._surplus_dry_on[dev["id"]] = on
+            text = f"(Trockenlauf) {dev['name']} würde {verb} – {why}"
+        else:
+            try:
+                shelly.set_state(dev["id"], on)
+                text = f"{dev['name']} {verb} – {why}"
+            except shelly.ShellyError as e:
+                text = f"{dev['name']}: Schalten fehlgeschlagen ({e})"
+        log.info("Ueberschuss-Automatik: %s", text)
+        surplus_ctrl.log(text)
+
     def start(self):
         cfg = store.load_config()
         interval = int(cfg.get("poll_seconds", 300))
         threading.Thread(target=self.run, args=(interval,), daemon=True).start()
         threading.Thread(target=self.run_energy, daemon=True).start()
+        threading.Thread(target=self.run_surplus, daemon=True).start()
 
 
 ctrl = Controller()
@@ -746,7 +794,8 @@ def api_config():
                "show_live_values", "show_energy_chart", "show_flow_chart",
                "show_week_overview", "show_month_overview", "show_tibber_card",
                "show_override_card", "show_price_plan", "show_charge_log",
-               "show_ev_card", "show_shelly_card"] + list(Params().__dict__.keys())
+               "show_ev_card", "show_shelly_card", "surplus_enabled", "surplus_dry_run",
+               "surplus_min_soc"] + list(Params().__dict__.keys())
     for key in allowed:
         if key in body:
             cfg[key] = body[key]
@@ -874,6 +923,15 @@ def api_shelly_list():
     return jsonify(shelly.list_with_status(only_shown=request.args.get("dashboard") == "1"))
 
 
+@app.route("/api/shelly/auto", methods=["GET"])
+def api_shelly_auto():
+    cfg = store.load_config()
+    return jsonify({"enabled": bool(cfg.get("surplus_enabled")),
+                    "dry_run": bool(cfg.get("surplus_dry_run")),
+                    "min_soc": cfg.get("surplus_min_soc", surplus.DEFAULT_MIN_SOC),
+                    "events": surplus_ctrl.recent()})
+
+
 @app.route("/api/shelly/icons", methods=["GET"])
 def api_shelly_icons():
     return jsonify(shelly.ICONS)
@@ -916,7 +974,9 @@ def api_shelly_modify(dev_id):
         body = request.get_json(silent=True) or {}
         try:
             ok = shelly.update(dev_id, name=body.get("name"), icon=body.get("icon"),
-                               show=body.get("show"))
+                               show=body.get("show"), auto=body.get("auto"),
+                               power_w=body.get("power_w"), min_on_min=body.get("min_on_min"),
+                               min_off_min=body.get("min_off_min"))
         except shelly.ShellyError as e:
             return jsonify(error=str(e)), 400
     return jsonify(ok=True) if ok else (jsonify(error="nicht gefunden"), 404)
@@ -926,9 +986,11 @@ def api_shelly_modify(dev_id):
 def api_shelly_switch(dev_id):
     on = bool((request.get_json(silent=True) or {}).get("on"))
     try:
-        return jsonify(shelly.set_state(dev_id, on))
+        result = shelly.set_state(dev_id, on)
     except shelly.ShellyError as e:
         return jsonify(error=str(e)), 502
+    surplus_ctrl.note_manual(dev_id)      # Handschaltung: Automatik pausiert fuer dieses Geraet
+    return jsonify(result)
 
 
 @app.route("/api/test-connection", methods=["POST"])

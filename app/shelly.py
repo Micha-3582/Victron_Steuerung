@@ -160,6 +160,7 @@ def add_by_ip(ip: str, password: str = "") -> list[dict]:
         entry = {"id": dev_id, "mac": info["mac"], "ip": ip, "gen": info["gen"],
                  "channel": ch, "model": info["model"], "name": name,
                  "icon": DEFAULT_ICON, "show": False,
+                 "auto": False, "power_w": 0, "min_on_min": 5, "min_off_min": 5,
                  "user": "admin" if password else "", "password": password}
         items.append(entry)
         added.append(entry)
@@ -167,30 +168,56 @@ def add_by_ip(ip: str, password: str = "") -> list[dict]:
     return added
 
 
+def _num(v, lo, hi, what):
+    try:
+        n = int(float(v))
+    except (TypeError, ValueError):
+        raise ShellyError(f"{what}: ungültiger Wert")
+    if not lo <= n <= hi:
+        raise ShellyError(f"{what}: erlaubt sind {lo} bis {hi}")
+    return n
+
+
 def update(dev_id: str, name: str | None = None, icon: str | None = None,
-           show: bool | None = None) -> bool:
-    """Name, Symbol und Dashboard-Sichtbarkeit eines Geraets aendern."""
+           show: bool | None = None, auto: bool | None = None, power_w=None,
+           min_on_min=None, min_off_min=None) -> bool:
+    """Name, Symbol, Dashboard-Sichtbarkeit und Ueberschuss-Automatik eines Geraets aendern."""
     if icon is not None and icon not in ICONS:
         raise ShellyError("Unbekanntes Symbol")
     items = load_devices()
     for d in items:
         if d["id"] == dev_id:
+            if power_w is not None:
+                d["power_w"] = _num(power_w, 0, 20000, "Leistung (W)")
+            if min_on_min is not None:
+                d["min_on_min"] = _num(min_on_min, 0, 1440, "Mindest-Einschaltdauer")
+            if min_off_min is not None:
+                d["min_off_min"] = _num(min_off_min, 0, 1440, "Mindest-Pause")
+            if auto:
+                if int(d.get("power_w") or 0) <= 0:
+                    raise ShellyError("Für die Automatik zuerst die Leistung des Geräts (W) eintragen")
             if name is not None:
                 d["name"] = name.strip()[:60] or d["name"]
             if icon is not None:
                 d["icon"] = icon
             if show is not None:
                 d["show"] = bool(show)
+            if auto is not None:
+                d["auto"] = bool(auto)
             _save(items)
             return True
     return False
 
 
 def reorder(ids: list[str]) -> None:
-    """Neue Reihenfolge (Liste der IDs); nicht genannte Geraete rutschen ans Ende."""
+    """Neue Reihenfolge fuer die genannten Geraete. Sie belegen nur die Plaetze, die sie
+    schon hatten - nicht genannte (z.B. nicht aufs Dashboard freigegebene) behalten ihre Position."""
     items = load_devices()
-    pos = {i: n for n, i in enumerate(ids)}
-    items.sort(key=lambda d: pos.get(d["id"], len(pos)))    # stabil
+    by_id = {d["id"]: d for d in items}
+    ids = [i for i in ids if i in by_id]
+    slots = sorted(n for n, d in enumerate(items) if d["id"] in set(ids))
+    for slot, i in zip(slots, ids):
+        items[slot] = by_id[i]
     _save(items)
 
 
@@ -255,6 +282,10 @@ def list_with_status(only_shown: bool = False) -> list[dict]:
         pub = {k: v for k, v in d.items() if k not in ("password", "user")}
         pub.setdefault("icon", DEFAULT_ICON)
         pub.setdefault("show", False)
+        pub.setdefault("auto", False)
+        pub.setdefault("power_w", 0)
+        pub.setdefault("min_on_min", 5)
+        pub.setdefault("min_off_min", 5)
         pub.update(st)
         out.append(pub)
     return out
