@@ -634,6 +634,23 @@ async function shellyApi(url, method, body) {
   return j;
 }
 function shellyMsg(t, err) { const m = document.getElementById('shelly-msg'); m.textContent = t || ''; m.style.color = err ? '#e5544a' : ''; }
+const POWER_ON_STYLE = 'background:var(--green);border-color:var(--green);color:#0b1f14';
+function shellyStatText(d) {
+  return !d.online ? 'nicht erreichbar' : (d.on ? 'an' : 'aus') + (d.power != null ? ` · ${Math.round(d.power)} W` : '');
+}
+/* Nur Status/Watt/Knopffarbe aktualisieren - Eingabefelder und offene Symbolauswahl bleiben unangetastet */
+async function refreshShellyStatus() {
+  let list; try { list = await (await fetch('/api/shelly')).json(); } catch (e) { return; }
+  if (!Array.isArray(list)) return;
+  for (const d of list) {
+    const row = [...document.querySelectorAll('#shelly-devs [data-dev]')].find(el => el.dataset.dev === d.id);
+    if (!row) continue;
+    row.querySelector('.dev-stat').textContent = shellyStatText(d);
+    const b = row.querySelector('.dev-power');
+    b.dataset.on = d.on ? '1' : '0'; b.disabled = !d.online;
+    b.style.cssText = d.on ? POWER_ON_STYLE : '';
+  }
+}
 async function loadShellyAdmin() {
   if (!shellyIcons.length) { try { shellyIcons = await (await fetch('/api/shelly/icons')).json(); } catch (e) { /* egal */ } }
   let list = [];
@@ -642,15 +659,15 @@ async function loadShellyAdmin() {
   if (!Array.isArray(list) || !list.length) { box.innerHTML = '<div class="muted">Noch keine Geräte angelegt.</div>'; return; }
   const prio = {}; list.filter(d => d.auto).forEach((d, n) => { prio[d.id] = n + 1; });
   box.innerHTML = list.map(d => {
-    const stat = !d.online ? 'nicht erreichbar' : (d.on ? 'an' : 'aus') + (d.power != null ? ` · ${Math.round(d.power)} W` : '');
+    const stat = shellyStatText(d);
     const id = escH(d.id);
     return `<div data-dev="${id}" style="border:1px solid var(--border);border-radius:10px;padding:10px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <button class="ghost" style="font-size:22px;padding:4px 10px" title="Symbol wählen" onclick="shellyPickIcon('${id}')">${escH(d.icon)}</button>
         <div style="flex:1;min-width:150px"><b>${escH(d.name)}</b>
-          <div class="muted">${escH(d.model)} · ${escH(d.ip)} · ${stat}</div></div>
+          <div class="muted">${escH(d.model)} · ${escH(d.ip)} · <span class="dev-stat">${stat}</span></div></div>
         <button class="ghost" onclick="shellyRename('${id}', this)" data-name="${escH(d.name)}" title="Umbenennen">✎</button>
-        <button class="ghost" onclick="shellyTest('${id}', ${d.on ? 'false' : 'true'})" ${d.online ? '' : 'disabled'} title="Testschalten">⏻</button>
+        <button class="ghost dev-power" data-on="${d.on ? '1' : '0'}" style="${d.on ? POWER_ON_STYLE : ''}" onclick="shellyTest('${id}', this)" ${d.online ? '' : 'disabled'} title="Testschalten">⏻</button>
         <button class="ghost" onclick="shellyMove('${id}', -1)" title="Höhere Priorität / weiter nach oben">▲</button>
         <button class="ghost" onclick="shellyMove('${id}', 1)" title="Niedrigere Priorität / weiter nach unten">▼</button>
         <button class="ghost" onclick="shellyRemove('${id}')" title="Entfernen">✕</button>
@@ -713,10 +730,13 @@ async function shellyRename(id, btn) {
   try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { name: n }); } catch (e) { shellyMsg(e.message, true); }
   loadShellyAdmin();
 }
-async function shellyTest(id, on) {
+async function shellyTest(id, btn) {
+  const on = btn.dataset.on !== '1';
   try { await shellyApi('/api/shelly/' + encodeURIComponent(id) + '/switch', 'POST', { on }); shellyMsg(''); }
   catch (e) { shellyMsg(e.message, true); }
-  loadShellyAdmin();
+  refreshShellyStatus();
+  // Der Leistungsmesser des Shelly braucht einen Moment - Anzeige kurz danach nachziehen
+  setTimeout(refreshShellyStatus, 1500); setTimeout(refreshShellyStatus, 4000);
 }
 async function shellyRemove(id) {
   if (!await uiDialog({ title: 'Gerät entfernen?', message: 'Das Gerät wird nur aus dieser Liste entfernt – am Shelly selbst ändert sich nichts.', okText: 'Entfernen' })) return;
@@ -751,6 +771,7 @@ document.getElementById('shelly-scan').addEventListener('click', async e => {
 });
 loadShellyAdmin();
 loadSurplus(true);
+setInterval(refreshShellyStatus, 5000);
 setInterval(() => loadSurplus(false), 15000);
 
 init();

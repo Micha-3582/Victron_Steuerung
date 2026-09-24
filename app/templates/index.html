@@ -1117,6 +1117,7 @@ async function shellySwitch(id, on, el) {
     if (!r.ok) alert((await r.json().catch(() => ({}))).error || 'Schalten fehlgeschlagen');
   } catch (e) { alert('Schalten fehlgeschlagen'); }
   loadShelly();
+  setTimeout(loadShelly, 2000);   // Leistungsmessung des Shelly braucht einen Moment
 }
 /* Umsortieren wie bei den Live-Werten: lang druecken, dann ueber andere Kachel ziehen. */
 function initShellyDragging() {
