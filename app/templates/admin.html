@@ -379,6 +379,9 @@
         <div><label>Region</label><select id="tuya-region"></select></div>
         <div><label>Access ID</label><input id="tuya-key" autocomplete="off"></div>
         <div><label>Access Secret</label><input id="tuya-secret" type="password" autocomplete="new-password"></div>
+        <div><label>Weitere Netze / VLANs (optional)</label><input id="tuya-networks" placeholder="z.B. 192.168.178.0/24, 192.168.48.0/21" autocomplete="off">
+          <div class="muted">Geräte in anderen VLANs werden per Broadcast nicht gefunden – hier deren Netze eintragen,
+            dann sucht die App dort gezielt. Der Server muss dorthin routen dürfen (Port 6668).</div></div>
         <div style="display:flex;align-items:flex-end"><button id="tuya-save" class="ghost">Zugang speichern</button></div>
       </div>
     </details>
@@ -828,13 +831,15 @@ async function loadTuyaInfo() {
   const sel = document.getElementById('tuya-region');
   sel.innerHTML = Object.entries(t.regions).map(([k, v]) => `<option value="${k}">${escH(v)}</option>`).join('');
   sel.value = t.region; document.getElementById('tuya-key').value = t.api_key;
+  document.getElementById('tuya-networks').value = t.networks || '';
   document.getElementById('tuya-secret').placeholder = t.configured ? '(gespeichert – leer lassen = unverändert)' : '';
   document.getElementById('tuya-setup').open = !t.configured;
 }
 document.getElementById('tuya-save').addEventListener('click', async () => {
   try {
     await shellyApi('/api/tuya/credentials', 'POST', { region: document.getElementById('tuya-region').value,
-      api_key: document.getElementById('tuya-key').value, api_secret: document.getElementById('tuya-secret').value });
+      api_key: document.getElementById('tuya-key').value, api_secret: document.getElementById('tuya-secret').value,
+      networks: document.getElementById('tuya-networks').value });
     document.getElementById('tuya-secret').value = ''; shellyMsg('Tuya-Zugang gespeichert.'); loadTuyaInfo();
   } catch (e) { shellyMsg(e.message, true); }
 });
@@ -846,12 +851,17 @@ document.getElementById('tuya-scan').addEventListener('click', async e => {
     shellyMsg(found.length ? `${found.length} Tuya-Gerät(e) im Konto, ${fresh.length} noch nicht angelegt.` : 'Im Tuya-Konto wurden keine Geräte gefunden.');
     document.getElementById('shelly-found').innerHTML = fresh.map(f => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <div style="flex:1;min-width:150px"><b>${escH(f.name)}</b><div class="muted">${escH(f.model)} · ${f.found_local ? escH(f.ip) + ' · Protokoll ' + escH(f.version) : '<span style="color:#e5544a">im Heimnetz nicht gefunden</span>'}</div></div>
-      ${f.found_local ? `<button onclick="tuyaAdd('${escH(f.dev_id)}')">Hinzufügen</button>` : ''}</div>`).join('');
+      ${f.found_local ? `<button onclick="tuyaAdd('${escH(f.dev_id)}')">Hinzufügen</button>`
+        : `<button class="ghost" onclick="tuyaAddManual('${escH(f.dev_id)}')">IP eintragen</button>`}</div>`).join('');
   } catch (err) { shellyMsg(err.message, true); }
   b.disabled = false;
 });
-async function tuyaAdd(devId) {
-  try { await shellyApi('/api/tuya/add', 'POST', { dev_id: devId }); }
+async function tuyaAddManual(devId) {
+  const ip = await uiDialog({ title: 'IP-Adresse eintragen', message: 'Die App prüft, ob das Gerät dort mit seinem Schlüssel antwortet.', label: 'IP-Adresse des Geräts', okText: 'Hinzufügen' });
+  if (ip) tuyaAdd(devId, ip);
+}
+async function tuyaAdd(devId, ip) {
+  try { await shellyApi('/api/tuya/add', 'POST', { dev_id: devId, ip: ip || '' }); }
   catch (e) { shellyMsg(e.message, true); return; }
   shellyMsg('Hinzugefügt.'); document.getElementById('shelly-found').innerHTML = ''; loadShellyAdmin();
 }

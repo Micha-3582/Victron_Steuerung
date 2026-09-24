@@ -952,7 +952,8 @@ def api_tuya_info():
 def api_tuya_credentials():
     body = request.get_json(silent=True) or {}
     try:
-        tuya.save_credentials(body.get("region"), body.get("api_key"), body.get("api_secret"))
+        tuya.save_credentials(body.get("region"), body.get("api_key"), body.get("api_secret"),
+                              body.get("networks"))
     except tuya.TuyaError as e:
         return jsonify(error=str(e)), 400
     return jsonify(ok=True)
@@ -974,7 +975,7 @@ def api_tuya_scan():
 def api_tuya_add():
     dev_id = str((request.get_json(silent=True) or {}).get("dev_id") or "")
     try:
-        entry = shelly.add_tuya(dev_id)
+        entry = shelly.add_tuya(dev_id, str((request.get_json(silent=True) or {}).get("ip") or ""))
     except shelly.ShellyError as e:
         return jsonify(error=str(e)), 400
     return jsonify({"added": entry["id"]}), 201

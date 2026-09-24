@@ -9,6 +9,7 @@ nur die Tuya-Funktionen melden einen verstaendlichen Fehler.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import os
@@ -61,10 +62,27 @@ def credentials_public() -> dict:
     c = load_credentials()
     return {"configured": bool(c.get("api_key") and c.get("api_secret")),
             "region": c.get("region") or "eu", "api_key": c.get("api_key", ""),
-            "regions": REGIONS}
+            "networks": ", ".join(c.get("networks") or []), "regions": REGIONS}
 
 
-def save_credentials(region: str, api_key: str, api_secret: str = ""):
+def parse_networks(text: str) -> list[str]:
+    """Weitere Netze (andere VLANs) fuer die Suche, z.B. '192.168.178.0/24, 192.168.48.0/21'."""
+    out = []
+    for tok in (text or "").replace(";", ",").replace("\n", ",").replace(" ", ",").split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        try:
+            net = ipaddress.ip_network(tok, strict=False)
+        except ValueError:
+            raise TuyaError(f"Ungültiges Netz: {tok} (Beispiel: 192.168.178.0/24)")
+        if net.version != 4 or not net.is_private or net.prefixlen < 20:
+            raise TuyaError(f"{tok}: nur private IPv4-Netze bis /20 (max. 4096 Adressen) erlaubt")
+        out.append(str(net))
+    return out
+
+
+def save_credentials(region: str, api_key: str, api_secret: str = "", networks: str | None = None):
     region = (region or "eu").strip()
     if region not in REGIONS:
         raise TuyaError("Unbekannte Region")
@@ -73,8 +91,9 @@ def save_credentials(region: str, api_key: str, api_secret: str = ""):
     api_secret = (api_secret or "").strip() or old.get("api_secret", "")   # leer = unveraendert
     if not api_key or not api_secret:
         raise TuyaError("Access ID und Access Secret eintragen")
+    nets = old.get("networks", []) if networks is None else parse_networks(networks)
     with open(CREDENTIALS_PATH, "w", encoding="utf-8") as f:
-        json.dump({"region": region, "api_key": api_key, "api_secret": api_secret}, f, indent=2)
+        json.dump({"region": region, "api_key": api_key, "api_secret": api_secret, "networks": nets}, f, indent=2)
 
 
 # ---------------------------------------------------------------- Suchen
@@ -95,7 +114,17 @@ def discover(known_ids: set[str]) -> list[dict]:
     Rueckgabe: Kandidaten ohne Schluessel; die Schluessel bleiben serverseitig im Zwischenspeicher."""
     tt = _tt()
     cloud = _cloud_devices()
-    local = tt.deviceScan(verbose=False, color=False, poll=False, byID=True) or {}
+    nets = load_credentials().get("networks") or []
+    if nets:
+        # UDP-Broadcast kommt nicht ueber VLAN-Grenzen: zusaetzlich die genannten Netze per TCP (Port 6668)
+        # absuchen; die Geraete werden dort anhand ihrer Cloud-Schluessel erkannt.
+        from tinytuya import scanner          # noqa: PLC0415
+        tdevs = [{"id": d["id"], "key": d["key"], "name": d.get("name") or d["id"], "mac": d.get("mac") or ""}
+                 for d in cloud]
+        local = scanner.devices(verbose=False, color=False, poll=True, byID=True, forcescan=nets,
+                                tuyadevices=tdevs, assume_yes=True) or {}
+    else:
+        local = tt.deviceScan(verbose=False, color=False, poll=False, byID=True) or {}
     out = []
     _scan_cache.clear()
     for d in cloud:
@@ -104,7 +133,7 @@ def discover(known_ids: set[str]) -> list[dict]:
         lo = local.get(d["id"]) or {}
         cand = {"dev_id": d["id"], "name": d.get("name") or d["id"],
                 "model": d.get("product_name") or d.get("category") or "Tuya",
-                "ip": lo.get("ip") or "", "version": str(lo.get("version") or ""),
+                "ip": lo.get("ip") or "", "version": str(lo.get("version") or lo.get("ver") or ""),
                 "key": d["key"]}
         _scan_cache[d["id"]] = cand
         out.append({**{k: v for k, v in cand.items() if k != "key"},
@@ -112,17 +141,41 @@ def discover(known_ids: set[str]) -> list[dict]:
     return out
 
 
-def build_entry(dev_id: str) -> dict:
-    """Legt aus einem Suchergebnis einen Geraete-Eintrag an (Schalt-/Leistungs-Datenpunkt per Statusabfrage)."""
+def _detect_version(entry: dict) -> str:
+    """Protokollversion durch Ausprobieren ermitteln (bei per Hand eingetragener IP)."""
+    for v in ("3.3", "3.4", "3.5", "3.1"):
+        entry["version"] = v
+        try:
+            _raw_status(entry)
+            return v
+        except TuyaError:
+            continue
+    raise TuyaError("Das Gerät antwortet unter dieser IP nicht (Adresse, Netzfreigabe und Schlüssel prüfen)")
+
+
+def build_entry(dev_id: str, ip: str = "") -> dict:
+    """Legt aus einem Suchergebnis einen Geraete-Eintrag an (Schalt-/Leistungs-Datenpunkt per Statusabfrage).
+    `ip`: von Hand eingetragene Adresse fuer Geraete, die die Suche nicht gefunden hat (z.B. anderes VLAN)."""
     cand = _scan_cache.get(dev_id)
     if not cand:
         raise TuyaError("Suchergebnis abgelaufen – bitte erneut nach Tuya-Geräten suchen")
+    manual = bool((ip or "").strip())
+    if manual:
+        try:
+            addr = ipaddress.ip_address(ip.strip())
+        except ValueError:
+            raise TuyaError("Ungültige IP-Adresse")
+        if addr.version != 4 or not addr.is_private or addr.is_loopback:
+            raise TuyaError("Nur IP-Adressen aus dem lokalen Netz erlaubt")
+        cand = {**cand, "ip": str(addr), "version": ""}
     if not cand["ip"]:
         raise TuyaError(f"{cand['name']}: im Heimnetz nicht gefunden – ist das Gerät online und im selben Netz? "
                         "Dann erneut suchen")
     entry = {"kind": "tuya", "dev_id": dev_id, "local_key": cand["key"], "ip": cand["ip"],
              "version": cand["version"] or "3.3", "dp": "1", "power_dp": None, "power_scale": 0.1,
              "model": "Tuya · " + cand["model"], "name": cand["name"], "gen": 0, "channel": 0}
+    if manual:
+        entry["version"] = _detect_version(entry)
     try:
         dps = _raw_status(entry).get("dps") or {}
     except TuyaError as e:

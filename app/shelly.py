@@ -197,9 +197,9 @@ def tuya_scan() -> list[dict]:
     return found
 
 
-def add_tuya(dev_id: str) -> dict:
+def add_tuya(dev_id: str, ip: str = "") -> dict:
     try:
-        entry = tuya.build_entry(dev_id)
+        entry = tuya.build_entry(dev_id, ip)
     except tuya.TuyaError as e:
         raise ShellyError(str(e))
     entry["id"] = f"tuya-{dev_id}-{entry['dp']}"
