@@ -703,6 +703,19 @@ async function shellyApi(url, method, body) {
   if (!r.ok) throw new Error(j.error || ('Fehler ' + r.status));
   return j;
 }
+/* Kleine Bestaetigung unten in der Mitte - im Geraete-Reiter wird jede Aenderung sofort gespeichert */
+let toastTimer = null;
+function savedToast(text = 'Gespeichert ✓') {
+  let el = document.getElementById('save-toast');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'save-toast';
+    el.style.cssText = 'position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:1100;background:var(--green);color:#0b1f14;'
+      + 'font-weight:600;padding:9px 18px;border-radius:999px;box-shadow:0 6px 22px rgba(0,0,0,.45);transition:opacity .3s;pointer-events:none';
+    document.body.appendChild(el);
+  }
+  el.textContent = text; el.style.opacity = '1';
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 1800);
+}
 function shellyMsg(t, err, id = 'shelly-msg') { const m = document.getElementById(id); m.textContent = t || ''; m.style.color = err ? '#e5544a' : ''; }
 function shellyStatText(d) {
   return !d.online ? 'nicht erreichbar' : (d.on ? 'an' : 'aus') + (d.power != null ? ` · ${Math.round(d.power)} W` : '');
@@ -775,7 +788,7 @@ async function loadShellyAdmin() {
   }).join('') : '<div class="muted">Noch kein Gerät ausgewählt.</div>';
 }
 async function shellyField(id, field, value, msgId = 'shelly-msg') {
-  try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { [field]: value }); shellyMsg('', false, msgId); }
+  try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { [field]: value }); shellyMsg('', false, msgId); savedToast(); }
   catch (e) { shellyMsg(e.message, true, msgId); }
   loadShellyAdmin();
 }
@@ -785,6 +798,7 @@ async function shellyMove(id, dir) {
   if (i < 0 || j < 0 || j >= ids.length) return;
   [ids[i], ids[j]] = [ids[j], ids[i]];
   await shellyApi('/api/shelly/auto-order', 'POST', { ids });
+  savedToast();
   loadShellyAdmin();
 }
 async function loadSurplus(fillInputs) {
@@ -802,17 +816,19 @@ async function saveSurplus() {
   await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
     surplus_enabled: document.getElementById('surplus_enabled').checked,
     surplus_dry_run: document.getElementById('surplus_dry_run').checked,
-    ...(v >= 50 && v <= 100 ? { surplus_min_soc: v } : {}) }) });
+    ...(v >= 50 && v <= 100 ? { surplus_min_soc: v } : {}) }) })
+    .then(r => { if (r.ok) savedToast(); else shellyMsg('Speichern fehlgeschlagen', true, 'surplus-msg'); })
+    .catch(() => shellyMsg('Speichern fehlgeschlagen', true, 'surplus-msg'));
   loadSurplus(false);
 }
 ['surplus_enabled', 'surplus_dry_run', 'surplus_min_soc'].forEach(id =>
   document.getElementById(id).addEventListener('change', saveSurplus));
 function shellyPickIcon(id) { const el = document.getElementById('icons-' + id); el.style.display = el.style.display === 'none' ? 'flex' : 'none'; }
-async function shellySetIcon(id, icon) { try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { icon }); } catch (e) { shellyMsg(e.message, true); } loadShellyAdmin(); }
+async function shellySetIcon(id, icon) { try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { icon }); savedToast(); } catch (e) { shellyMsg(e.message, true); } loadShellyAdmin(); }
 async function shellyRename(id, btn) {
   const n = await uiDialog({ title: 'Gerät umbenennen', label: 'Neuer Name', value: btn.dataset.name });
   if (n === null) return;
-  try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { name: n }); } catch (e) { shellyMsg(e.message, true); }
+  try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { name: n }); savedToast(); } catch (e) { shellyMsg(e.message, true); }
   loadShellyAdmin();
 }
 async function shellyTest(id, btn) {
@@ -825,7 +841,7 @@ async function shellyTest(id, btn) {
 }
 async function shellyRemove(id) {
   if (!await uiDialog({ title: 'Gerät entfernen?', message: 'Das Gerät wird nur aus dieser Liste entfernt – am Shelly selbst ändert sich nichts.', okText: 'Entfernen' })) return;
-  await shellyApi('/api/shelly/' + encodeURIComponent(id), 'DELETE'); loadShellyAdmin();
+  await shellyApi('/api/shelly/' + encodeURIComponent(id), 'DELETE'); savedToast('Entfernt ✓'); loadShellyAdmin();
 }
 async function shellyAddIp(ip) {
   try { await shellyApi('/api/shelly', 'POST', { ip }); }
