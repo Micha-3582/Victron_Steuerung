@@ -538,7 +538,7 @@ document.getElementById('btn-check').addEventListener('click', async () => {
   } catch (e) { st.textContent = 'Fehler bei der Prüfung.'; }
 });
 document.getElementById('btn-update').addEventListener('click', async () => {
-  if (!confirm('Jetzt aktualisieren? Die App wird dabei kurz neu gestartet.')) return;
+  if (!await uiDialog({ title: 'Jetzt aktualisieren?', message: 'Die App wird dabei kurz neu gestartet.', okText: 'Aktualisieren' })) return;
   const st = document.getElementById('update-status');
   const out = document.getElementById('update-output');
   st.textContent = 'Lade Update …';
@@ -577,6 +577,34 @@ document.getElementById('btn-pw').addEventListener('click', async () => {
   } catch (e) { msg.textContent = 'Fehler beim Ändern.'; }
   setTimeout(() => msg.textContent = '', 4000);
 });
+
+/* Eigener Dialog im App-Design (statt Browser-prompt/confirm) */
+function uiDialog({ title, message, label, value = '', type = 'text', okText = 'OK' }) {
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px';
+    ov.innerHTML = `<div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;width:100%;max-width:400px;box-shadow:0 12px 40px rgba(0,0,0,.5)">
+      <h3 style="margin:0 0 10px;font-size:17px"></h3>
+      <div class="muted dlg-msg" style="margin-bottom:12px"></div>
+      ${label ? '<label></label><input class="dlg-in">' : ''}
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+        <button class="ghost dlg-no">Abbrechen</button><button class="dlg-ok"></button></div></div>`;
+    ov.querySelector('h3').textContent = title || '';
+    const msg = ov.querySelector('.dlg-msg'); if (message) msg.textContent = message; else msg.remove();
+    ov.querySelector('.dlg-ok').textContent = okText;
+    const inp = ov.querySelector('.dlg-in');
+    if (inp) { ov.querySelector('label').textContent = label; inp.type = type; inp.value = value; }
+    const close = v => { document.removeEventListener('keydown', onKey); ov.remove(); resolve(v); };
+    const ok = () => close(inp ? inp.value : true);
+    const onKey = e => { if (e.key === 'Escape') close(null); else if (e.key === 'Enter') ok(); };
+    ov.querySelector('.dlg-ok').onclick = ok;
+    ov.querySelector('.dlg-no').onclick = () => close(null);
+    ov.addEventListener('mousedown', e => { if (e.target === ov) close(null); });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(ov);
+    if (inp) { inp.focus(); inp.select(); } else ov.querySelector('.dlg-ok').focus();
+  });
+}
 
 /* --- Shelly-Geraete --- */
 const escH = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -619,7 +647,7 @@ function shellyPickIcon(id) { const el = document.getElementById('icons-' + id);
 async function shellySetIcon(id, icon) { try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { icon }); } catch (e) { shellyMsg(e.message, true); } loadShellyAdmin(); }
 async function shellyShow(id, show) { try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { show }); } catch (e) { shellyMsg(e.message, true); } }
 async function shellyRename(id, btn) {
-  const n = prompt('Neuer Name:', btn.dataset.name);
+  const n = await uiDialog({ title: 'Gerät umbenennen', label: 'Neuer Name', value: btn.dataset.name });
   if (n === null) return;
   try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { name: n }); } catch (e) { shellyMsg(e.message, true); }
   loadShellyAdmin();
@@ -630,14 +658,14 @@ async function shellyTest(id, on) {
   loadShellyAdmin();
 }
 async function shellyRemove(id) {
-  if (!confirm('Gerät aus der Liste entfernen? (Am Shelly selbst ändert sich nichts.)')) return;
+  if (!await uiDialog({ title: 'Gerät entfernen?', message: 'Das Gerät wird nur aus dieser Liste entfernt – am Shelly selbst ändert sich nichts.', okText: 'Entfernen' })) return;
   await shellyApi('/api/shelly/' + encodeURIComponent(id), 'DELETE'); loadShellyAdmin();
 }
 async function shellyAddIp(ip) {
   try { await shellyApi('/api/shelly', 'POST', { ip }); }
   catch (e) {
     if (!/Passwort angeben/.test(e.message)) { shellyMsg(e.message, true); return; }
-    const password = prompt('Passwort des Shelly (Benutzer: admin):');
+    const password = await uiDialog({ title: 'Passwort erforderlich', message: 'Dieser Shelly ist geschützt (Benutzer: admin).', label: 'Passwort', type: 'password' });
     if (!password) return;
     try { await shellyApi('/api/shelly', 'POST', { ip, password }); }
     catch (e2) { shellyMsg(e2.message, true); return; }
