@@ -666,7 +666,7 @@ async function loadShellyAdmin() {
         <div><label>Mind. an (min)</label><input type="number" min="0" value="${d.min_on_min}" onchange="shellyField('${id}', 'min_on_min', this.value)"></div>
         <div><label>Mind. aus (min)</label><input type="number" min="0" value="${d.min_off_min}" onchange="shellyField('${id}', 'min_off_min', this.value)"></div>
       </div>
-      <div id="icons-${id}" style="display:none;flex-wrap:wrap;gap:6px;margin-top:10px">
+      <div id="icons-${id}" style="display:none;flex-wrap:wrap;gap:6px;margin-top:10px;max-height:230px;overflow-y:auto">
         ${shellyIcons.map(i => `<button class="ghost" style="font-size:22px;padding:4px 8px" onclick="shellySetIcon('${id}', '${i}')">${i}</button>`).join('')}
       </div></div>`;
   }).join('');
