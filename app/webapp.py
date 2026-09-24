@@ -700,7 +700,8 @@ def api_status():
                "show_price_plan": bool(cfg.get("show_price_plan", True)),
                "show_charge_log": bool(cfg.get("show_charge_log", True)),
                "show_ev_card": bool(cfg.get("show_ev_card", True)),
-               "show_shelly_card": bool(cfg.get("show_shelly_card", True))},
+               "show_shelly_card": bool(cfg.get("show_shelly_card", True)),
+               "tile_order": [k for k in (cfg.get("tile_order") or []) if isinstance(k, str)]},
         "prices": prices,
         "ev_schedules": store.list_ev(),
         "charge_log": charge,
@@ -797,7 +798,10 @@ def api_config():
                "show_week_overview", "show_month_overview", "show_tibber_card",
                "show_override_card", "show_price_plan", "show_charge_log",
                "show_ev_card", "show_shelly_card", "surplus_enabled", "surplus_dry_run",
-               "surplus_min_soc"] + list(Params().__dict__.keys())
+               "surplus_min_soc", "tile_order"] + list(Params().__dict__.keys())
+    if not (isinstance(body.get("tile_order", []), list)
+            and all(isinstance(k, str) for k in body.get("tile_order", []))):
+        body.pop("tile_order", None)          # Kachelreihenfolge: nur Liste von Textschluesseln
     for key in allowed:
         if key in body:
             cfg[key] = body[key]

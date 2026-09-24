@@ -121,6 +121,7 @@
     .dash { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
     .dash > * { min-width: 0; }   /* Grid-Kinder dürfen schrumpfen -> kein Überlauf */
     .dash .full { grid-column: 1 / -1; }
+    .dash > .card { margin-bottom: 0 !important; }   /* Abstand kommt vom Grid-gap */
     @media (max-width: 720px) { .dash { grid-template-columns: 1fr; } }
     .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px;
       font-size: 13px; color: var(--muted); }

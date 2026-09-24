@@ -3,6 +3,7 @@
 
 <div id="banner"></div>
 
+<div class="dash" id="dashboard">
 <div class="card full" id="live-card" style="margin-bottom:14px">
   <h2>Live-Werte (Victron)</h2>
   <div class="sysgrid" id="sysgrid">
@@ -67,7 +68,6 @@
   <div class="table-scroll" style="max-height:400px;overflow-y:auto"><table id="month-table"></table></div>
 </div>
 
-<div class="dash">
   <div class="card" id="tibber-card">
     <h2>Tibber</h2>
     <div class="row">
@@ -112,15 +112,14 @@
     </div>
     <div class="muted" id="planline" style="margin-top:8px"></div>
   </div>
-</div>
 
-<div class="card" id="charge-log-card">
+<div class="card full" id="charge-log-card">
   <h2>Ladevorgänge (heute)</h2>
   <div class="muted" style="margin-bottom:8px">Geplante Ladefenster und tatsächlich durchgeführte – mit Preis, Menge und Kosten. Reset um Mitternacht.</div>
   <div class="table-scroll"><table id="charge-log"></table></div>
 </div>
 
-<div class="card" id="ev-card">
+<div class="card full" id="ev-card">
   <h2>Manuelle Ladetermine</h2>
   <div id="ev-form" class="ev-form">
     <div class="grid2">
@@ -142,6 +141,7 @@
   <h2>Geräte</h2>
   <div class="sysgrid" id="shelly-grid"></div>
 </div>
+</div>
 
 {% endblock %}
 {% block scripts %}
@@ -160,8 +160,15 @@ const TILE_IDS = {
   show_override_card: 'override-card', show_price_plan: 'price-plan-card',
   show_charge_log: 'charge-log-card', show_ev_card: 'ev-card',
 };
+// Reihenfolge der Kacheln (Einstellungen -> Kacheln); Standard = Reihenfolge dieser Liste.
+const ORDER_IDS = { ...TILE_IDS, show_shelly_card: 'shelly-card' };
+function applyTileOrder(order) {
+  const keys = Object.keys(ORDER_IDS), given = (order || []).filter(k => keys.includes(k));
+  [...given, ...keys.filter(k => !given.includes(k))].forEach((k, i) => { const el = $(ORDER_IDS[k]); if (el) el.style.order = i; });
+}
 let shellyEnabled = true;
 function applyTileVisibility(ui) {
+  applyTileOrder(ui.tile_order);
   shellyEnabled = ui.show_shelly_card !== false;
   for (const [key, id] of Object.entries(TILE_IDS)) {
     const el = $(id);

@@ -116,8 +116,8 @@
 
 <div class="card">
   <h2><svg class="h2i" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Kacheln</h2>
-  <div class="muted" style="margin-bottom:12px">Jede Dashboard-Kachel einzeln ein-/ausblendbar – so lässt sich die Startseite
-    auf das Wesentliche zuschneiden.</div>
+  <div class="muted" style="margin-bottom:12px">Jede Dashboard-Kachel einzeln ein-/ausblendbar und mit ▲▼ in der Reihenfolge verschiebbar –
+    so lässt sich die Startseite auf das Wesentliche zuschneiden. (Erst mit „Speichern“ übernommen.)</div>
   <div id="tile-toggles" style="display:flex;flex-direction:column;gap:10px"></div>
 </div>
 
@@ -477,12 +477,30 @@ const TILE_DEFS = [
   { key: 'show_ev_card', label: 'Manuelle Ladetermine', hint: 'Formular zum Anlegen eines Ladetermins.' },
   { key: 'show_shelly_card', label: 'Geräte (Shelly/Tuya)', hint: 'Schalter für smarte Steckdosen auf dem Dashboard.' },
 ];
+let tileOrder = TILE_DEFS.map(t => t.key);   // Reihenfolge auf dem Dashboard (▲▼ unten)
+function mergeTileOrder(saved) {
+  const known = TILE_DEFS.map(t => t.key), s = (saved || []).filter(k => known.includes(k));
+  return [...s, ...known.filter(k => !s.includes(k))];
+}
+function moveTile(key, dir) {
+  const i = tileOrder.indexOf(key), j = i + dir;
+  if (i < 0 || j < 0 || j >= tileOrder.length) return;
+  [tileOrder[i], tileOrder[j]] = [tileOrder[j], tileOrder[i]];
+  renderTileToggles();
+  if (typeof updateTariffFields === 'function') updateTariffFields();   // Sperre (Fork) nach dem Neuzeichnen wieder setzen
+}
 function renderTileToggles() {
-  document.getElementById('tile-toggles').innerHTML = TILE_DEFS.map(t => `
+  const checks = {};
+  TILE_DEFS.forEach(t => { const el = document.getElementById(t.key); if (el) checks[t.key] = el.checked; });
+  const defs = tileOrder.map(k => TILE_DEFS.find(t => t.key === k)).filter(Boolean);
+  document.getElementById('tile-toggles').innerHTML = defs.map((t, i) => `
     <div style="display:flex;align-items:center;gap:14px">
       <label class="switch" style="margin:0"><input type="checkbox" id="${t.key}"><span class="slider"></span></label>
-      <div><b>${t.label}</b><div class="muted">${t.hint}</div></div>
+      <div style="flex:1;min-width:0"><b>${t.label}</b><div class="muted">${t.hint}</div></div>
+      <button type="button" class="ghost" onclick="moveTile('${t.key}', -1)" ${i === 0 ? 'disabled' : ''} title="Weiter nach oben">▲</button>
+      <button type="button" class="ghost" onclick="moveTile('${t.key}', 1)" ${i === defs.length - 1 ? 'disabled' : ''} title="Weiter nach unten">▼</button>
     </div>`).join('');
+  TILE_DEFS.forEach(t => { if (t.key in checks) document.getElementById(t.key).checked = checks[t.key]; });
 }
 renderTileToggles();
 
@@ -494,6 +512,7 @@ async function init() {
   document.getElementById('energy_sample_seconds').value = cfg.energy_sample_seconds ?? 10;
   document.getElementById('chart_energy_hourly').checked = !!cfg.chart_energy_hourly;
   document.getElementById('chart_flow_hourly').checked = !!cfg.chart_flow_hourly;
+  tileOrder = mergeTileOrder(cfg.tile_order); renderTileToggles();
   TILE_DEFS.forEach(t => { document.getElementById(t.key).checked = cfg[t.key] !== false; });
   document.getElementById('openmeteo_pr').value = cfg.openmeteo_pr ?? 0.68;
   const bf = cfg.pv_bucket_factors;
@@ -539,6 +558,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     chart_energy_hourly: document.getElementById('chart_energy_hourly').checked,
     chart_flow_hourly: document.getElementById('chart_flow_hourly').checked,
     ...Object.fromEntries(TILE_DEFS.map(t => [t.key, document.getElementById(t.key).checked])),
+    tile_order: tileOrder,
     openmeteo_pr: numDE(document.getElementById('openmeteo_pr').value) || 0.68,
     cerbo_host: document.getElementById('cerbo_host').value.trim(),
     cerbo_port: parseInt(document.getElementById('cerbo_port').value) || 502,
