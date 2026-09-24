@@ -870,7 +870,22 @@ def api_ev_modify(eid):
 
 @app.route("/api/shelly", methods=["GET"])
 def api_shelly_list():
-    return jsonify(shelly.list_with_status())
+    """?dashboard=1: nur die in den Einstellungen fuers Dashboard freigegebenen."""
+    return jsonify(shelly.list_with_status(only_shown=request.args.get("dashboard") == "1"))
+
+
+@app.route("/api/shelly/icons", methods=["GET"])
+def api_shelly_icons():
+    return jsonify(shelly.ICONS)
+
+
+@app.route("/api/shelly/order", methods=["POST"])
+def api_shelly_order():
+    ids = (request.get_json(silent=True) or {}).get("ids")
+    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+        return jsonify(error="ids fehlt"), 400
+    shelly.reorder(ids)
+    return jsonify(ok=True)
 
 
 @app.route("/api/shelly/scan", methods=["POST"])
@@ -898,7 +913,12 @@ def api_shelly_modify(dev_id):
     if request.method == "DELETE":
         ok = shelly.remove(dev_id)
     else:
-        ok = shelly.rename(dev_id, (request.get_json(silent=True) or {}).get("name", ""))
+        body = request.get_json(silent=True) or {}
+        try:
+            ok = shelly.update(dev_id, name=body.get("name"), icon=body.get("icon"),
+                               show=body.get("show"))
+        except shelly.ShellyError as e:
+            return jsonify(error=str(e)), 400
     return jsonify(ok=True) if ok else (jsonify(error="nicht gefunden"), 404)
 
 

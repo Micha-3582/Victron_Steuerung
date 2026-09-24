@@ -341,6 +341,21 @@
     <span id="grid-msg" class="muted" style="margin-left:12px"></span></div>
 </div>
 
+<div class="card" id="shelly-admin">
+  <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Shelly-Geräte</h2>
+  <div class="muted" style="margin-bottom:12px">Shellys im Heimnetz suchen, benennen und ein Symbol zuweisen.
+    Mit dem Häkchen „Auf dem Dashboard" erscheint das Gerät dort als Schalter
+    (dort per langem Drücken sortierbar).</div>
+  <div id="shelly-devs" style="display:flex;flex-direction:column;gap:10px"></div>
+  <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <button id="shelly-scan" class="ghost">Netzwerk durchsuchen</button>
+    <input type="text" id="shelly-ip" placeholder="oder IP eingeben, z.B. 192.168.2.55" style="flex:1;min-width:190px">
+    <button id="shelly-add" class="ghost">Hinzufügen</button>
+  </div>
+  <div class="muted" id="shelly-msg" style="margin-top:8px"></div>
+  <div id="shelly-found" style="display:flex;flex-direction:column;gap:8px;margin-top:8px"></div>
+</div>
+
 <div class="card">
   <h2><svg class="h2i" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Konto &amp; Zugang</h2>
   <div class="grid2">
@@ -562,6 +577,90 @@ document.getElementById('btn-pw').addEventListener('click', async () => {
   } catch (e) { msg.textContent = 'Fehler beim Ändern.'; }
   setTimeout(() => msg.textContent = '', 4000);
 });
+
+/* --- Shelly-Geraete --- */
+const escH = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let shellyIcons = [];
+async function shellyApi(url, method, body) {
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || ('Fehler ' + r.status));
+  return j;
+}
+function shellyMsg(t, err) { const m = document.getElementById('shelly-msg'); m.textContent = t || ''; m.style.color = err ? '#e5544a' : ''; }
+async function loadShellyAdmin() {
+  if (!shellyIcons.length) { try { shellyIcons = await (await fetch('/api/shelly/icons')).json(); } catch (e) { /* egal */ } }
+  let list = [];
+  try { list = await (await fetch('/api/shelly')).json(); } catch (e) { return; }
+  const box = document.getElementById('shelly-devs');
+  if (!Array.isArray(list) || !list.length) { box.innerHTML = '<div class="muted">Noch keine Geräte angelegt.</div>'; return; }
+  box.innerHTML = list.map(d => {
+    const stat = !d.online ? 'nicht erreichbar' : (d.on ? 'an' : 'aus') + (d.power != null ? ` · ${Math.round(d.power)} W` : '');
+    const id = escH(d.id);
+    return `<div style="border:1px solid var(--border);border-radius:10px;padding:10px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <button class="ghost" style="font-size:22px;padding:4px 10px" title="Symbol wählen" onclick="shellyPickIcon('${id}')">${escH(d.icon)}</button>
+        <div style="flex:1;min-width:150px"><b>${escH(d.name)}</b>
+          <div class="muted">${escH(d.model)} · ${escH(d.ip)} · ${stat}</div></div>
+        <button class="ghost" onclick="shellyRename('${id}', this)" data-name="${escH(d.name)}" title="Umbenennen">✎</button>
+        <button class="ghost" onclick="shellyTest('${id}', ${d.on ? 'false' : 'true'})" ${d.online ? '' : 'disabled'} title="Testschalten">⏻</button>
+        <button class="ghost" onclick="shellyRemove('${id}')" title="Entfernen">✕</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
+        <label class="switch" style="margin:0"><input type="checkbox" ${d.show ? 'checked' : ''} onchange="shellyShow('${id}', this.checked)"><span class="slider"></span></label>
+        <span>Auf dem Dashboard anzeigen</span></div>
+      <div id="icons-${id}" style="display:none;flex-wrap:wrap;gap:6px;margin-top:10px">
+        ${shellyIcons.map(i => `<button class="ghost" style="font-size:22px;padding:4px 8px" onclick="shellySetIcon('${id}', '${i}')">${i}</button>`).join('')}
+      </div></div>`;
+  }).join('');
+}
+function shellyPickIcon(id) { const el = document.getElementById('icons-' + id); el.style.display = el.style.display === 'none' ? 'flex' : 'none'; }
+async function shellySetIcon(id, icon) { try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { icon }); } catch (e) { shellyMsg(e.message, true); } loadShellyAdmin(); }
+async function shellyShow(id, show) { try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { show }); } catch (e) { shellyMsg(e.message, true); } }
+async function shellyRename(id, btn) {
+  const n = prompt('Neuer Name:', btn.dataset.name);
+  if (n === null) return;
+  try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { name: n }); } catch (e) { shellyMsg(e.message, true); }
+  loadShellyAdmin();
+}
+async function shellyTest(id, on) {
+  try { await shellyApi('/api/shelly/' + encodeURIComponent(id) + '/switch', 'POST', { on }); shellyMsg(''); }
+  catch (e) { shellyMsg(e.message, true); }
+  loadShellyAdmin();
+}
+async function shellyRemove(id) {
+  if (!confirm('Gerät aus der Liste entfernen? (Am Shelly selbst ändert sich nichts.)')) return;
+  await shellyApi('/api/shelly/' + encodeURIComponent(id), 'DELETE'); loadShellyAdmin();
+}
+async function shellyAddIp(ip) {
+  try { await shellyApi('/api/shelly', 'POST', { ip }); }
+  catch (e) {
+    if (!/Passwort angeben/.test(e.message)) { shellyMsg(e.message, true); return; }
+    const password = prompt('Passwort des Shelly (Benutzer: admin):');
+    if (!password) return;
+    try { await shellyApi('/api/shelly', 'POST', { ip, password }); }
+    catch (e2) { shellyMsg(e2.message, true); return; }
+  }
+  shellyMsg('Hinzugefügt.'); document.getElementById('shelly-ip').value = ''; document.getElementById('shelly-found').innerHTML = '';
+  loadShellyAdmin();
+}
+document.getElementById('shelly-add').addEventListener('click', () => {
+  const ip = document.getElementById('shelly-ip').value.trim(); if (ip) shellyAddIp(ip);
+});
+document.getElementById('shelly-scan').addEventListener('click', async e => {
+  const b = e.target; b.disabled = true; shellyMsg('Suche läuft … (einige Sekunden)');
+  try {
+    const found = await shellyApi('/api/shelly/scan', 'POST');
+    const fresh = found.filter(f => !f.known);
+    shellyMsg(found.length ? `${found.length} Shelly gefunden, ${fresh.length} noch nicht angelegt.` : 'Keine Shelly-Geräte gefunden.');
+    document.getElementById('shelly-found').innerHTML = fresh.map(f => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="flex:1;min-width:150px"><b>${escH(f.name)}</b><div class="muted">${escH(f.model)} · Gen${f.gen} · ${escH(f.ip)}${f.auth ? ' · 🔒' : ''}</div></div>
+      <button onclick="shellyAddIp('${escH(f.ip)}')">Hinzufügen</button></div>`).join('');
+  } catch (err) { shellyMsg(err.message, true); }
+  b.disabled = false;
+});
+loadShellyAdmin();
 
 init();
 </script>

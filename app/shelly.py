@@ -22,6 +22,11 @@ log = logging.getLogger("shelly")
 DEVICES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shelly_devices.json")
 _lock = threading.Lock()
 
+# Auswahl fuer die Geraete-Symbole (Einstellungen); Standard = Steckdose
+ICONS = ["🔌", "💡", "🔥", "♨️", "🌡️", "❄️", "🌀", "💧", "🚗", "🧺", "🫧", "🍳",
+         "🏊", "🖥️", "📺", "🎧", "🔔", "🌿", "🛋️", "🔒"]
+DEFAULT_ICON = ICONS[0]
+
 PROBE_TIMEOUT = 0.8      # Subnetz-Scan (LAN-Antwort < 100 ms)
 CALL_TIMEOUT = 3.0       # Status/Schalten
 
@@ -154,6 +159,7 @@ def add_by_ip(ip: str, password: str = "") -> list[dict]:
         name = info["name"] if len(channels) == 1 else f"{info['name']} K{ch + 1}"
         entry = {"id": dev_id, "mac": info["mac"], "ip": ip, "gen": info["gen"],
                  "channel": ch, "model": info["model"], "name": name,
+                 "icon": DEFAULT_ICON, "show": False,
                  "user": "admin" if password else "", "password": password}
         items.append(entry)
         added.append(entry)
@@ -161,14 +167,31 @@ def add_by_ip(ip: str, password: str = "") -> list[dict]:
     return added
 
 
-def rename(dev_id: str, name: str) -> bool:
+def update(dev_id: str, name: str | None = None, icon: str | None = None,
+           show: bool | None = None) -> bool:
+    """Name, Symbol und Dashboard-Sichtbarkeit eines Geraets aendern."""
+    if icon is not None and icon not in ICONS:
+        raise ShellyError("Unbekanntes Symbol")
     items = load_devices()
     for d in items:
         if d["id"] == dev_id:
-            d["name"] = (name or "").strip()[:60] or d["name"]
+            if name is not None:
+                d["name"] = name.strip()[:60] or d["name"]
+            if icon is not None:
+                d["icon"] = icon
+            if show is not None:
+                d["show"] = bool(show)
             _save(items)
             return True
     return False
+
+
+def reorder(ids: list[str]) -> None:
+    """Neue Reihenfolge (Liste der IDs); nicht genannte Geraete rutschen ans Ende."""
+    items = load_devices()
+    pos = {i: n for n, i in enumerate(ids)}
+    items.sort(key=lambda d: pos.get(d["id"], len(pos)))    # stabil
+    _save(items)
 
 
 def remove(dev_id: str) -> bool:
@@ -219,9 +242,10 @@ def set_state(dev_id: str, on: bool) -> dict:
     return status(d)
 
 
-def list_with_status() -> list[dict]:
-    """Angelegte Geraete inkl. Live-Status (parallel abgefragt). Ohne Passwort."""
-    items = load_devices()
+def list_with_status(only_shown: bool = False) -> list[dict]:
+    """Angelegte Geraete inkl. Live-Status (parallel abgefragt). Ohne Passwort.
+    only_shown: nur die fuers Dashboard freigegebenen (Reihenfolge wie gespeichert)."""
+    items = [d for d in load_devices() if d.get("show")] if only_shown else load_devices()
     if not items:
         return []
     with ThreadPoolExecutor(max_workers=min(16, len(items))) as ex:
@@ -229,6 +253,8 @@ def list_with_status() -> list[dict]:
     out = []
     for d, st in zip(items, states):
         pub = {k: v for k, v in d.items() if k not in ("password", "user")}
+        pub.setdefault("icon", DEFAULT_ICON)
+        pub.setdefault("show", False)
         pub.update(st)
         out.append(pub)
     return out

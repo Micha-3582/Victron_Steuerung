@@ -138,17 +138,9 @@
   <div class="table-scroll"><table id="ev-list" style="margin-top:16px"></table></div>
 </div>
 
-<div class="card" id="shelly-card">
-  <h2>Shelly-Geräte</h2>
-  <div class="muted" style="margin-bottom:8px">Shellys im Heimnetz finden und schalten.</div>
-  <div class="table-scroll"><table id="shelly-list"></table></div>
-  <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <button id="shelly-scan" class="ghost">Netzwerk durchsuchen</button>
-    <input type="text" id="shelly-ip" placeholder="oder IP eingeben, z.B. 192.168.2.55" style="flex:1;min-width:190px">
-    <button id="shelly-add" class="ghost">Hinzufügen</button>
-  </div>
-  <div class="muted" id="shelly-msg" style="margin-top:8px"></div>
-  <div class="table-scroll"><table id="shelly-found" style="margin-top:8px"></table></div>
+<div class="card full" id="shelly-card" hidden style="margin-bottom:14px">
+  <h2>Geräte</h2>
+  <div class="sysgrid" id="shelly-grid"></div>
 </div>
 
 {% endblock %}
@@ -166,9 +158,11 @@ const TILE_IDS = {
   show_flow_chart: 'flow-card', show_week_overview: 'week-card',
   show_month_overview: 'month-card', show_tibber_card: 'tibber-card',
   show_override_card: 'override-card', show_price_plan: 'price-plan-card',
-  show_charge_log: 'charge-log-card', show_ev_card: 'ev-card', show_shelly_card: 'shelly-card',
+  show_charge_log: 'charge-log-card', show_ev_card: 'ev-card',
 };
+let shellyEnabled = true;
 function applyTileVisibility(ui) {
+  shellyEnabled = ui.show_shelly_card !== false;
   for (const [key, id] of Object.entries(TILE_IDS)) {
     const el = $(id);
     if (el) el.hidden = ui[key] === false;
@@ -1090,72 +1084,87 @@ setInterval(loadLive, 2000);   // Live-Werte vom Cerbo (wie Victron: alle 2 s)
 setInterval(loadWeek, 300000);  // Wochenrückblick (ändert sich langsam)
 setInterval(loadMonth, 300000); // Monatsüberblick (ändert sich langsam)
 
-/* --- Shelly --- */
+/* --- Shelly-Geraete (Auswahl/Symbole in den Einstellungen; hier nur Schalten + Sortieren) --- */
 const escH = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function shellyApi(url, method, body) {
-  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || ('Fehler ' + r.status));
-  return j;
-}
-function shellyMsg(t, err) { const m = $('shelly-msg'); m.textContent = t || ''; m.style.color = err ? '#e5544a' : ''; }
+let shellyDragActive = false;   // waehrend Verschieben: Neuaufbau pausieren
 async function loadShelly() {
-  if ($('shelly-card').hidden) return;
+  if (shellyDragActive) return;
+  const card = $('shelly-card');
+  if (!shellyEnabled) { card.hidden = true; return; }
   let list;
-  try { list = await (await fetch('/api/shelly')).json(); } catch (e) { return; }
-  const t = $('shelly-list');
-  if (!Array.isArray(list) || !list.length) { t.innerHTML = '<tr><td class="muted">Noch keine Geräte angelegt.</td></tr>'; return; }
-  t.innerHTML = list.map(d => {
-    const pw = d.online && d.power != null ? ` · ${Math.round(d.power)} W` : '';
-    const stat = d.online ? (d.on ? 'an' : 'aus') + pw : 'nicht erreichbar';
-    return `<tr><td><b>${escH(d.name)}</b><div class="muted">${escH(d.model)} · ${escH(d.ip)} · ${stat}</div></td>
-      <td style="text-align:right;white-space:nowrap">
-        <label class="switch" style="display:inline-block;vertical-align:middle"><input type="checkbox" ${d.on ? 'checked' : ''} ${d.online ? '' : 'disabled'} onchange="shellySwitch('${d.id}', this.checked, this)"><span class="slider"></span></label>
-        <button class="ghost" style="margin-left:8px" onclick="shellyRename('${d.id}', this)" data-name="${escH(d.name)}" title="Umbenennen">✎</button>
-        <button class="ghost" onclick="shellyRemove('${d.id}')" title="Entfernen">✕</button></td></tr>`;
+  try { list = await (await fetch('/api/shelly?dashboard=1')).json(); } catch (e) { return; }
+  if (shellyDragActive) return;
+  if (!Array.isArray(list) || !list.length) { card.hidden = true; return; }
+  card.hidden = false;
+  $('shelly-grid').innerHTML = list.map(d => {
+    const stat = !d.online ? 'nicht erreichbar'
+      : (d.on ? 'an' : 'aus') + (d.power != null ? ` · ${Math.round(d.power)} W` : '');
+    return `<div class="systile" data-tile-id="${escH(d.id)}" ${d.online ? '' : 'style="opacity:.55"'}>
+      <div class="systile-t">${escH(d.name)}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span style="font-size:30px;line-height:1.1">${escH(d.icon)}</span>
+        <label class="switch"><input type="checkbox" ${d.on ? 'checked' : ''} ${d.online ? '' : 'disabled'}
+          onchange="shellySwitch('${escH(d.id)}', this.checked, this)"><span class="slider"></span></label>
+      </div>
+      <div class="systile-s">${stat}</div></div>`;
   }).join('');
 }
 async function shellySwitch(id, on, el) {
   el.disabled = true;
-  try { await shellyApi('/api/shelly/' + id + '/switch', 'POST', { on }); shellyMsg(''); }
-  catch (e) { shellyMsg(e.message, true); }
-  await loadShelly();
-}
-async function shellyRename(id, btn) {
-  const n = prompt('Neuer Name:', btn.dataset.name);
-  if (n === null) return;
-  await shellyApi('/api/shelly/' + id, 'PATCH', { name: n }); loadShelly();
-}
-async function shellyRemove(id) {
-  if (!confirm('Gerät aus der Liste entfernen? (Am Shelly selbst ändert sich nichts.)')) return;
-  await shellyApi('/api/shelly/' + id, 'DELETE'); loadShelly();
-}
-async function shellyAddIp(ip) {
-  try { await shellyApi('/api/shelly', 'POST', { ip }); }
-  catch (e) {
-    if (!/Passwort angeben/.test(e.message)) { shellyMsg(e.message, true); return; }
-    const password = prompt('Passwort des Shelly (Benutzer: admin):');
-    if (!password) return;
-    try { await shellyApi('/api/shelly', 'POST', { ip, password }); }
-    catch (e2) { shellyMsg(e2.message, true); return; }
-  }
-  shellyMsg('Hinzugefügt.'); $('shelly-ip').value = ''; $('shelly-found').innerHTML = '';
+  try {
+    const r = await fetch('/api/shelly/' + encodeURIComponent(id) + '/switch', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on }) });
+    if (!r.ok) alert((await r.json().catch(() => ({}))).error || 'Schalten fehlgeschlagen');
+  } catch (e) { alert('Schalten fehlgeschlagen'); }
   loadShelly();
 }
-$('shelly-add').addEventListener('click', () => { const ip = $('shelly-ip').value.trim(); if (ip) shellyAddIp(ip); });
-$('shelly-scan').addEventListener('click', async e => {
-  const b = e.target; b.disabled = true; shellyMsg('Suche läuft … (einige Sekunden)');
-  try {
-    const found = await shellyApi('/api/shelly/scan', 'POST');
-    const fresh = found.filter(f => !f.known);
-    shellyMsg(found.length ? `${found.length} Shelly gefunden, ${fresh.length} noch nicht angelegt.` : 'Keine Shelly-Geräte gefunden.');
-    $('shelly-found').innerHTML = fresh.map(f => `<tr><td><b>${escH(f.name)}</b>
-      <div class="muted">${escH(f.model)} · Gen${f.gen} · ${escH(f.ip)}${f.auth ? ' · 🔒' : ''}</div></td>
-      <td style="text-align:right"><button onclick="shellyAddIp('${escH(f.ip)}')">Hinzufügen</button></td></tr>`).join('');
-  } catch (err) { shellyMsg(err.message, true); }
-  b.disabled = false;
-});
+/* Umsortieren wie bei den Live-Werten: lang druecken, dann ueber andere Kachel ziehen. */
+function initShellyDragging() {
+  const g = $('shelly-grid');
+  const LONG_PRESS_MS = 500, MOVE_TOLERANCE = 10;
+  let pending = null, dragEl = null;
+  const cancelPending = () => {
+    if (pending) { clearTimeout(pending.timer); pending = null; if (!dragEl) shellyDragActive = false; }
+  };
+  const endDrag = () => {
+    if (!dragEl) return;
+    dragEl.classList.remove('dragging'); g.classList.remove('reordering');
+    const ids = [...g.querySelectorAll('.systile')].map(el => el.dataset.tileId);
+    dragEl = null; shellyDragActive = false;
+    fetch('/api/shelly/order', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }) });
+  };
+  g.addEventListener('pointerdown', e => {
+    const el = e.target.closest('.systile');
+    if (!el || e.target.closest('.switch')) return;      // Schalter bleibt normal bedienbar
+    cancelPending();
+    shellyDragActive = true;
+    pending = { el, x: e.clientX, y: e.clientY, timer: setTimeout(() => {
+      pending = null; dragEl = el; g.classList.add('reordering'); el.classList.add('dragging');
+      if (navigator.vibrate) navigator.vibrate(15);
+    }, LONG_PRESS_MS) };
+  });
+  g.addEventListener('pointermove', e => {
+    if (pending) {
+      if (Math.abs(e.clientX - pending.x) > MOVE_TOLERANCE || Math.abs(e.clientY - pending.y) > MOVE_TOLERANCE) cancelPending();
+      return;
+    }
+    if (!dragEl) return;
+    e.preventDefault();
+    const els = [...g.querySelectorAll('.systile')];
+    const target = els.find(el => {
+      if (el === dragEl) return false;
+      const r = el.getBoundingClientRect();
+      return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    });
+    if (!target) return;
+    if (els.indexOf(dragEl) < els.indexOf(target)) g.insertBefore(dragEl, target.nextSibling);
+    else g.insertBefore(dragEl, target);
+  }, { passive: false });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => g.addEventListener(ev, () => { cancelPending(); endDrag(); }));
+  g.addEventListener('contextmenu', e => { if (pending || dragEl) e.preventDefault(); });
+}
+initShellyDragging();
 setInterval(loadShelly, 15000);
 </script>
 {% endblock %}
