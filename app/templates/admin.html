@@ -19,9 +19,11 @@
   .card:nth-of-type(10) h2 svg.h2i { color: var(--blue); }   /* SOC-Strategie */
   .card:nth-of-type(11) h2 svg.h2i { color: var(--red); }    /* Netz-Zähler  */
   /* Reiter (Tabs) */
-  .tabbar { position: sticky; top: 0; z-index: 30; display: flex; gap: 6px; overflow-x: auto;
+  .tabbar { position: sticky; top: var(--hdr-h, 56px); z-index: 9; display: flex; gap: 6px; overflow-x: auto;
     padding: 8px 0; margin-bottom: 14px; background: var(--bg); scrollbar-width: none; }
   .tabbar::-webkit-scrollbar { display: none; }
+  /* base.html setzt am Handy overflow-x:hidden auf <main> - das wuerde 'sticky' ausschalten; clip verhindert Seitenueberlauf ohne */
+  @media (max-width: 640px) { main { overflow-x: clip; } }
   .tabbar button { flex: 0 0 auto; background: var(--card); color: var(--muted); border: 1px solid var(--border);
     border-radius: 999px; padding: 8px 16px; font-size: 14px; font-weight: 500; cursor: pointer; white-space: nowrap; }
   .tabbar button:hover { color: var(--fg); }
@@ -893,6 +895,9 @@ const ADMIN_TABS = [
     const t = ADMIN_TABS.find(t => t.match.some(m => h.startsWith(m)));
     c.dataset.tab = t ? t.id : 'system';
   });
+  // Reiterleiste klebt direkt UNTER der (ebenfalls klebenden) Kopfzeile - deren Hoehe ist je nach Bildschirm verschieden
+  const setHdr = () => document.documentElement.style.setProperty('--hdr-h', (document.querySelector('header')?.offsetHeight || 56) + 'px');
+  setHdr(); window.addEventListener('resize', setHdr); window.addEventListener('load', setHdr);
   const bar = document.getElementById('tabbar');
   bar.innerHTML = ADMIN_TABS.map(t => `<button type="button" data-tab="${t.id}">${t.label}</button>`).join('');
   function show(id) {
