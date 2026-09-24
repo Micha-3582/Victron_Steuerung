@@ -18,7 +18,18 @@
   .card:nth-of-type(9)  h2 svg.h2i { color: var(--plan); }   /* Peak-Schutz  */
   .card:nth-of-type(10) h2 svg.h2i { color: var(--blue); }   /* SOC-Strategie */
   .card:nth-of-type(11) h2 svg.h2i { color: var(--red); }    /* Netz-Zähler  */
+  /* Reiter (Tabs) */
+  .tabbar { position: sticky; top: 0; z-index: 30; display: flex; gap: 6px; overflow-x: auto;
+    padding: 8px 0; margin-bottom: 14px; background: var(--bg); scrollbar-width: none; }
+  .tabbar::-webkit-scrollbar { display: none; }
+  .tabbar button { flex: 0 0 auto; background: var(--card); color: var(--muted); border: 1px solid var(--border);
+    border-radius: 999px; padding: 8px 16px; font-size: 14px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+  .tabbar button:hover { color: var(--fg); }
+  .tabbar button.active { background: var(--accent); border-color: var(--accent); color: #06121f; font-weight: 600; }
+  .card.savebar { position: sticky; bottom: 12px; z-index: 25; box-shadow: 0 6px 24px rgba(0,0,0,.45); }
 </style>
+
+<div class="tabbar" id="tabbar"></div>
 
 <div class="card">
   <h2><svg class="h2i" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>App-Version & Update</h2>
@@ -794,6 +805,40 @@ loadShellyAdmin();
 loadSurplus(true);
 setInterval(refreshShellyStatus, 5000);
 setInterval(() => loadSurplus(false), 15000);
+
+/* --- Reiter: jede Karte gehoert zu genau einem Reiter (Zuordnung ueber die Ueberschrift) --- */
+const ADMIN_TABS = [
+  { id: 'anlage', label: 'Anlage', match: ['Victron Cerbo', 'Anlage', 'Batterie-Watchdog', 'Netz-Zähler'] },
+  { id: 'tarif', label: 'Tarif & Laden', match: ['Tibber', 'Stromtarif', 'Peak-Schutz', 'SOC-Strategie'] },
+  { id: 'solar', label: 'Solar', match: ['Standort', 'Solarfläch', 'PV-Prognose', 'PV-Wechselrichter'] },
+  { id: 'geraete', label: 'Geräte & Überschuss', match: ['Shelly', 'Überschuss'] },
+  { id: 'anzeige', label: 'Dashboard', match: ['Kacheln', 'Diagramme'] },
+  { id: 'system', label: 'System & Konto', match: ['App-Version', 'Betrieb', 'Konto'] },
+];
+(function initAdminTabs() {
+  const cards = [...document.querySelectorAll('.card')];
+  cards.forEach(c => {
+    if (c.querySelector('#btn-save')) { c.classList.add('savebar'); c.dataset.tab = '*'; (document.getElementById('tab-account') || c.parentNode).appendChild(c); return; }   // Leiste immer ans Ende
+    const h = (c.querySelector('h2')?.textContent || '').replace(/\s+/g, ' ').trim();
+    const t = ADMIN_TABS.find(t => t.match.some(m => h.startsWith(m)));
+    c.dataset.tab = t ? t.id : 'system';
+  });
+  const bar = document.getElementById('tabbar');
+  bar.innerHTML = ADMIN_TABS.map(t => `<button type="button" data-tab="${t.id}">${t.label}</button>`).join('');
+  function show(id) {
+    if (!ADMIN_TABS.some(t => t.id === id)) id = ADMIN_TABS[0].id;
+    // Speichern-Leiste ueberall ausser bei 'Geraete' (dort speichert jede Aenderung sofort)
+    cards.forEach(c => { c.hidden = c.dataset.tab === '*' ? id === 'geraete' : c.dataset.tab !== id; });
+    bar.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+    bar.querySelector('.active')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+    try { localStorage.setItem('adminTab', id); } catch (e) { /* nur Komfort */ }
+    if (location.hash !== '#' + id) history.replaceState(null, '', '#' + id);
+  }
+  bar.addEventListener('click', e => { const b = e.target.closest('button'); if (b) { show(b.dataset.tab); window.scrollTo(0, 0); } });
+  let start = location.hash.slice(1);
+  if (!start) { try { start = localStorage.getItem('adminTab') || ''; } catch (e) { /* egal */ } }
+  show(start);
+})();
 
 init();
 </script>
