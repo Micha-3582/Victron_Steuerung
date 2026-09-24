@@ -695,6 +695,7 @@ function uiDialog({ title, message, label, value = '', type = 'text', okText = '
 /* --- Shelly-Geraete + Ueberschuss-Automatik --- */
 const escH = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let shellyIcons = [];
+const PWR_ICON = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" style="vertical-align:middle"><path d="M12 3v9"/><path d="M6.4 6.4a8 8 0 1 0 11.2 0"/></svg>';
 const POWER_ON_STYLE = 'background:var(--green);border-color:var(--green);color:#0b1f14';
 async function shellyApi(url, method, body) {
   const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' },
@@ -746,9 +747,11 @@ async function loadShellyAdmin() {
         <button class="ghost" style="font-size:22px;padding:4px 10px" title="Symbol wählen" onclick="shellyPickIcon('${id}')">${escH(d.icon)}</button>
         <div style="flex:1;min-width:150px"><b>${escH(d.name)}</b>
           <div class="muted">${escH(d.model)} · ${escH(d.ip)} · <span class="dev-stat">${shellyStatText(d)}</span></div></div>
+        <div style="display:flex;gap:8px;margin-left:auto">
         <button class="ghost" onclick="shellyRename('${id}', this)" data-name="${escH(d.name)}" title="Umbenennen">✎</button>
-        <button class="ghost dev-power" data-on="${d.on ? '1' : '0'}" style="${d.on ? POWER_ON_STYLE : ''}" onclick="shellyTest('${id}', this)" ${d.online && d.switchable !== false ? '' : 'disabled'} title="${d.switchable === false ? 'Nur Überwachung – nicht schaltbar' : 'Testschalten'}">⏻</button>
+        <button class="ghost dev-power" data-on="${d.on ? '1' : '0'}" style="${d.on ? POWER_ON_STYLE : ''}" onclick="shellyTest('${id}', this)" ${d.online && d.switchable !== false ? '' : 'disabled'} title="${d.switchable === false ? 'Nur Überwachung – nicht schaltbar' : 'Testschalten'}">${PWR_ICON}</button>
         <button class="ghost" onclick="shellyRemove('${id}')" title="Entfernen">✕</button>
+        </div>
       </div>
       <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
         <label class="switch" style="margin:0"><input type="checkbox" ${d.show ? 'checked' : ''} onchange="shellyField('${id}', 'show', this.checked)"><span class="slider"></span></label>
@@ -774,9 +777,11 @@ async function loadShellyAdmin() {
         <span style="font-size:22px">${escH(d.icon)}</span>
         <div style="flex:1;min-width:150px"><b>${escH(d.name)}</b>
           <div class="muted">${escH(d.ip)} · <span class="dev-stat">${shellyStatText(d)}</span></div></div>
+        <div style="display:flex;gap:8px;margin-left:auto">
         <button class="ghost" onclick="shellyMove('${id}', -1)" title="Höhere Priorität (früher zuschalten)">▲</button>
         <button class="ghost" onclick="shellyMove('${id}', 1)" title="Niedrigere Priorität (später zuschalten)">▼</button>
         <button class="ghost" onclick="shellyField('${id}', 'auto', false, 'surplus-msg')" title="Aus der Automatik nehmen">✕</button>
+        </div>
       </div>
       <div class="grid2" style="margin-top:8px;grid-template-columns:repeat(3,1fr)">
         <div><label>Leistung des Geräts (W)</label><input type="number" min="0" value="${d.power_w || ''}" placeholder="z.B. 2000" onchange="shellyField('${id}', 'power_w', this.value, 'surplus-msg')"></div>
