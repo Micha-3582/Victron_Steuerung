@@ -57,6 +57,16 @@ def _daily_backup(path: str):
         log.warning("Tagessicherung von %s fehlgeschlagen: %s", os.path.basename(path), e)
 
 
+def _forced_backup(path: str, tag: str):
+    """Sofortige Sicherung mit Zeitstempel (vor riskanten Aktionen)."""
+    try:
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        name = os.path.basename(path)[:-5]
+        shutil.copyfile(path, os.path.join(BACKUP_DIR, f"{name}-{tag}-{datetime.now():%Y%m%d-%H%M%S}.json"))
+    except OSError as e:
+        log.warning("Sicherung (%s) fehlgeschlagen: %s", tag, e)
+
+
 def _dump_json(path: str, data, indent=2, backup: bool = False):
     """Atomar schreiben: erst in eine Zwischendatei, dann umbenennen. Ein Absturz/Neustart mitten
     im Schreiben hinterlaesst so nie eine halbe oder leere Datei."""
@@ -412,6 +422,8 @@ def log_energy_sample(system: dict | None, now: datetime | None = None,
 
     data = _load_history()
     hours = data["hours"]
+    n_before = len(hours)
+    prev_ts = (data.get("last") or {}).get("ts")
     slot_key = _slot_key(now)
     b = hours.get(slot_key) or _new_bucket(soc)
     hours[slot_key] = b
@@ -457,6 +469,21 @@ def log_energy_sample(system: dict | None, now: datetime | None = None,
         except ValueError:
             log.warning("history.json: unbekannter Schluessel %r bleibt erhalten", k)
 
+    # Notbremse: schrumpft der Verlauf in EINEM Schritt auf weniger als die Haelfte, ohne dass eine
+    # Zeitluecke (Ausfall/Uhrensprung) dahintersteckt, ist das ein Fehler - dann nicht speichern.
+    try:
+        gap_s = (now - datetime.fromisoformat(prev_ts)).total_seconds() if prev_ts else 0.0
+    except ValueError:
+        gap_s = 0.0
+    if n_before >= 100 and len(hours) < n_before * 0.5:
+        if abs(gap_s) <= 86400:
+            log.error("history.json: Verlauf waere von %d auf %d Slots geschrumpft (ohne Zeitluecke) - "
+                      "NICHT gespeichert, Sicherung bleibt erhalten", n_before, len(hours))
+            return
+        # Grosse Luecke (lange Ausfallzeit ODER falsche Systemuhr): pruefen wir nicht, sichern aber vorher
+        log.warning("history.json: grosses Aufraeumen (%d -> %d Slots, Luecke %.0f h) - Sicherung vorab",
+                    n_before, len(hours), gap_s / 3600)
+        _forced_backup(HISTORY_PATH, "vorAufraeumen")
     _dump_json(HISTORY_PATH, data, indent=2, backup=True)
 
 
