@@ -662,7 +662,7 @@ async function loadShellyAdmin() {
         <label class="switch" style="margin:0"><input type="checkbox" ${d.auto ? 'checked' : ''} onchange="shellyField('${id}', 'auto', this.checked)"><span class="slider"></span></label>
         <span>Automatisch bei Überschuss${d.auto ? ` <b>(Priorität ${prio[d.id]})</b>` : ''}</span></div>
       <div class="grid2" style="margin-top:8px;grid-template-columns:repeat(3,1fr)">
-        <div><label>Leistung (W)</label><input type="number" min="0" value="${d.power_w || ''}" placeholder="z.B. 2000" onchange="shellyField('${id}', 'power_w', this.value)"></div>
+        <div><label>Leistung des Geräts (W)</label><input type="number" min="0" value="${d.power_w || ''}" placeholder="z.B. 2000" onchange="shellyField('${id}', 'power_w', this.value)"></div>
         <div><label>Mind. an (min)</label><input type="number" min="0" value="${d.min_on_min}" onchange="shellyField('${id}', 'min_on_min', this.value)"></div>
         <div><label>Mind. aus (min)</label><input type="number" min="0" value="${d.min_off_min}" onchange="shellyField('${id}', 'min_off_min', this.value)"></div>
       </div>
