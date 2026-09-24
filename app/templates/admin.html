@@ -394,6 +394,7 @@ const TILE_DEFS = [
   { key: 'show_price_plan', label: 'Strompreis & Ladeplan', hint: 'Preiskurve mit Ladeplan, manuelle Termine markieren.' },
   { key: 'show_charge_log', label: 'Ladevorgänge (heute)', hint: 'Protokoll geplanter/durchgeführter Ladungen.' },
   { key: 'show_ev_card', label: 'Manuelle Ladetermine', hint: 'Formular zum Anlegen eines Ladetermins.' },
+  { key: 'show_shelly_card', label: 'Shelly-Geräte', hint: 'Shellys im Netzwerk finden und schalten.' },
 ];
 function renderTileToggles() {
   document.getElementById('tile-toggles').innerHTML = TILE_DEFS.map(t => `

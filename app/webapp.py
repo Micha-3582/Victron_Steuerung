@@ -23,6 +23,7 @@ from flask import (Flask, g, jsonify, redirect, render_template, request,
 
 import os
 
+import shelly
 import store
 import updater
 from auth import UserError, UserStore, new_secret_key
@@ -648,7 +649,8 @@ def api_status():
                "show_override_card": bool(cfg.get("show_override_card", True)),
                "show_price_plan": bool(cfg.get("show_price_plan", True)),
                "show_charge_log": bool(cfg.get("show_charge_log", True)),
-               "show_ev_card": bool(cfg.get("show_ev_card", True))},
+               "show_ev_card": bool(cfg.get("show_ev_card", True)),
+               "show_shelly_card": bool(cfg.get("show_shelly_card", True))},
         "prices": prices,
         "ev_schedules": store.list_ev(),
         "charge_log": charge,
@@ -744,7 +746,7 @@ def api_config():
                "show_live_values", "show_energy_chart", "show_flow_chart",
                "show_week_overview", "show_month_overview", "show_tibber_card",
                "show_override_card", "show_price_plan", "show_charge_log",
-               "show_ev_card"] + list(Params().__dict__.keys())
+               "show_ev_card", "show_shelly_card"] + list(Params().__dict__.keys())
     for key in allowed:
         if key in body:
             cfg[key] = body[key]
@@ -864,6 +866,49 @@ def api_ev_modify(eid):
     if not entry:
         return jsonify({"error": "nicht gefunden"}), 404
     return jsonify(entry)
+
+
+@app.route("/api/shelly", methods=["GET"])
+def api_shelly_list():
+    return jsonify(shelly.list_with_status())
+
+
+@app.route("/api/shelly/scan", methods=["POST"])
+def api_shelly_scan():
+    """Durchsucht das lokale /24-Netz nach Shelly-Geraeten (dauert ca. 2-5 s)."""
+    try:
+        return jsonify(shelly.discover())
+    except Exception as e:                               # noqa: BLE001
+        log.warning("Shelly-Scan fehlgeschlagen: %s", e)
+        return jsonify(error=f"Suche fehlgeschlagen: {e}"), 500
+
+
+@app.route("/api/shelly", methods=["POST"])
+def api_shelly_add():
+    body = request.get_json(silent=True) or {}
+    try:
+        added = shelly.add_by_ip(body.get("ip", ""), body.get("password", ""))
+    except shelly.ShellyError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify({"added": len(added)}), 201
+
+
+@app.route("/api/shelly/<dev_id>", methods=["PATCH", "DELETE"])
+def api_shelly_modify(dev_id):
+    if request.method == "DELETE":
+        ok = shelly.remove(dev_id)
+    else:
+        ok = shelly.rename(dev_id, (request.get_json(silent=True) or {}).get("name", ""))
+    return jsonify(ok=True) if ok else (jsonify(error="nicht gefunden"), 404)
+
+
+@app.route("/api/shelly/<dev_id>/switch", methods=["POST"])
+def api_shelly_switch(dev_id):
+    on = bool((request.get_json(silent=True) or {}).get("on"))
+    try:
+        return jsonify(shelly.set_state(dev_id, on))
+    except shelly.ShellyError as e:
+        return jsonify(error=str(e)), 502
 
 
 @app.route("/api/test-connection", methods=["POST"])
