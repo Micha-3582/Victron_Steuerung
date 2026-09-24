@@ -14,6 +14,7 @@ app/pv_cache.json
 app/pv_cache_openmeteo.json
 app/battery_watchdog.json
 app/shelly_devices.json
+app/tuya_cloud.json
 app/users.json
 app/secret.key
 app/initial-password.txt

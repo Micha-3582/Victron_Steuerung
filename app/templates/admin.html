@@ -353,15 +353,36 @@
 </div>
 
 <div class="card" id="shelly-admin">
-  <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Shelly-Geräte</h2>
-  <div class="muted" style="margin-bottom:12px">Shellys im Heimnetz suchen, benennen und mit einem Symbol versehen.
+  <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Geräte (Shelly &amp; Tuya)</h2>
+  <div class="muted" style="margin-bottom:12px">Shellys und Tuya-/Gosund-Geräte im Heimnetz suchen, benennen und mit einem Symbol versehen.
     Pro Gerät legst du fest, wo es verwendet wird: als Schalter auf dem Dashboard und/oder in der
     Überschuss-Automatik (eigene Karte darunter, dort auch die Reihenfolge).</div>
   <div id="shelly-devs" style="display:flex;flex-direction:column;gap:10px"></div>
   <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <button id="shelly-scan" class="ghost">Netzwerk durchsuchen</button>
-    <input type="text" id="shelly-ip" placeholder="oder IP eingeben, z.B. 192.168.2.55" style="flex:1;min-width:190px">
+    <button id="shelly-scan" class="ghost">Shellys suchen</button>
+    <input type="text" id="shelly-ip" placeholder="oder Shelly-IP eingeben, z.B. 192.168.2.55" style="flex:1;min-width:190px">
     <button id="shelly-add" class="ghost">Hinzufügen</button>
+  </div>
+  <div style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px">
+    <b>Tuya / Smart Life (z.B. Gosund)</b>
+    <div class="muted" style="margin:4px 0 10px">Die Geräte werden <b>lokal im Heimnetz</b> geschaltet. Die Tuya-Cloud wird nur
+      einmal gebraucht, um die Geräteschlüssel abzuholen.</div>
+    <details id="tuya-setup">
+      <summary>Tuya-Zugang einrichten</summary>
+      <div class="muted" style="margin:8px 0">
+        1. Auf <b>iot.tuya.com</b> ein kostenloses Konto anlegen → Cloud → Development → <i>Create Cloud Project</i>
+           (Industry „Smart Home“, Data Center passend zu deiner Region).<br>
+        2. Im Projekt die Dienste <i>IoT Core</i> und <i>Authorization Token Management</i> hinzufügen.<br>
+        3. Unter <i>Devices → Link App Account</i> die Smart-Life-/Tuya-App per QR-Code verknüpfen.<br>
+        4. Auf der Projekt-Übersicht <i>Access ID</i> und <i>Access Secret</i> kopieren und hier eintragen.</div>
+      <div class="grid2">
+        <div><label>Region</label><select id="tuya-region"></select></div>
+        <div><label>Access ID</label><input id="tuya-key" autocomplete="off"></div>
+        <div><label>Access Secret</label><input id="tuya-secret" type="password" autocomplete="new-password"></div>
+        <div style="display:flex;align-items:flex-end"><button id="tuya-save" class="ghost">Zugang speichern</button></div>
+      </div>
+    </details>
+    <div style="margin-top:10px"><button id="tuya-scan" class="ghost">Tuya-Geräte suchen</button></div>
   </div>
   <div class="muted" id="shelly-msg" style="margin-top:8px"></div>
   <div id="shelly-found" style="display:flex;flex-direction:column;gap:8px;margin-top:8px"></div>
@@ -371,7 +392,7 @@
   <h2><svg class="h2i" style="color:var(--timer)" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Überschuss-Automatik</h2>
   <div class="muted" style="margin-bottom:12px">Ist der Akku voll und wird eingespeist, schaltet die Steuerung die Geräte
     dieser Liste nacheinander zu (oberstes zuerst). Bei Netzbezug oder Batterie-Entladung werden sie in umgekehrter
-    Reihenfolge wieder abgeschaltet. Geräte landen hier, wenn du bei ihnen unter „Shelly-Geräte“ den Schalter
+    Reihenfolge wieder abgeschaltet. Geräte landen hier, wenn du bei ihnen unter „Geräte“ den Schalter
     „In der Überschuss-Automatik verwenden“ aktivierst.</div>
   <div id="surplus-box" style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px">
     <div style="display:flex;align-items:center;gap:14px">
@@ -445,7 +466,7 @@ const TILE_DEFS = [
   { key: 'show_price_plan', label: 'Strompreis & Ladeplan', hint: 'Preiskurve mit Ladeplan, manuelle Termine markieren.' },
   { key: 'show_charge_log', label: 'Ladevorgänge (heute)', hint: 'Protokoll geplanter/durchgeführter Ladungen.' },
   { key: 'show_ev_card', label: 'Manuelle Ladetermine', hint: 'Formular zum Anlegen eines Ladetermins.' },
-  { key: 'show_shelly_card', label: 'Shelly-Geräte', hint: 'Shellys im Netzwerk finden und schalten.' },
+  { key: 'show_shelly_card', label: 'Geräte (Shelly/Tuya)', hint: 'Schalter für smarte Steckdosen auf dem Dashboard.' },
 ];
 function renderTileToggles() {
   document.getElementById('tile-toggles').innerHTML = TILE_DEFS.map(t => `
@@ -801,6 +822,41 @@ document.getElementById('shelly-scan').addEventListener('click', async e => {
   } catch (err) { shellyMsg(err.message, true); }
   b.disabled = false;
 });
+/* --- Tuya (lokal) --- */
+async function loadTuyaInfo() {
+  let t; try { t = await (await fetch('/api/tuya')).json(); } catch (e) { return; }
+  const sel = document.getElementById('tuya-region');
+  sel.innerHTML = Object.entries(t.regions).map(([k, v]) => `<option value="${k}">${escH(v)}</option>`).join('');
+  sel.value = t.region; document.getElementById('tuya-key').value = t.api_key;
+  document.getElementById('tuya-secret').placeholder = t.configured ? '(gespeichert – leer lassen = unverändert)' : '';
+  document.getElementById('tuya-setup').open = !t.configured;
+}
+document.getElementById('tuya-save').addEventListener('click', async () => {
+  try {
+    await shellyApi('/api/tuya/credentials', 'POST', { region: document.getElementById('tuya-region').value,
+      api_key: document.getElementById('tuya-key').value, api_secret: document.getElementById('tuya-secret').value });
+    document.getElementById('tuya-secret').value = ''; shellyMsg('Tuya-Zugang gespeichert.'); loadTuyaInfo();
+  } catch (e) { shellyMsg(e.message, true); }
+});
+document.getElementById('tuya-scan').addEventListener('click', async e => {
+  const b = e.target; b.disabled = true; shellyMsg('Tuya-Suche läuft … (bis zu 30 Sekunden)');
+  try {
+    const found = await shellyApi('/api/tuya/scan', 'POST');
+    const fresh = found.filter(f => !f.known);
+    shellyMsg(found.length ? `${found.length} Tuya-Gerät(e) im Konto, ${fresh.length} noch nicht angelegt.` : 'Im Tuya-Konto wurden keine Geräte gefunden.');
+    document.getElementById('shelly-found').innerHTML = fresh.map(f => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="flex:1;min-width:150px"><b>${escH(f.name)}</b><div class="muted">${escH(f.model)} · ${f.found_local ? escH(f.ip) + ' · Protokoll ' + escH(f.version) : '<span style="color:#e5544a">im Heimnetz nicht gefunden</span>'}</div></div>
+      ${f.found_local ? `<button onclick="tuyaAdd('${escH(f.dev_id)}')">Hinzufügen</button>` : ''}</div>`).join('');
+  } catch (err) { shellyMsg(err.message, true); }
+  b.disabled = false;
+});
+async function tuyaAdd(devId) {
+  try { await shellyApi('/api/tuya/add', 'POST', { dev_id: devId }); }
+  catch (e) { shellyMsg(e.message, true); return; }
+  shellyMsg('Hinzugefügt.'); document.getElementById('shelly-found').innerHTML = ''; loadShellyAdmin();
+}
+loadTuyaInfo();
+
 loadShellyAdmin();
 loadSurplus(true);
 setInterval(refreshShellyStatus, 5000);
@@ -811,7 +867,7 @@ const ADMIN_TABS = [
   { id: 'anlage', label: 'Anlage', match: ['Victron Cerbo', 'Anlage', 'Batterie-Watchdog', 'Netz-Zähler'] },
   { id: 'tarif', label: 'Tarif & Laden', match: ['Tibber', 'Stromtarif', 'Peak-Schutz', 'SOC-Strategie'] },
   { id: 'solar', label: 'Solar', match: ['Standort', 'Solarfläch', 'PV-Prognose', 'PV-Wechselrichter'] },
-  { id: 'geraete', label: 'Geräte & Überschuss', match: ['Shelly', 'Überschuss'] },
+  { id: 'geraete', label: 'Geräte & Überschuss', match: ['Geräte', 'Shelly', 'Überschuss'] },
   { id: 'anzeige', label: 'Dashboard', match: ['Kacheln', 'Diagramme'] },
   { id: 'system', label: 'System & Konto', match: ['App-Version', 'Betrieb', 'Konto'] },
 ];

@@ -26,6 +26,7 @@ import os
 import shelly
 import store
 import surplus
+import tuya
 import updater
 from auth import UserError, UserStore, new_secret_key
 from datasources import (OPENMETEO_PR, PvForecast, PvForecastOpenMeteo,
@@ -940,6 +941,43 @@ def api_shelly_auto_order():
         return jsonify(error="ids fehlt"), 400
     shelly.reorder_auto(ids)
     return jsonify(ok=True)
+
+
+@app.route("/api/tuya", methods=["GET"])
+def api_tuya_info():
+    return jsonify(tuya.credentials_public())          # ohne Secret
+
+
+@app.route("/api/tuya/credentials", methods=["POST"])
+def api_tuya_credentials():
+    body = request.get_json(silent=True) or {}
+    try:
+        tuya.save_credentials(body.get("region"), body.get("api_key"), body.get("api_secret"))
+    except tuya.TuyaError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True)
+
+
+@app.route("/api/tuya/scan", methods=["POST"])
+def api_tuya_scan():
+    """Tuya-Geraete: Schluessel aus der Cloud + Suche im LAN (dauert ca. 20-30 s)."""
+    try:
+        return jsonify(shelly.tuya_scan())
+    except shelly.ShellyError as e:
+        return jsonify(error=str(e)), 400
+    except Exception as e:                               # noqa: BLE001
+        log.warning("Tuya-Suche fehlgeschlagen: %s", e)
+        return jsonify(error=f"Suche fehlgeschlagen: {e}"), 500
+
+
+@app.route("/api/tuya/add", methods=["POST"])
+def api_tuya_add():
+    dev_id = str((request.get_json(silent=True) or {}).get("dev_id") or "")
+    try:
+        entry = shelly.add_tuya(dev_id)
+    except shelly.ShellyError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify({"added": entry["id"]}), 201
 
 
 @app.route("/api/shelly/icons", methods=["GET"])

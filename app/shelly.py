@@ -17,6 +17,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
+import tuya
+
 log = logging.getLogger("shelly")
 
 DEVICES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shelly_devices.json")
@@ -127,7 +129,7 @@ def discover(subnet: ipaddress.IPv4Network | None = None) -> list[dict]:
     hosts = [str(h) for h in subnet.hosts()]
     with ThreadPoolExecutor(max_workers=64) as ex:
         found = [r for r in ex.map(probe, hosts) if r]
-    known = {d["mac"] for d in load_devices()}
+    known = {d.get("mac") for d in load_devices()}
     for f in found:
         f["known"] = f["mac"] in known
     found.sort(key=lambda f: tuple(int(x) for x in f["ip"].split(".")))
@@ -172,6 +174,44 @@ def add_by_ip(ip: str, password: str = "") -> list[dict]:
         added.append(entry)
     _save(items)
     return added
+
+
+# ---------------------------------------------------------------- Tuya (Gosund & Co.)
+def tuya_scan() -> list[dict]:
+    """Tuya-Geraete (Cloud-Schluessel + LAN-Suche). Aktualisiert dabei die IPs bekannter Geraete."""
+    items = load_devices()
+    known = {d["dev_id"] for d in items if d.get("kind") == "tuya"}
+    try:
+        found = tuya.discover(known)
+    except tuya.TuyaError as e:
+        raise ShellyError(str(e))
+    by_id = {f["dev_id"]: f for f in found}
+    changed = False
+    for d in items:
+        f = by_id.get(d.get("dev_id")) if d.get("kind") == "tuya" else None
+        if f and f["ip"] and (f["ip"] != d.get("ip") or (f["version"] and f["version"] != d.get("version"))):
+            d["ip"], d["version"] = f["ip"], f["version"] or d.get("version")
+            changed = True
+    if changed:
+        _save(items)
+    return found
+
+
+def add_tuya(dev_id: str) -> dict:
+    try:
+        entry = tuya.build_entry(dev_id)
+    except tuya.TuyaError as e:
+        raise ShellyError(str(e))
+    entry["id"] = f"tuya-{dev_id}-{entry['dp']}"
+    entry["mac"] = None
+    items = load_devices()
+    if any(d["id"] == entry["id"] for d in items):
+        raise ShellyError("Gerät ist schon angelegt")
+    entry.update({"icon": DEFAULT_ICON, "show": False, "auto": False, "power_w": 0,
+                  "min_on_min": 5, "min_off_min": 5})
+    items.append(entry)
+    _save(items)
+    return {k: v for k, v in entry.items() if k != "local_key"}
 
 
 def _num(v, lo, hi, what):
@@ -251,6 +291,8 @@ def _auth(d: dict):
 
 def status(d: dict) -> dict:
     """{'online': bool, 'on': bool|None, 'power': W|None}"""
+    if d.get("kind") == "tuya":
+        return tuya.status(d)
     try:
         if d["gen"] >= 2:
             st = _get(d["ip"], f"/rpc/Switch.GetStatus?id={d['channel']}", CALL_TIMEOUT)
@@ -271,6 +313,11 @@ def set_state(dev_id: str, on: bool) -> dict:
     d = _find(dev_id)
     if not d:
         raise ShellyError("Gerät nicht gefunden")
+    if d.get("kind") == "tuya":
+        try:
+            return tuya.set_state(d, on)
+        except tuya.TuyaError as e:
+            raise ShellyError(str(e))
     try:
         if d["gen"] >= 2:
             _get(d["ip"], f"/rpc/Switch.Set?id={d['channel']}&on={'true' if on else 'false'}",
@@ -293,7 +340,7 @@ def list_with_status(only_shown: bool = False) -> list[dict]:
         states = list(ex.map(status, items))
     out = []
     for d, st in zip(items, states):
-        pub = {k: v for k, v in d.items() if k not in ("password", "user")}
+        pub = {k: v for k, v in d.items() if k not in ("password", "user", "local_key")}
         pub.setdefault("icon", DEFAULT_ICON)
         pub.setdefault("show", False)
         pub.setdefault("auto", False)
