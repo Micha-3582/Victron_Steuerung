@@ -5,7 +5,9 @@ Alles als JSON neben der App.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import shutil
 import threading
 import uuid
 from dataclasses import asdict
@@ -26,6 +28,77 @@ WATCHDOG_PATH = os.path.join(_DIR, "battery_watchdog.json")
 MONTHLY_PATH = os.path.join(_DIR, "monthly_summary.json")
 
 _lock = threading.Lock()
+log = logging.getLogger("store")
+
+BACKUP_DIR = os.path.join(_DIR, "backups")
+_BACKUP_KEEP_DAYS = 14
+
+
+def _daily_backup(path: str):
+    """Einmal pro Tag den Stand VOR dem ersten Schreiben sichern (nur wenn lesbar und nicht leer),
+    14 Tage lang. Schutz gegen Datenverlust bei defekter/geleerter Statistikdatei."""
+    try:
+        if not os.path.exists(path) or os.path.getsize(path) < 10:
+            return
+        name = os.path.basename(path)[:-5]
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        target = os.path.join(BACKUP_DIR, f"{name}-{datetime.now():%Y-%m-%d}.json")
+        if os.path.exists(target):
+            return
+        with open(path, encoding="utf-8") as f:
+            json.load(f)                                  # nur gueltige Dateien sichern
+        shutil.copyfile(path, target)
+        cutoff = datetime.now() - timedelta(days=_BACKUP_KEEP_DAYS)
+        for fn in os.listdir(BACKUP_DIR):
+            if fn.startswith(name + "-") and datetime.fromtimestamp(
+                    os.path.getmtime(os.path.join(BACKUP_DIR, fn))) < cutoff:
+                os.remove(os.path.join(BACKUP_DIR, fn))
+    except (OSError, ValueError) as e:
+        log.warning("Tagessicherung von %s fehlgeschlagen: %s", os.path.basename(path), e)
+
+
+def _dump_json(path: str, data, indent=2, backup: bool = False):
+    """Atomar schreiben: erst in eine Zwischendatei, dann umbenennen. Ein Absturz/Neustart mitten
+    im Schreiben hinterlaesst so nie eine halbe oder leere Datei."""
+    with _lock:
+        if backup:
+            _daily_backup(path)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=indent, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+
+
+def _load_json_recovering(path: str, default):
+    """Datei lesen. Ist sie unlesbar/leer: NICHT still durch Leerwerte ersetzen, sondern beiseitelegen,
+    laut warnen und die juengste Tagessicherung zurueckholen (sonst default())."""
+    if not os.path.exists(path):
+        return default()
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (ValueError, OSError) as e:
+        log.error("%s ist unlesbar (%s) - lege sie beiseite und versuche die Tagessicherung", os.path.basename(path), e)
+    try:
+        os.replace(path, f"{path}.corrupt-{datetime.now():%Y%m%d-%H%M%S-%f}")
+    except OSError:
+        pass
+    name = os.path.basename(path)[:-5]
+    try:
+        cands = sorted(fn for fn in os.listdir(BACKUP_DIR) if fn.startswith(name + "-") and fn.endswith(".json"))
+    except OSError:
+        cands = []
+    for fn in reversed(cands):
+        try:
+            with open(os.path.join(BACKUP_DIR, fn), encoding="utf-8") as f:
+                data = json.load(f)
+            log.warning("%s aus Sicherung %s wiederhergestellt", os.path.basename(path), fn)
+            return data
+        except (ValueError, OSError):
+            continue
+    return default()
 
 # Pflichtfelder, damit der Wizard weiß, ob die App eingerichtet ist.
 REQUIRED_KEYS = ("cerbo_host", "tibber_token", "pv_latitude", "pv_longitude", "pv_planes")
@@ -56,8 +129,7 @@ def load_config():
 
 
 def save_config(cfg: dict):
-    with _lock, open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
+    _dump_json(CONFIG_PATH, cfg, indent=2)
 
 
 def is_configured(cfg=None) -> bool:
@@ -78,8 +150,7 @@ def load_state() -> PersistentState:
 
 
 def save_state(state: PersistentState):
-    with _lock, open(STATE_PATH, "w", encoding="utf-8") as f:
-        json.dump(asdict(state), f, indent=2, ensure_ascii=False)
+    _dump_json(STATE_PATH, asdict(state), indent=2)
 
 
 # --- E-Auto-Ladetermine ---------------------------------------------------
@@ -91,8 +162,7 @@ def _load_ev():
 
 
 def _save_ev(items):
-    with _lock, open(EV_PATH, "w", encoding="utf-8") as f:
-        json.dump(items, f, indent=2, ensure_ascii=False)
+    _dump_json(EV_PATH, items, indent=2)
 
 
 def cleanup_ev(now: datetime | None = None):
@@ -200,8 +270,7 @@ def set_grid_today(import_today, export_today, now=None):
         "import_adj": round(import_today - imp, 3),
         "export_adj": round(export_today - exp, 3),
     }
-    with _lock, open(ENERGY_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+    _dump_json(ENERGY_PATH, data, indent=2)
     return {"import": round(import_today, 2), "export": round(export_today, 2)}
 
 
@@ -231,8 +300,7 @@ def log_charge_state(is_charging, strategy, now=None):
         data["sessions"].append({"start": open_s["start"], "end": ts,
                                  "strategy": open_s.get("strategy", "")})
         data["open"] = None
-    with _lock, open(CHARGE_LOG_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    _dump_json(CHARGE_LOG_PATH, data, indent=2)
 
 
 def list_charge_sessions(now=None):
@@ -316,16 +384,12 @@ def _new_bucket(soc: float) -> dict:
 
 
 def _load_history() -> dict:
-    if os.path.exists(HISTORY_PATH):
-        try:
-            with open(HISTORY_PATH, encoding="utf-8") as f:
-                d = json.load(f)
-            d.setdefault("hours", {})
-            d.setdefault("last", None)
-            return d
-        except (ValueError, OSError):
-            pass
-    return {"hours": {}, "last": None}
+    d = _load_json_recovering(HISTORY_PATH, lambda: {"hours": {}, "last": None})
+    if not isinstance(d, dict):
+        d = {"hours": {}, "last": None}
+    d.setdefault("hours", {})
+    d.setdefault("last", None)
+    return d
 
 
 def log_energy_sample(system: dict | None, now: datetime | None = None,
@@ -391,10 +455,9 @@ def log_energy_sample(system: dict | None, now: datetime | None = None,
             if datetime.fromisoformat(k).timestamp() < keep_from:
                 del hours[k]
         except ValueError:
-            del hours[k]
+            log.warning("history.json: unbekannter Schluessel %r bleibt erhalten", k)
 
-    with _lock, open(HISTORY_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    _dump_json(HISTORY_PATH, data, indent=2, backup=True)
 
 
 def _row_from_bucket(label: str, b: dict | None) -> dict:
@@ -537,18 +600,12 @@ def energy_week_summary(now: datetime | None = None, days: int = 7, offset_weeks
 
 
 def _load_monthly() -> dict:
-    if os.path.exists(MONTHLY_PATH):
-        try:
-            with open(MONTHLY_PATH, encoding="utf-8") as f:
-                return json.load(f)
-        except (ValueError, OSError):
-            pass
-    return {"months": {}, "days_archived": []}
+    d = _load_json_recovering(MONTHLY_PATH, lambda: {"months": {}, "days_archived": []})
+    return d if isinstance(d, dict) else {"months": {}, "days_archived": []}
 
 
 def _save_monthly(data: dict):
-    with _lock, open(MONTHLY_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    _dump_json(MONTHLY_PATH, data, indent=2, backup=True)
 
 
 def archive_finished_days(now: datetime | None = None):
@@ -603,9 +660,11 @@ def monthly_overview(now: datetime | None = None, limit_months: int = 120) -> di
     months = {k: dict(v) for k, v in data.get("months", {}).items()}
     cur_key = now.strftime("%Y-%m")
     hours = _load_history().get("hours", {})
-    cur = {"solar": 0.0, "verbrauch": 0.0, "import": 0.0, "export": 0.0, "cost_ct": 0.0}
+    archived_days = set(data.get("days_archived", []))
+    cur = dict(months.get(cur_key) or {"solar": 0.0, "verbrauch": 0.0, "import": 0.0,
+                                       "export": 0.0, "cost_ct": 0.0})
     for k, b in hours.items():
-        if k[:7] != cur_key:
+        if k[:7] != cur_key or k[:10] in archived_days:      # archivierte Tage stecken schon in `cur`
             continue
         cur["solar"] += b.get("solar", 0.0)
         cur["verbrauch"] += b.get("verbrauch", 0.0)
@@ -791,8 +850,7 @@ def record_solar_forecast(om_kwh: float | None, pr: float,
             e["factor"] = round(fs_factor, 2) if fs_factor else None
         if hourly_today and e.get("bucket_forecast") is None:
             e["bucket_forecast"] = bucket_sums(hourly_today)
-    with _lock, open(SOLAR_LOG_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    _dump_json(SOLAR_LOG_PATH, data, indent=2)
 
 
 def solar_log(now: datetime | None = None) -> dict:
@@ -907,8 +965,7 @@ def auto_adjust_pr(now: datetime | None = None) -> float | None:
     if data.get("auto_pr_date") == today:
         return None   # heute schon gelaufen
     data["auto_pr_date"] = today
-    with _lock, open(SOLAR_LOG_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    _dump_json(SOLAR_LOG_PATH, data, indent=2)
 
     log = solar_log(now)
     if log["days_used"] < _AUTO_PR_MIN_DAYS or log["suggestion"] is None:
@@ -971,8 +1028,7 @@ def auto_adjust_bucket_factors(now: datetime | None = None) -> dict | None:
     if data.get("auto_bucket_date") == today:
         return None
     data["auto_bucket_date"] = today
-    with _lock, open(SOLAR_LOG_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    _dump_json(SOLAR_LOG_PATH, data, indent=2)
 
     log = bucket_log(now)
     cfg = load_config()
@@ -1067,8 +1123,7 @@ def battery_watchdog_update(is_frozen: bool, now: datetime, detail: dict,
         data["since"] = None
         data["notified"] = False
         data["last_detail"] = None
-    with _lock, open(WATCHDOG_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    _dump_json(WATCHDOG_PATH, data, indent=2)
     return result
 
 
