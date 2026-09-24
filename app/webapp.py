@@ -505,17 +505,29 @@ class Controller:
                             for d in devs:
                                 if d["id"] in self._surplus_dry_on:
                                     d["on"] = self._surplus_dry_on[d["id"]]
-                        act = surplus_ctrl.step(datetime.now(), system, cfg, devs)
+                        now = datetime.now()
+                        if dry:
+                            surplus_ctrl.disarm_all()
+                        else:        # Sicherheits-Timer der zugeschalteten Geraete verlaengern (nur bei frischen Messwerten)
+                            fs = surplus.settings(cfg)["failsafe_min"]
+                            for d in surplus_ctrl.due_rearm(now, cfg, devs):
+                                try:
+                                    shelly.set_state(d["id"], True, timer_s=int(fs * 60))
+                                    surplus_ctrl.mark_armed(d["id"], now)
+                                except shelly.ShellyError as e:
+                                    log.warning("Sicherheits-Timer %s: %s", d["name"], e)
+                        act = surplus_ctrl.step(now, system, cfg, devs)
                         if act:
-                            self._apply_surplus(act, dry)
+                            self._apply_surplus(act, dry, cfg)
                 else:
                     surplus_ctrl.reset_timers()
+                    surplus_ctrl.disarm_all()   # Timer laufen aus -> Geraete schalten sich selbst ab
                     self._surplus_dry_on.clear()
             except Exception as e:                       # noqa: BLE001
                 log.warning("Ueberschuss-Automatik: %s", e)
             self._stop.wait(10)
 
-    def _apply_surplus(self, act, dry: bool):
+    def _apply_surplus(self, act, dry: bool, cfg: dict):
         action, dev, why = act
         on = action == "on"
         verb = "eingeschaltet" if on else "ausgeschaltet"
@@ -524,7 +536,13 @@ class Controller:
             text = f"(Trockenlauf) {dev['name']} würde {verb} – {why}"
         else:
             try:
-                shelly.set_state(dev["id"], on)
+                fs = surplus.settings(cfg)["failsafe_min"]
+                timer_s = int(fs * 60) if on and fs > 0 and dev.get("kind") != "tuya" else None
+                shelly.set_state(dev["id"], on, timer_s=timer_s)
+                if timer_s:
+                    surplus_ctrl.mark_armed(dev["id"])
+                elif not on:
+                    surplus_ctrl.disarm(dev["id"])
                 text = f"{dev['name']} {verb} – {why}"
             except shelly.ShellyError as e:
                 text = f"{dev['name']}: Schalten fehlgeschlagen ({e})"
@@ -799,6 +817,7 @@ def api_config():
                "show_override_card", "show_price_plan", "show_charge_log",
                "show_ev_card", "show_shelly_card", "surplus_enabled", "surplus_dry_run",
                "surplus_min_soc", "tile_order"] + list(Params().__dict__.keys())
+    allowed = allowed + ["surplus_" + k for k in surplus.DEFAULTS]     # einstellbare Automatik-Werte
     if not (isinstance(body.get("tile_order", []), list)
             and all(isinstance(k, str) for k in body.get("tile_order", []))):
         body.pop("tile_order", None)          # Kachelreihenfolge: nur Liste von Textschluesseln
@@ -935,6 +954,8 @@ def api_shelly_auto():
     return jsonify({"enabled": bool(cfg.get("surplus_enabled")),
                     "dry_run": bool(cfg.get("surplus_dry_run")),
                     "min_soc": cfg.get("surplus_min_soc", surplus.DEFAULT_MIN_SOC),
+                    "settings": surplus.settings(cfg), "defaults": surplus.DEFAULTS,
+                    "bounds": surplus.BOUNDS,
                     "events": surplus_ctrl.recent()})
 
 
@@ -1040,10 +1061,10 @@ def api_shelly_modify(dev_id):
 def api_shelly_switch(dev_id):
     on = bool((request.get_json(silent=True) or {}).get("on"))
     try:
-        result = shelly.set_state(dev_id, on)
+        result = shelly.set_state(dev_id, on, timer_s=0 if on else None)     # 0 = evtl. laufenden Auto-Timer aufheben
     except shelly.ShellyError as e:
         return jsonify(error=str(e)), 502
-    surplus_ctrl.note_manual(dev_id)      # Handschaltung: Automatik pausiert fuer dieses Geraet
+    surplus_ctrl.note_manual(dev_id, hold_min=surplus.settings(store.load_config())["manual_hold_min"])   # Automatik pausiert fuer dieses Geraet
     return jsonify(result)
 
 

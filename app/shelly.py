@@ -315,7 +315,9 @@ def status(d: dict) -> dict:
         return {"online": False, "on": None, "power": None}
 
 
-def set_state(dev_id: str, on: bool) -> dict:
+def set_state(dev_id: str, on: bool, timer_s: int | None = None) -> dict:
+    """Schaltet ein Geraet. `timer_s` (nur beim Einschalten, nur Shelly): eingebauter Rueckschalt-Timer des
+    Shelly in Sekunden - nach Ablauf schaltet das Geraet von selbst wieder aus (0 = laufenden Timer aufheben)."""
     d = _find(dev_id)
     if not d:
         raise ShellyError("Gerät nicht gefunden")
@@ -328,10 +330,12 @@ def set_state(dev_id: str, on: bool) -> dict:
             raise ShellyError(str(e))
     try:
         if d["gen"] >= 2:
-            _get(d["ip"], f"/rpc/Switch.Set?id={d['channel']}&on={'true' if on else 'false'}",
+            extra = f"&toggle_after={int(timer_s)}" if on and timer_s is not None else ""
+            _get(d["ip"], f"/rpc/Switch.Set?id={d['channel']}&on={'true' if on else 'false'}{extra}",
                  CALL_TIMEOUT)
         else:
-            _get(d["ip"], f"/relay/{d['channel']}?turn={'on' if on else 'off'}",
+            extra = f"&timer={int(timer_s)}" if on and timer_s is not None else ""
+            _get(d["ip"], f"/relay/{d['channel']}?turn={'on' if on else 'off'}{extra}",
                  CALL_TIMEOUT, _auth(d))
     except (requests.RequestException, ValueError) as e:
         raise ShellyError(f"Schalten fehlgeschlagen: {e}")

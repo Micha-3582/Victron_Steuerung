@@ -415,6 +415,12 @@
         <label class="switch" style="margin:0"><input type="checkbox" id="surplus_dry_run"><span class="slider"></span></label>
         <div><b>Trockenlauf</b><div class="muted">Nur protokollieren, nichts schalten.</div></div></div>
     </div>
+    <details style="margin-top:12px">
+      <summary>Feineinstellung (Zeiten, Schwellen, Sicherheits-Timer)</summary>
+      <div class="muted" style="margin:8px 0">Die Standardwerte passen für die meisten Anlagen. Änderungen wirken sofort.</div>
+      <div id="surplus-fine" class="grid2"></div>
+      <div style="margin-top:10px"><button id="surplus-fine-reset" class="ghost">Alle auf Standard</button></div>
+    </details>
     <div style="margin-top:12px"><b>Letzte Aktionen</b>
       <div id="surplus-events" class="muted" style="margin-top:4px">–</div></div>
   </div>
@@ -806,12 +812,45 @@ async function shellyMove(id, dir) {
   savedToast();
   loadShellyAdmin();
 }
+const SURPLUS_FINE = [
+  { k: 'on_delay_min', label: 'Zuschalten nach … Min Überschuss', unit: 'min', hint: 'So lange muss der Überschuss am Stück da sein, bevor ein Gerät zugeschaltet wird.' },
+  { k: 'off_delay_min', label: 'Abschalten nach … Min Bezug/Entladung', unit: 'min', hint: 'So lange am Stück, bevor das letzte Gerät wieder abgeschaltet wird.' },
+  { k: 'off_import_w', label: 'Netzbezug-Schwelle', unit: 'W', hint: 'Ab diesem Bezug aus dem Netz gilt der Überschuss als weg.' },
+  { k: 'off_discharge_w', label: 'Batterie-Entladung-Schwelle', unit: 'W', hint: 'Ab dieser Entladung gilt der Überschuss als weg.' },
+  { k: 'soc_hyst', label: 'Akku-Hysterese', unit: '%', hint: 'Abgeschaltet wird erst, wenn der Akku so viel unter „Akku mindestens" fällt.' },
+  { k: 'manual_hold_min', label: 'Pause nach Handschaltung', unit: 'min', hint: 'So lange lässt die Automatik ein von Hand geschaltetes Gerät in Ruhe.' },
+  { k: 'failsafe_min', label: 'Sicherheits-Timer (Shelly)', unit: 'min', hint: 'Eingebauter Rückschalt-Timer im Shelly: stürzt die App ab, geht das Gerät nach dieser Zeit von selbst aus. 0 = aus (Tuya-Geräte nicht unterstützt).' },
+];
+function renderSurplusFine(a) {
+  const box = document.getElementById('surplus-fine');
+  box.innerHTML = SURPLUS_FINE.map(f => {
+    const [lo, hi] = a.bounds[f.k];
+    return `<div><label>${f.label} (${f.unit})</label>
+      <input type="number" min="${lo}" max="${hi}" step="any" data-k="${f.k}" value="${a.settings[f.k]}" placeholder="${a.defaults[f.k]}">
+      <div class="muted">${f.hint} Standard: ${a.defaults[f.k]}</div></div>`;
+  }).join('');
+  box.onchange = async e => {
+    const inp = e.target.closest('input[data-k]'); if (!inp) return;
+    const v = inp.value === '' ? a.defaults[inp.dataset.k] : Number(inp.value);
+    await saveSurplusFine({ ['surplus_' + inp.dataset.k]: v });
+  };
+  document.getElementById('surplus-fine-reset').onclick = () =>
+    saveSurplusFine(Object.fromEntries(SURPLUS_FINE.map(f => ['surplus_' + f.k, a.defaults[f.k]])), true);
+}
+async function saveSurplusFine(body, reload) {
+  try {
+    const r = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error();
+    savedToast(); loadSurplus(true);
+  } catch (e) { shellyMsg('Speichern fehlgeschlagen', true, 'surplus-msg'); }
+}
 async function loadSurplus(fillInputs) {
   let a; try { a = await (await fetch('/api/shelly/auto')).json(); } catch (e) { return; }
   if (fillInputs) {
     document.getElementById('surplus_enabled').checked = a.enabled;
     document.getElementById('surplus_dry_run').checked = a.dry_run;
     document.getElementById('surplus_min_soc').value = a.min_soc;
+    renderSurplusFine(a);
   }
   document.getElementById('surplus-events').innerHTML = a.events.length
     ? a.events.slice(0, 8).map(e => `${escH(e.ts.slice(11, 16))} · ${escH(e.text)}`).join('<br>') : 'Noch keine.';
