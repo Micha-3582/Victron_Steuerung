@@ -498,7 +498,8 @@ class Controller:
                     system = self.last_system if time.time() - self.last_system_ts < 45 else None
                     if system:
                         dry = bool(cfg.get("surplus_dry_run"))
-                        devs = shelly.list_with_status()
+                        devs = sorted(shelly.list_with_status(),
+                                      key=lambda d: d.get("prio") or 10 ** 6)   # Prioritaet
                         if dry:      # Trockenlauf: mit gedachtem statt echtem Zustand rechnen
                             for d in devs:
                                 if d["id"] in self._surplus_dry_on:
@@ -930,6 +931,15 @@ def api_shelly_auto():
                     "dry_run": bool(cfg.get("surplus_dry_run")),
                     "min_soc": cfg.get("surplus_min_soc", surplus.DEFAULT_MIN_SOC),
                     "events": surplus_ctrl.recent()})
+
+
+@app.route("/api/shelly/auto-order", methods=["POST"])
+def api_shelly_auto_order():
+    ids = (request.get_json(silent=True) or {}).get("ids")
+    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+        return jsonify(error="ids fehlt"), 400
+    shelly.reorder_auto(ids)
+    return jsonify(ok=True)
 
 
 @app.route("/api/shelly/icons", methods=["GET"])

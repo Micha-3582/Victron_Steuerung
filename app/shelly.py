@@ -199,9 +199,6 @@ def update(dev_id: str, name: str | None = None, icon: str | None = None,
                 d["min_on_min"] = _num(min_on_min, 0, 1440, "Mindest-Einschaltdauer")
             if min_off_min is not None:
                 d["min_off_min"] = _num(min_off_min, 0, 1440, "Mindest-Pause")
-            if auto:
-                if int(d.get("power_w") or 0) <= 0:
-                    raise ShellyError("Für die Automatik zuerst die Leistung des Geräts (W) eintragen")
             if name is not None:
                 d["name"] = name.strip()[:60] or d["name"]
             if icon is not None:
@@ -210,6 +207,8 @@ def update(dev_id: str, name: str | None = None, icon: str | None = None,
                 d["show"] = bool(show)
             if auto is not None:
                 d["auto"] = bool(auto)
+                if auto and not d.get("prio"):      # neu in der Automatik: ans Ende der Prioritaet
+                    d["prio"] = max([x.get("prio") or 0 for x in items]) + 1
             _save(items)
             return True
     return False
@@ -224,6 +223,15 @@ def reorder(ids: list[str]) -> None:
     slots = sorted(n for n, d in enumerate(items) if d["id"] in set(ids))
     for slot, i in zip(slots, ids):
         items[slot] = by_id[i]
+    _save(items)
+
+
+def reorder_auto(ids: list[str]) -> None:
+    """Prioritaet in der Ueberschuss-Automatik (unabhaengig von der Dashboard-Reihenfolge)."""
+    items = load_devices()
+    by_id = {d["id"]: d for d in items}
+    for n, i in enumerate(i for i in ids if i in by_id):
+        by_id[i]["prio"] = n + 1
     _save(items)
 
 
@@ -289,6 +297,7 @@ def list_with_status(only_shown: bool = False) -> list[dict]:
         pub.setdefault("icon", DEFAULT_ICON)
         pub.setdefault("show", False)
         pub.setdefault("auto", False)
+        pub.setdefault("prio", 0)
         pub.setdefault("power_w", 0)
         pub.setdefault("min_on_min", 5)
         pub.setdefault("min_off_min", 5)

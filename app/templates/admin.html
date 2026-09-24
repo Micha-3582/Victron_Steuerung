@@ -343,15 +343,29 @@
 
 <div class="card" id="shelly-admin">
   <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Shelly-Geräte</h2>
-  <div class="muted" style="margin-bottom:12px">Shellys im Heimnetz suchen, benennen und ein Symbol zuweisen.
-    Mit dem Häkchen „Auf dem Dashboard" erscheint das Gerät dort als Schalter
-    (dort per langem Drücken sortierbar).</div>
+  <div class="muted" style="margin-bottom:12px">Shellys im Heimnetz suchen, benennen und mit einem Symbol versehen.
+    Pro Gerät legst du fest, wo es verwendet wird: als Schalter auf dem Dashboard und/oder in der
+    Überschuss-Automatik (eigene Karte darunter, dort auch die Reihenfolge).</div>
+  <div id="shelly-devs" style="display:flex;flex-direction:column;gap:10px"></div>
+  <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <button id="shelly-scan" class="ghost">Netzwerk durchsuchen</button>
+    <input type="text" id="shelly-ip" placeholder="oder IP eingeben, z.B. 192.168.2.55" style="flex:1;min-width:190px">
+    <button id="shelly-add" class="ghost">Hinzufügen</button>
+  </div>
+  <div class="muted" id="shelly-msg" style="margin-top:8px"></div>
+  <div id="shelly-found" style="display:flex;flex-direction:column;gap:8px;margin-top:8px"></div>
+</div>
+
+<div class="card" id="surplus-admin">
+  <h2><svg class="h2i" style="color:var(--timer)" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Überschuss-Automatik</h2>
+  <div class="muted" style="margin-bottom:12px">Ist der Akku voll und wird eingespeist, schaltet die Steuerung die Geräte
+    dieser Liste nacheinander zu (oberstes zuerst). Bei Netzbezug oder Batterie-Entladung werden sie in umgekehrter
+    Reihenfolge wieder abgeschaltet. Geräte landen hier, wenn du bei ihnen unter „Shelly-Geräte“ den Schalter
+    „In der Überschuss-Automatik verwenden“ aktivierst.</div>
   <div id="surplus-box" style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px">
     <div style="display:flex;align-items:center;gap:14px">
       <label class="switch" style="margin:0"><input type="checkbox" id="surplus_enabled"><span class="slider"></span></label>
-      <div><b>Überschuss-Automatik</b><div class="muted">Ist der Akku voll und wird eingespeist, schaltet die Steuerung die
-        Geräte mit „Automatisch bei Überschuss" nacheinander zu (Reihenfolge = Priorität, oberstes zuerst).
-        Bei Netzbezug oder Batterie-Entladung werden sie in umgekehrter Reihenfolge wieder abgeschaltet.</div></div>
+      <div><b>Automatik aktiv</b></div>
     </div>
     <div class="grid2" style="margin-top:12px">
       <div><label>Akku mindestens (%)</label><input id="surplus_min_soc" type="number" min="50" max="100">
@@ -363,14 +377,8 @@
     <div style="margin-top:12px"><b>Letzte Aktionen</b>
       <div id="surplus-events" class="muted" style="margin-top:4px">–</div></div>
   </div>
-  <div id="shelly-devs" style="display:flex;flex-direction:column;gap:10px"></div>
-  <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <button id="shelly-scan" class="ghost">Netzwerk durchsuchen</button>
-    <input type="text" id="shelly-ip" placeholder="oder IP eingeben, z.B. 192.168.2.55" style="flex:1;min-width:190px">
-    <button id="shelly-add" class="ghost">Hinzufügen</button>
-  </div>
-  <div class="muted" id="shelly-msg" style="margin-top:8px"></div>
-  <div id="shelly-found" style="display:flex;flex-direction:column;gap:8px;margin-top:8px"></div>
+  <div id="surplus-devs" style="display:flex;flex-direction:column;gap:10px"></div>
+  <div class="muted" id="surplus-msg" style="margin-top:8px"></div>
 </div>
 
 <div class="card">
@@ -623,9 +631,10 @@ function uiDialog({ title, message, label, value = '', type = 'text', okText = '
   });
 }
 
-/* --- Shelly-Geraete --- */
+/* --- Shelly-Geraete + Ueberschuss-Automatik --- */
 const escH = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let shellyIcons = [];
+const POWER_ON_STYLE = 'background:var(--green);border-color:var(--green);color:#0b1f14';
 async function shellyApi(url, method, body) {
   const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined });
@@ -633,8 +642,7 @@ async function shellyApi(url, method, body) {
   if (!r.ok) throw new Error(j.error || ('Fehler ' + r.status));
   return j;
 }
-function shellyMsg(t, err) { const m = document.getElementById('shelly-msg'); m.textContent = t || ''; m.style.color = err ? '#e5544a' : ''; }
-const POWER_ON_STYLE = 'background:var(--green);border-color:var(--green);color:#0b1f14';
+function shellyMsg(t, err, id = 'shelly-msg') { const m = document.getElementById(id); m.textContent = t || ''; m.style.color = err ? '#e5544a' : ''; }
 function shellyStatText(d) {
   return !d.online ? 'nicht erreichbar' : (d.on ? 'an' : 'aus') + (d.power != null ? ` · ${Math.round(d.power)} W` : '');
 }
@@ -643,62 +651,76 @@ async function refreshShellyStatus() {
   let list; try { list = await (await fetch('/api/shelly')).json(); } catch (e) { return; }
   if (!Array.isArray(list)) return;
   for (const d of list) {
-    const row = [...document.querySelectorAll('#shelly-devs [data-dev]')].find(el => el.dataset.dev === d.id);
-    if (!row) continue;
-    row.querySelector('.dev-stat').textContent = shellyStatText(d);
-    const b = row.querySelector('.dev-power');
-    b.dataset.on = d.on ? '1' : '0'; b.disabled = !d.online;
-    b.style.cssText = d.on ? POWER_ON_STYLE : '';
+    document.querySelectorAll('#shelly-devs [data-dev], #surplus-devs [data-dev]').forEach(row => {
+      if (row.dataset.dev !== d.id) return;
+      row.querySelector('.dev-stat').textContent = shellyStatText(d);
+      const b = row.querySelector('.dev-power');
+      if (b) { b.dataset.on = d.on ? '1' : '0'; b.disabled = !d.online; b.style.cssText = d.on ? POWER_ON_STYLE : ''; }
+    });
   }
 }
 async function loadShellyAdmin() {
   if (!shellyIcons.length) { try { shellyIcons = await (await fetch('/api/shelly/icons')).json(); } catch (e) { /* egal */ } }
   let list = [];
   try { list = await (await fetch('/api/shelly')).json(); } catch (e) { return; }
+  if (!Array.isArray(list)) return;
   const box = document.getElementById('shelly-devs');
-  if (!Array.isArray(list) || !list.length) { box.innerHTML = '<div class="muted">Noch keine Geräte angelegt.</div>'; return; }
-  const prio = {}; list.filter(d => d.auto).forEach((d, n) => { prio[d.id] = n + 1; });
-  box.innerHTML = list.map(d => {
-    const stat = shellyStatText(d);
+  box.innerHTML = list.length ? list.map(d => {
     const id = escH(d.id);
     return `<div data-dev="${id}" style="border:1px solid var(--border);border-radius:10px;padding:10px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <button class="ghost" style="font-size:22px;padding:4px 10px" title="Symbol wählen" onclick="shellyPickIcon('${id}')">${escH(d.icon)}</button>
         <div style="flex:1;min-width:150px"><b>${escH(d.name)}</b>
-          <div class="muted">${escH(d.model)} · ${escH(d.ip)} · <span class="dev-stat">${stat}</span></div></div>
+          <div class="muted">${escH(d.model)} · ${escH(d.ip)} · <span class="dev-stat">${shellyStatText(d)}</span></div></div>
         <button class="ghost" onclick="shellyRename('${id}', this)" data-name="${escH(d.name)}" title="Umbenennen">✎</button>
         <button class="ghost dev-power" data-on="${d.on ? '1' : '0'}" style="${d.on ? POWER_ON_STYLE : ''}" onclick="shellyTest('${id}', this)" ${d.online ? '' : 'disabled'} title="Testschalten">⏻</button>
-        <button class="ghost" onclick="shellyMove('${id}', -1)" title="Höhere Priorität / weiter nach oben">▲</button>
-        <button class="ghost" onclick="shellyMove('${id}', 1)" title="Niedrigere Priorität / weiter nach unten">▼</button>
         <button class="ghost" onclick="shellyRemove('${id}')" title="Entfernen">✕</button>
       </div>
       <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
-        <label class="switch" style="margin:0"><input type="checkbox" ${d.show ? 'checked' : ''} onchange="shellyShow('${id}', this.checked)"><span class="slider"></span></label>
+        <label class="switch" style="margin:0"><input type="checkbox" ${d.show ? 'checked' : ''} onchange="shellyField('${id}', 'show', this.checked)"><span class="slider"></span></label>
         <span>Auf dem Dashboard anzeigen</span></div>
       <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
         <label class="switch" style="margin:0"><input type="checkbox" ${d.auto ? 'checked' : ''} onchange="shellyField('${id}', 'auto', this.checked)"><span class="slider"></span></label>
-        <span>Automatisch bei Überschuss${d.auto ? ` <b>(Priorität ${prio[d.id]})</b>` : ''}</span></div>
-      <div class="grid2" style="margin-top:8px;grid-template-columns:repeat(3,1fr)">
-        <div><label>Leistung des Geräts (W)</label><input type="number" min="0" value="${d.power_w || ''}" placeholder="z.B. 2000" onchange="shellyField('${id}', 'power_w', this.value)"></div>
-        <div><label>Mind. an (min)</label><input type="number" min="0" value="${d.min_on_min}" onchange="shellyField('${id}', 'min_on_min', this.value)"></div>
-        <div><label>Mind. aus (min)</label><input type="number" min="0" value="${d.min_off_min}" onchange="shellyField('${id}', 'min_off_min', this.value)"></div>
-      </div>
+        <span>In der Überschuss-Automatik verwenden</span></div>
       <div id="icons-${id}" style="display:none;flex-wrap:wrap;gap:6px;margin-top:10px;max-height:230px;overflow-y:auto">
         ${shellyIcons.map(i => `<button class="ghost" style="font-size:22px;padding:4px 8px" onclick="shellySetIcon('${id}', '${i}')">${i}</button>`).join('')}
       </div></div>`;
-  }).join('');
+  }).join('') : '<div class="muted">Noch keine Geräte angelegt.</div>';
+
+  // Automatik-Liste: nur freigegebene Geraete, sortiert nach Prioritaet
+  const autos = list.filter(d => d.auto).sort((a, b) => (a.prio || 1e6) - (b.prio || 1e6));
+  document.getElementById('surplus-devs').innerHTML = autos.length ? autos.map((d, n) => {
+    const id = escH(d.id);
+    return `<div data-dev="${id}" style="border:1px solid var(--border);border-radius:10px;padding:10px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <b style="min-width:22px;text-align:center;color:var(--timer)" title="Priorität">${n + 1}.</b>
+        <span style="font-size:22px">${escH(d.icon)}</span>
+        <div style="flex:1;min-width:150px"><b>${escH(d.name)}</b>
+          <div class="muted">${escH(d.ip)} · <span class="dev-stat">${shellyStatText(d)}</span></div></div>
+        <button class="ghost" onclick="shellyMove('${id}', -1)" title="Höhere Priorität (früher zuschalten)">▲</button>
+        <button class="ghost" onclick="shellyMove('${id}', 1)" title="Niedrigere Priorität (später zuschalten)">▼</button>
+        <button class="ghost" onclick="shellyField('${id}', 'auto', false, 'surplus-msg')" title="Aus der Automatik nehmen">✕</button>
+      </div>
+      <div class="grid2" style="margin-top:8px;grid-template-columns:repeat(3,1fr)">
+        <div><label>Leistung des Geräts (W)</label><input type="number" min="0" value="${d.power_w || ''}" placeholder="z.B. 2000" onchange="shellyField('${id}', 'power_w', this.value, 'surplus-msg')"></div>
+        <div><label>Mind. an (min)</label><input type="number" min="0" value="${d.min_on_min}" onchange="shellyField('${id}', 'min_on_min', this.value, 'surplus-msg')"></div>
+        <div><label>Mind. aus (min)</label><input type="number" min="0" value="${d.min_off_min}" onchange="shellyField('${id}', 'min_off_min', this.value, 'surplus-msg')"></div>
+      </div>
+      ${d.power_w > 0 ? '' : '<div class="muted" style="color:#e5544a;margin-top:6px">Leistung eintragen – ohne sie wird dieses Gerät nicht geschaltet.</div>'}
+    </div>`;
+  }).join('') : '<div class="muted">Noch kein Gerät ausgewählt.</div>';
 }
-async function shellyField(id, field, value) {
-  try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { [field]: value }); shellyMsg(''); }
-  catch (e) { shellyMsg(e.message, true); }
+async function shellyField(id, field, value, msgId = 'shelly-msg') {
+  try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { [field]: value }); shellyMsg('', false, msgId); }
+  catch (e) { shellyMsg(e.message, true, msgId); }
   loadShellyAdmin();
 }
 async function shellyMove(id, dir) {
-  const ids = [...document.querySelectorAll('#shelly-devs [data-dev]')].map(el => el.dataset.dev);
+  const ids = [...document.querySelectorAll('#surplus-devs [data-dev]')].map(el => el.dataset.dev);
   const i = ids.indexOf(id), j = i + dir;
   if (i < 0 || j < 0 || j >= ids.length) return;
   [ids[i], ids[j]] = [ids[j], ids[i]];
-  await shellyApi('/api/shelly/order', 'POST', { ids });
+  await shellyApi('/api/shelly/auto-order', 'POST', { ids });
   loadShellyAdmin();
 }
 async function loadSurplus(fillInputs) {
@@ -723,7 +745,6 @@ async function saveSurplus() {
   document.getElementById(id).addEventListener('change', saveSurplus));
 function shellyPickIcon(id) { const el = document.getElementById('icons-' + id); el.style.display = el.style.display === 'none' ? 'flex' : 'none'; }
 async function shellySetIcon(id, icon) { try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { icon }); } catch (e) { shellyMsg(e.message, true); } loadShellyAdmin(); }
-async function shellyShow(id, show) { try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { show }); } catch (e) { shellyMsg(e.message, true); } }
 async function shellyRename(id, btn) {
   const n = await uiDialog({ title: 'Gerät umbenennen', label: 'Neuer Name', value: btn.dataset.name });
   if (n === null) return;
