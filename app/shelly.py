@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
+import tasmota
 import tuya
 
 log = logging.getLogger("shelly")
@@ -123,10 +124,22 @@ def _channels_gen2(ip: str) -> list[int]:
     return sorted(int(k.split(":")[1]) for k in st if k.startswith("switch:"))
 
 
-def discover(subnet: ipaddress.IPv4Network | None = None) -> list[dict]:
-    """Scannt das Subnetz parallel. Liefert gefundene Shellys (auch bereits angelegte)."""
-    subnet = subnet or local_subnet()
-    hosts = [str(h) for h in subnet.hosts()]
+def _scan_hosts(subnet: ipaddress.IPv4Network | None, extra_networks: list[str] | None) -> list[str]:
+    """Zu pruefende Adressen: das eigene /24 (oder `subnet`) plus weitere Netze/VLANs (max. 8192 Adressen)."""
+    nets = [subnet or local_subnet()] + [ipaddress.ip_network(n, strict=False) for n in (extra_networks or [])]
+    hosts, seen = [], set()
+    for net in nets:
+        for h in net.hosts():
+            s = str(h)
+            if s not in seen:
+                seen.add(s)
+                hosts.append(s)
+    return hosts[:8192]
+
+
+def discover(subnet: ipaddress.IPv4Network | None = None, extra_networks: list[str] | None = None) -> list[dict]:
+    """Scannt das Subnetz (und weitere Netze) parallel. Liefert gefundene Shellys (auch bereits angelegte)."""
+    hosts = _scan_hosts(subnet, extra_networks)
     with ThreadPoolExecutor(max_workers=64) as ex:
         found = [r for r in ex.map(probe, hosts) if r]
     known = {d.get("mac") for d in load_devices()}
@@ -142,7 +155,7 @@ def add_by_ip(ip: str, password: str = "") -> list[dict]:
     ip = check_ip(ip)
     info = probe(ip, CALL_TIMEOUT)
     if not info:
-        raise ShellyError("Unter dieser Adresse antwortet kein Shelly")
+        return _add_tasmota(ip, password)
     if info["auth"] and info["gen"] >= 2:
         raise ShellyError("Passwortgeschützte Gen2/3-Geräte werden noch nicht unterstützt "
                           "(Login in der Shelly-Weboberfläche vorübergehend abschalten)")
@@ -176,13 +189,53 @@ def add_by_ip(ip: str, password: str = "") -> list[dict]:
     return added
 
 
+# ---------------------------------------------------------------- Tasmota
+def tasmota_discover(subnet: ipaddress.IPv4Network | None = None, extra_networks: list[str] | None = None) -> list[dict]:
+    """Sucht Tasmota-Geraete (ohne Passwortschutz) im eigenen /24 und in weiteren Netzen."""
+    hosts = _scan_hosts(subnet, extra_networks)
+    with ThreadPoolExecutor(max_workers=64) as ex:
+        found = [r for r in ex.map(tasmota.probe, hosts) if r and not r.get("auth")]
+    known = {d.get("mac") for d in load_devices() if d.get("kind") == "tasmota"}
+    for f in found:
+        f["known"] = f["mac"] in known
+        f["channels"] = len(f["channels"])
+    found.sort(key=lambda f: tuple(int(x) for x in f["ip"].split(".")))
+    return found
+
+
+def _add_tasmota(ip: str, password: str = "") -> list[dict]:
+    info = tasmota.probe(ip, CALL_TIMEOUT, ("admin", password) if password else None)
+    if not info:
+        raise ShellyError("Unter dieser Adresse antwortet weder ein Shelly noch ein Tasmota")
+    if info["auth"]:
+        raise ShellyError("Gerät ist passwortgeschützt – Passwort angeben" if not password
+                          else "Passwort abgelehnt (oder kein Tasmota-Gerät)")
+    if not info["channels"]:
+        raise ShellyError("Dieses Tasmota-Gerät hat keinen Relaiskanal (POWER)")
+    items = load_devices()
+    have = {d["id"] for d in items}
+    added = []
+    for ch in info["channels"]:
+        dev_id = f"tasmota-{info['mac']}-{ch}"
+        if dev_id in have:
+            continue
+        entry = {"id": dev_id, "kind": "tasmota", "mac": info["mac"], "ip": ip, "gen": 0, "channel": ch,
+                 "model": info["model"], "name": info["name"] if not info["multi"] else f"{info['name']} K{ch}",
+                 "icon": DEFAULT_ICON, "show": False, "auto": False, "power_w": 0, "min_on_min": 5, "min_off_min": 5,
+                 "user": "admin" if password else "", "password": password}
+        items.append(entry)
+        added.append(entry)
+    _save(items)
+    return added
+
+
 # ---------------------------------------------------------------- Tuya (Gosund & Co.)
-def tuya_scan() -> list[dict]:
+def tuya_scan(networks: list[str] | None = None) -> list[dict]:
     """Tuya-Geraete (Cloud-Schluessel + LAN-Suche). Aktualisiert dabei die IPs bekannter Geraete."""
     items = load_devices()
     known = {d["dev_id"] for d in items if d.get("kind") == "tuya"}
     try:
-        found = tuya.discover(known)
+        found = tuya.discover(known, networks)
     except tuya.TuyaError as e:
         raise ShellyError(str(e))
     by_id = {f["dev_id"]: f for f in found}
@@ -299,6 +352,8 @@ def status(d: dict) -> dict:
     """{'online': bool, 'on': bool|None, 'power': W|None}"""
     if d.get("kind") == "tuya":
         return tuya.status(d)
+    if d.get("kind") == "tasmota":
+        return tasmota.status(d)
     try:
         if d["gen"] >= 2:
             st = _get(d["ip"], f"/rpc/Switch.GetStatus?id={d['channel']}", CALL_TIMEOUT)
@@ -328,6 +383,12 @@ def set_state(dev_id: str, on: bool, timer_s: int | None = None) -> dict:
             return tuya.set_state(d, on)
         except tuya.TuyaError as e:
             raise ShellyError(str(e))
+    if d.get("kind") == "tasmota":
+        try:
+            tasmota.set_state(d, on, timer_s)
+        except tasmota.TasmotaError as e:
+            raise ShellyError(str(e))
+        return status(d)
     try:
         if d["gen"] >= 2:
             extra = f"&toggle_after={int(timer_s)}" if on and timer_s is not None else ""

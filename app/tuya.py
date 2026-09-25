@@ -109,12 +109,12 @@ def _cloud_devices() -> list[dict]:
     return [d for d in res if isinstance(d, dict) and d.get("id") and d.get("key")]
 
 
-def discover(known_ids: set[str]) -> list[dict]:
+def discover(known_ids: set[str], networks: list[str] | None = None) -> list[dict]:
     """Holt die Geraete samt Keys aus der Cloud und sucht sie per Broadcast im LAN.
     Rueckgabe: Kandidaten ohne Schluessel; die Schluessel bleiben serverseitig im Zwischenspeicher."""
     tt = _tt()
     cloud = _cloud_devices()
-    nets = load_credentials().get("networks") or []
+    nets = list(networks) if networks else (load_credentials().get("networks") or [])
     if nets:
         # UDP-Broadcast kommt nicht ueber VLAN-Grenzen: zusaetzlich die genannten Netze per TCP (Port 6668)
         # absuchen; die Geraete werden dort anhand ihrer Cloud-Schluessel erkannt.

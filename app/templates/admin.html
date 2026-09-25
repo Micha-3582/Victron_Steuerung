@@ -359,15 +359,22 @@
 </div>
 
 <div class="card" id="shelly-admin">
-  <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Geräte (Shelly &amp; Tuya)</h2>
-  <div class="muted" style="margin-bottom:12px">Shellys und Tuya-/Gosund-Geräte im Heimnetz suchen, benennen und mit einem Symbol versehen.
+  <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Geräte (Shelly, Tasmota &amp; Tuya)</h2>
+  <div class="muted" style="margin-bottom:12px">Shelly-, Tasmota- und Tuya-/Gosund-Geräte im Heimnetz suchen, benennen und mit einem Symbol versehen.
     Pro Gerät legst du fest, wo es verwendet wird: als Schalter auf dem Dashboard und/oder in der
     Überschuss-Automatik (eigene Karte darunter, dort auch die Reihenfolge).</div>
   <div id="shelly-devs" style="display:flex;flex-direction:column;gap:10px"></div>
   <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
     <button id="shelly-scan" class="ghost">Shellys suchen</button>
-    <input type="text" id="shelly-ip" placeholder="oder Shelly-IP eingeben, z.B. 192.168.2.55" style="flex:1;min-width:190px">
+    <button id="tasmota-scan" class="ghost">Tasmota suchen</button>
+    <input type="text" id="shelly-ip" placeholder="oder IP (Shelly/Tasmota), z.B. 192.168.2.55" style="flex:1;min-width:190px">
     <button id="shelly-add" class="ghost">Hinzufügen</button>
+  </div>
+  <div style="margin-top:14px">
+    <label>Weitere Netze / VLANs für die Suche (optional)</label>
+    <input id="scan-networks" placeholder="z.B. 192.168.178.0/24, 192.168.48.0/21" autocomplete="off">
+    <div class="muted">Standardmäßig wird nur das Netz des Servers durchsucht. Geräte in anderen VLANs hier eintragen (gilt für Shelly, Tasmota
+      und Tuya; der Server muss dorthin routen dürfen). Die Suche dauert dann etwas länger.</div>
   </div>
   <div style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px">
     <b>Tuya / Smart Life (z.B. Gosund)</b>
@@ -385,9 +392,6 @@
         <div><label>Region</label><select id="tuya-region"></select></div>
         <div><label>Access ID</label><input id="tuya-key" autocomplete="off"></div>
         <div><label>Access Secret</label><input id="tuya-secret" type="password" autocomplete="new-password"></div>
-        <div><label>Weitere Netze / VLANs (optional)</label><input id="tuya-networks" placeholder="z.B. 192.168.178.0/24, 192.168.48.0/21" autocomplete="off">
-          <div class="muted">Geräte in anderen VLANs werden per Broadcast nicht gefunden – hier deren Netze eintragen,
-            dann sucht die App dort gezielt. Der Server muss dorthin routen dürfen (Port 6668).</div></div>
         <div style="display:flex;align-items:flex-end"><button id="tuya-save" class="ghost">Zugang speichern</button></div>
       </div>
     </details>
@@ -481,7 +485,7 @@ const TILE_DEFS = [
   { key: 'show_price_plan', label: 'Strompreis & Ladeplan', hint: 'Preiskurve mit Ladeplan, manuelle Termine markieren.' },
   { key: 'show_charge_log', label: 'Ladevorgänge (heute)', hint: 'Protokoll geplanter/durchgeführter Ladungen.' },
   { key: 'show_ev_card', label: 'Manuelle Ladetermine', hint: 'Formular zum Anlegen eines Ladetermins.' },
-  { key: 'show_shelly_card', label: 'Geräte (Shelly/Tuya)', hint: 'Schalter für smarte Steckdosen auf dem Dashboard.' },
+  { key: 'show_shelly_card', label: 'Geräte (Shelly/Tasmota/Tuya)', hint: 'Schalter für smarte Steckdosen auf dem Dashboard.' },
 ];
 let tileOrder = TILE_DEFS.map(t => t.key);   // Reihenfolge auf dem Dashboard (▲▼ unten)
 function mergeTileOrder(saved) {
@@ -920,17 +924,42 @@ async function loadTuyaInfo() {
   const sel = document.getElementById('tuya-region');
   sel.innerHTML = Object.entries(t.regions).map(([k, v]) => `<option value="${k}">${escH(v)}</option>`).join('');
   sel.value = t.region; document.getElementById('tuya-key').value = t.api_key;
-  document.getElementById('tuya-networks').value = t.networks || '';
   document.getElementById('tuya-secret').placeholder = t.configured ? '(gespeichert – leer lassen = unverändert)' : '';
   document.getElementById('tuya-setup').open = !t.configured;
 }
 document.getElementById('tuya-save').addEventListener('click', async () => {
   try {
     await shellyApi('/api/tuya/credentials', 'POST', { region: document.getElementById('tuya-region').value,
-      api_key: document.getElementById('tuya-key').value, api_secret: document.getElementById('tuya-secret').value,
-      networks: document.getElementById('tuya-networks').value });
+      api_key: document.getElementById('tuya-key').value, api_secret: document.getElementById('tuya-secret').value });
     document.getElementById('tuya-secret').value = ''; shellyMsg('Tuya-Zugang gespeichert.'); loadTuyaInfo();
   } catch (e) { shellyMsg(e.message, true); }
+});
+/* --- Tasmota + gemeinsame Netzeinstellung --- */
+document.getElementById('tasmota-scan').addEventListener('click', async e => {
+  const b = e.target; b.disabled = true; shellyMsg('Tasmota-Suche läuft … (bei weiteren Netzen bis zu 30 Sekunden)');
+  try {
+    const found = await shellyApi('/api/tasmota/scan', 'POST');
+    const fresh = found.filter(f => !f.known);
+    shellyMsg(found.length ? `${found.length} Tasmota-Gerät(e) gefunden, ${fresh.length} noch nicht angelegt.` : 'Keine Tasmota-Geräte gefunden (passwortgeschützte per IP + Passwort hinzufügen).');
+    document.getElementById('shelly-found').innerHTML = fresh.map(f => `<div data-key="${escH(f.ip)}" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="flex:1;min-width:150px"><b>${escH(f.name)}</b><div class="muted">${escH(f.model)} · ${escH(f.ip)} · ${f.channels} Kanal${f.channels === 1 ? '' : 'e'}</div></div>
+      <button onclick="shellyAddIp('${escH(f.ip)}')">Hinzufügen</button></div>`).join('');
+  } catch (err) { shellyMsg(err.message, true); }
+  b.disabled = false;
+});
+(async () => {
+  try {
+    const cfg = await (await fetch('/api/config')).json();
+    const t = await (await fetch('/api/tuya')).json();
+    document.getElementById('scan-networks').value = cfg.scan_networks || t.networks || '';
+  } catch (e) { /* egal */ }
+})();
+document.getElementById('scan-networks').addEventListener('change', async e => {
+  try {
+    await shellyApi('/api/config', 'POST', { scan_networks: e.target.value });
+    const cfg = await (await fetch('/api/config')).json(); e.target.value = cfg.scan_networks || '';
+    shellyMsg(''); savedToast();
+  } catch (err) { shellyMsg(err.message, true); }
 });
 document.getElementById('tuya-scan').addEventListener('click', async e => {
   const b = e.target; b.disabled = true; shellyMsg('Tuya-Suche läuft … (bis zu 30 Sekunden)');

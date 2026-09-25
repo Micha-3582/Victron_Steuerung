@@ -816,8 +816,13 @@ def api_config():
                "show_week_overview", "show_month_overview", "show_tibber_card",
                "show_override_card", "show_price_plan", "show_charge_log",
                "show_ev_card", "show_shelly_card", "surplus_enabled", "surplus_dry_run",
-               "surplus_min_soc", "tile_order"] + list(Params().__dict__.keys())
+               "surplus_min_soc", "tile_order", "scan_networks"] + list(Params().__dict__.keys())
     allowed = allowed + ["surplus_" + k for k in surplus.DEFAULTS]     # einstellbare Automatik-Werte
+    if "scan_networks" in body:
+        try:
+            body["scan_networks"] = ", ".join(tuya.parse_networks(body["scan_networks"]))
+        except tuya.TuyaError as e:
+            return jsonify(error=str(e)), 400
     if not (isinstance(body.get("tile_order", []), list)
             and all(isinstance(k, str) for k in body.get("tile_order", []))):
         body.pop("tile_order", None)          # Kachelreihenfolge: nur Liste von Textschluesseln
@@ -942,6 +947,16 @@ def api_ev_modify(eid):
     return jsonify(entry)
 
 
+def _scan_networks() -> list[str]:
+    """Weitere Netze/VLANs fuer alle Geraetesuchen (Einstellung `scan_networks`; frueher am Tuya-Zugang gespeichert)."""
+    cfg = store.load_config()
+    text = cfg.get("scan_networks") or ", ".join(tuya.load_credentials().get("networks") or [])
+    try:
+        return tuya.parse_networks(text)
+    except tuya.TuyaError:
+        return []
+
+
 @app.route("/api/shelly", methods=["GET"])
 def api_shelly_list():
     """?dashboard=1: nur die in den Einstellungen fuers Dashboard freigegebenen."""
@@ -988,7 +1003,7 @@ def api_tuya_credentials():
 def api_tuya_scan():
     """Tuya-Geraete: Schluessel aus der Cloud + Suche im LAN (dauert ca. 20-30 s)."""
     try:
-        return jsonify(shelly.tuya_scan())
+        return jsonify(shelly.tuya_scan(_scan_networks()))
     except shelly.ShellyError as e:
         return jsonify(error=str(e)), 400
     except Exception as e:                               # noqa: BLE001
@@ -1024,9 +1039,19 @@ def api_shelly_order():
 def api_shelly_scan():
     """Durchsucht das lokale /24-Netz nach Shelly-Geraeten (dauert ca. 2-5 s)."""
     try:
-        return jsonify(shelly.discover())
+        return jsonify(shelly.discover(extra_networks=_scan_networks()))
     except Exception as e:                               # noqa: BLE001
         log.warning("Shelly-Scan fehlgeschlagen: %s", e)
+        return jsonify(error=f"Suche fehlgeschlagen: {e}"), 500
+
+
+@app.route("/api/tasmota/scan", methods=["POST"])
+def api_tasmota_scan():
+    """Durchsucht das lokale /24-Netz und die eingestellten weiteren Netze nach Tasmota-Geraeten."""
+    try:
+        return jsonify(shelly.tasmota_discover(extra_networks=_scan_networks()))
+    except Exception as e:                               # noqa: BLE001
+        log.warning("Tasmota-Scan fehlgeschlagen: %s", e)
         return jsonify(error=f"Suche fehlgeschlagen: {e}"), 500
 
 
