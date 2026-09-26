@@ -256,6 +256,9 @@ def build(days: int = 7, ctrl: dict | None = None, now: datetime | None = None) 
                         "pv_today": (ctrl.get("status") or {}).get("pv_today"), "pv_tom": (ctrl.get("status") or {}).get("pv_tom"),
                         "plan_windows": (ctrl.get("status") or {}).get("plan_windows"), "now_price": (ctrl.get("status") or {}).get("now_price")},
             "planner": ({"available": True, "sim_ct": plan["result"]["sim"]["cost_ct"], "current_ct": plan["result"]["current"]["cost_ct"],
+                         "sim_net": plan["result"]["sim"]["net_ct"], "current_net": plan["result"]["current"]["net_ct"],
+                         "sim_end_soc": plan["result"]["sim"]["end_soc"], "current_end_soc": plan["result"]["current"]["end_soc"],
+                         "horizon_end": plan["result"]["horizon_end"],
                          "sim_windows": plan["result"]["sim"]["windows"], "current_windows": plan["result"]["current"]["windows"]}
                         if plan.get("available") else None)}
 
@@ -276,7 +279,10 @@ def to_markdown(r: dict) -> str:
     if r.get("planner"):
         p = r["planner"]
         w = lambda ws: ", ".join(f"{x['from']}-{x['to']}" for x in ws) or "kein Netzladen"
-        L.append(f"Planer (Test): Simulation {p['sim_ct'] / 100:.2f} € [{w(p['sim_windows'])}] vs. bisherige Steuerung {p['current_ct'] / 100:.2f} € [{w(p['current_windows'])}]")
+        diff = p["current_net"] - p["sim_net"]
+        L.append(f"Planer (Test), Horizont bis {p['horizon_end'][5:16].replace('T', ' ')}: Simulation lädt [{w(p['sim_windows'])}] → Netzbezug {p['sim_ct'] / 100:.2f} €, Akku-Endstand {p['sim_end_soc']:.0f} % · "
+                 f"bisherige Steuerung [{w(p['current_windows'])}] → {p['current_ct'] / 100:.2f} €, Endstand {p['current_end_soc']:.0f} % · "
+                 f"Unterschied inkl. Akku-Restwert: {'Simulation' if diff >= 0 else 'bisherige Steuerung'} {abs(diff) / 100:.2f} € günstiger")
     L += ["", "## Tage (neueste zuerst)", "| Tag | Solar | Verbr. | Bezug | Einsp. | Autark | Kosten € | Ø Bezugspreis | Geladen kWh | Preis min/Ø/max | VRM-Prog. (Abw.) | Durchl. ok/Fehler | Lade-Durchl. | ESS-Wechsel | Plan-Vorteil ct |",
           "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for d in r["days"]:
