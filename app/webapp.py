@@ -1140,6 +1140,41 @@ def api_ess_min_soc():
         return jsonify(error=str(e)), 400
 
 
+@app.route("/api/ess/grid-setpoint", methods=["GET", "POST"])
+def api_ess_grid_setpoint():
+    """ESS 'Sollwert Netz' (W) am Cerbo lesen/setzen - der Netzbezug, den der Multiplus zu halten versucht (negativ = leichte Einspeisung)."""
+    cfg = store.load_config()
+    if not store.is_configured(cfg):
+        return jsonify(error="Cerbo ist noch nicht eingerichtet"), 400
+    cerbo = Cerbo(cfg["cerbo_host"], cfg.get("cerbo_port", 502))
+    try:
+        if request.method == "GET":
+            return jsonify(ok=True, watt=cerbo.read_grid_setpoint())
+        try:
+            watt = int(float((request.get_json(silent=True) or {}).get("watt")))
+        except (TypeError, ValueError):
+            return jsonify(error="Bitte eine ganze Zahl (Watt) eintragen"), 400
+        if not -1000 <= watt <= 1000:
+            return jsonify(error="Sollwert Netz: zwischen -1000 und 1000 W"), 400
+        if cfg.get("dry_run", True):
+            return jsonify(error="Der Trockenlauf der Ladesteuerung ist an – dabei wird nichts am Cerbo geändert. Schalte ihn unter Einstellungen aus."), 400
+        old = cerbo.read_grid_setpoint()
+        cerbo.write_grid_setpoint(watt, dry_run=False)
+        new = old
+        for _ in range(10):                              # der Cerbo uebernimmt den Wert erst einen Moment spaeter
+            time.sleep(0.5)
+            new = cerbo.read_grid_setpoint()
+            if new == watt:
+                break
+        if new != watt:
+            return jsonify(error=f"Der Cerbo meldet noch {new} W statt {watt} W – bitte kurz warten und in der Remote-Konsole prüfen"), 400
+        opslog.log("ess", f"Sollwert Netz (Cerbo) von {old} W auf {new} W gesetzt")
+        return jsonify(ok=True, watt=new)
+    except Exception as e:                               # noqa: BLE001
+        log.warning("Sollwert Netz: %s", e)
+        return jsonify(error=str(e)), 400
+
+
 @app.route("/api/config", methods=["GET", "POST"])
 def api_config():
     if request.method == "GET":

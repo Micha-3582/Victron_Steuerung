@@ -16,6 +16,7 @@ _GRID_COUNTER_WARNING_INTERVAL = 600   # nur alle 10 Min erneut loggen (Live-/Sa
 SOC_BMS_UNIT, SOC_BMS_REG = 225, 266      # Wert = %*10  -> /10
 SOC_SYS_UNIT, SOC_SYS_REG = 100, 843      # Wert = %     (Gegencheck)
 ESS_MODE_UNIT, ESS_MODE_REG = 100, 2900   # Holding: 9=laden, 10=idle
+GRID_SP_UNIT, GRID_SP_REG = 100, 2700     # Holding int16: ESS 'Sollwert Netz' (W); negativ = leicht einspeisen
 MIN_SOC_UNIT, MIN_SOC_REG = 100, 2901     # Holding: ESS 'Minimaler SOC (es sei denn, Netz faellt aus)', Wert = %*10
 
 
@@ -175,6 +176,33 @@ class Cerbo:
             if rr.isError():
                 raise IOError(f"Minimaler SOC schreiben fehlgeschlagen: {rr}")
             log.info("Minimaler SOC = %s %% geschrieben", pct)
+            return True
+        finally:
+            c.close()
+
+    def read_grid_setpoint(self):
+        """ESS 'Sollwert Netz' in W (mit Vorzeichen)."""
+        c = self._client()
+        try:
+            rr = _call(c.read_holding_registers, GRID_SP_REG, GRID_SP_UNIT)
+            if rr.isError():
+                raise IOError(f"Sollwert Netz nicht lesbar: {rr}")
+            raw = rr.registers[0]
+            return raw - 65536 if raw >= 32768 else raw
+        finally:
+            c.close()
+
+    def write_grid_setpoint(self, watt, dry_run=True):
+        """Setzt den Netz-Sollwert (ganze W, auch negativ). Bei dry_run wird NICHT geschrieben."""
+        if dry_run:
+            log.info("[DRY-RUN] wuerde Sollwert Netz = %s W schreiben (kein Schreibzugriff)", watt)
+            return False
+        c = self._client()
+        try:
+            rr = _write(c.write_register, GRID_SP_REG, int(watt) & 0xFFFF, GRID_SP_UNIT)
+            if rr.isError():
+                raise IOError(f"Sollwert Netz schreiben fehlgeschlagen: {rr}")
+            log.info("Sollwert Netz = %s W geschrieben", watt)
             return True
         finally:
             c.close()
