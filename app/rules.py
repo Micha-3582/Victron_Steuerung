@@ -277,6 +277,8 @@ class RuleEngine:
         self.owner_rule: dict[str, str] = {}             # geraet -> Regel-ID, die es eingeschaltet hat
         self.ran: dict[str, dict] = {}                   # regel -> {"day": iso, "min": Minuten (Tagesziel)}
         self.blocked: set[str] = set()                   # Regeln, die nach einem Ausschalten erst neu 'scharf' werden muessen
+        self.block_reason: dict[str, str] = {}           # regel -> 'manual' (von Hand ausgeschaltet) | 'off' (Ausschalt-Bedingung)
+        self._prev_on: dict[str, bool] = {}              # geraet -> Zustand beim letzten Schritt (Erkennung von Handschaltungen am Geraet)
         self._last_change: dict[str, datetime] = {}
         self._hold_until: dict[str, datetime] = {}
         self._armed: dict[str, datetime] = {}
@@ -295,12 +297,15 @@ class RuleEngine:
                 self.owner = {k: v for k, v in (d.get("owner") or {}).items() if isinstance(v, str)}
                 self.owner_rule = {k: v for k, v in (d.get("owner_rule") or {}).items() if isinstance(v, str)}
                 self.ran = {k: v for k, v in (d.get("ran") or {}).items() if isinstance(v, dict)}
+                self.block_reason = {k: v for k, v in (d.get("blocked") or {}).items() if isinstance(v, str)}
+                self.blocked = set(self.block_reason)
         except Exception:                                # noqa: BLE001
             pass
 
     def _save_state(self):
         try:
-            _store()._dump_json(STATE_PATH, {"owner": self.owner, "owner_rule": self.owner_rule, "ran": self.ran}, indent=None)
+            _store()._dump_json(STATE_PATH, {"owner": self.owner, "owner_rule": self.owner_rule, "ran": self.ran,
+                                             "blocked": {r: self.block_reason.get(r, "off") for r in self.blocked}}, indent=None)
         except Exception:                                # noqa: BLE001
             pass
 
@@ -309,10 +314,17 @@ class RuleEngine:
         now = now or datetime.now()
         with self._lock:
             self._hold_until[dev_id] = now.replace(microsecond=0) + timedelta(minutes=hold_min)
+            rid = self.owner_rule.get(dev_id)
+            if self.owner.get(dev_id) == "rule" and rid:
+                self._block(rid, "manual")               # von Hand ausgeschaltet: gilt, bis die Einschalt-Bedingungen einmal nicht mehr stimmen
             self.owner.pop(dev_id, None)
             self.owner_rule.pop(dev_id, None)
             self._armed.pop(dev_id, None)
         self._save_state()
+
+    def _block(self, rule_id: str, reason: str):
+        self.blocked.add(rule_id)
+        self.block_reason[rule_id] = reason
 
     def mark_armed(self, dev_id: str, now: datetime | None = None):
         with self._lock:
@@ -375,7 +387,20 @@ class RuleEngine:
         info: dict[str, dict] = {}                       # regel -> Auswertung
         wants: dict[str, tuple[str, str]] = {}           # geraet -> (regel-id, Begruendung): soll jetzt eingeschaltet werden
         rule_ids = {r["id"] for r in rules}
-        self.blocked &= rule_ids
+        for gone in self.blocked - rule_ids:
+            self.blocked.discard(gone)
+            self.block_reason.pop(gone, None)
+        # Am Geraet selbst (oder in einer anderen App) ausgeschaltet, obwohl es der Regel gehoert: gilt wie Handschaltung
+        try:
+            manual_hold = float(cfg.get("surplus_manual_hold_min", 60))
+        except (TypeError, ValueError):
+            manual_hold = 60.0
+        for d in devices:
+            if self._prev_on.get(d["id"]) is True and d.get("online") and not d.get("on") and self.owner.get(d["id"]) == "rule":
+                self.note_manual(d["id"], now, manual_hold)
+                hold = dict(self._hold_until)
+            if d.get("online"):
+                self._prev_on[d["id"]] = bool(d.get("on"))
 
         for r in rules:
             dev = by_dev.get(r["device_id"])
@@ -397,6 +422,7 @@ class RuleEngine:
             info[r["id"]] = {"base_on": base_on, "off_hit": off_hit, "budget_done": budget_done, "has_off": bool(off_res)}
             if not base_on:
                 self.blocked.discard(r["id"])            # Einschalt-Bedingungen galten nicht mehr -> Regel wieder scharf
+                self.block_reason.pop(r["id"], None)
             if not dev.get("switchable", True):
                 status[r["id"]] = {"state": "off", "text": "Gerät ist nur zur Überwachung (nicht schaltbar)", "conds": conds}
                 continue
@@ -421,7 +447,8 @@ class RuleEngine:
                     wants.setdefault(dev["id"], (r["id"], r["name"] or "Regel"))
                     status[r["id"]] = {"state": "on", "text": "Bedingungen erfüllt", "conds": conds}
             elif base_on:
-                status[r["id"]] = {"state": "off", "text": "Ausschalt-Bedingung war erfüllt – wartet, bis die Einschalt-Bedingungen einmal nicht mehr stimmen", "conds": conds}
+                by_hand = self.block_reason.get(r["id"]) == "manual"
+                status[r["id"]] = {"state": "off", "text": ("von Hand ausgeschaltet" if by_hand else "Ausschalt-Bedingung war erfüllt") + " – wartet, bis die Einschalt-Bedingungen einmal nicht mehr stimmen", "conds": conds}
             else:
                 why = ("keine Daten für: " + ", ".join(missing)) if missing else "nicht erfüllt: " + ", ".join(x["text"] for x in conds if x["ok"] is False)
                 status[r["id"]] = {"state": "off", "text": why, "conds": conds}
@@ -449,7 +476,7 @@ class RuleEngine:
                 elif inf["off_hit"]:
                     reason = "Ausschalt-Bedingung: " + ", ".join(inf["off_hit"])
                     if inf["base_on"]:
-                        self.blocked.add(rid)
+                        self._block(rid, "off")
                 elif inf["budget_done"]:
                     reason = "Tagesziel erreicht"
                 elif not inf["has_off"] and not inf["base_on"]:
