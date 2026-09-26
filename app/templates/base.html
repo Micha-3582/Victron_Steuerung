@@ -146,7 +146,7 @@
     /* Handy: Kurve doppelt so breit -> ~12 h sichtbar, Rest seitlich scrollen.
        Feste CSS-Breite statt JS verhindert das Aufschaukeln von Chart.js. */
     @media (max-width: 720px) { .chart-inner { height: 250px; width: 200%; } }
-    .chart-scroll canvas { cursor: crosshair; touch-action: pan-x pan-y; }
+    .chart-scroll canvas { cursor: crosshair; touch-action: pan-x pan-y; }   /* pan-y: senkrecht wischen scrollt die Seite auch ueber dem Diagramm */
     body.selecting .chart-scroll canvas { touch-action: none; }
     .sel-btn[aria-pressed="true"] { background: var(--timer); color: #14171c; border-color: var(--timer); }
     .daytab { font-size: 13px; padding: 6px 14px; }
