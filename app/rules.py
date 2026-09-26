@@ -19,7 +19,8 @@ Bedingungen:
 Die PV-Ueberschuss-Automatik ist ein eigener Baustein (surplus.py): Geraete mit Flag "auto" (Reihenfolge = Prioritaet) bekommen ueberschuessigen Strom.
 Hat eine Regel ein Geraet gerade eingeschaltet oder soll es laufen, laesst die Ueberschuss-Automatik es in Ruhe.
 
-Sicherheit: geschaltet wird nur, was die Engine selbst eingeschaltet hat (Besitzer-Merkung, ueberlebt Neustarts); von Hand geschaltete Geraete
+Sicherheit: ausgeschaltet wird nur, was die Engine selbst eingeschaltet oder uebernommen hat (Besitzer-Merkung, ueberlebt Neustarts). Laeuft ein Geraet,
+waehrend die Einschalt-Bedingungen einer Regel stimmen, uebernimmt die Regel es (Timer-Verhalten); von Hand ueber die App geschaltete Geraete
 bleiben fuer eine Weile in Ruhe; Shelly bekommen einen Rueckschalt-Timer (wie bisher).
 
 Alles hier ist reine Logik ohne Netzwerk (testbar). Geschaltet wird vom Aufrufer (webapp.py).
@@ -413,8 +414,12 @@ class RuleEngine:
                 else:
                     status[r["id"]] = {"state": "on", "text": "läuft" + (" – bis eine Ausschalt-Bedingung zutrifft" if off_res else " – solange die Bedingungen stimmen"), "conds": conds}
             elif base_on and r["id"] not in self.blocked:
-                wants.setdefault(dev["id"], (r["id"], r["name"] or "Regel"))
-                status[r["id"]] = {"state": "on", "text": "Bedingungen erfüllt", "conds": conds}
+                if dev.get("on") and dev["id"] not in self.owner:
+                    self.set_owner(dev["id"], "rule", r["id"])            # Geraet laeuft schon, waehrend die Bedingungen stimmen: Regel uebernimmt es
+                    status[r["id"]] = {"state": "on", "text": "läuft – von der Regel übernommen", "conds": conds}
+                else:
+                    wants.setdefault(dev["id"], (r["id"], r["name"] or "Regel"))
+                    status[r["id"]] = {"state": "on", "text": "Bedingungen erfüllt", "conds": conds}
             elif base_on:
                 status[r["id"]] = {"state": "off", "text": "Ausschalt-Bedingung war erfüllt – wartet, bis die Einschalt-Bedingungen einmal nicht mehr stimmen", "conds": conds}
             else:
