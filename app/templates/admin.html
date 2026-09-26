@@ -275,9 +275,9 @@
       <div style="display:flex;gap:8px"><input id="ess_min_soc" type="number" min="0" max="100" step="1" placeholder="…"><button type="button" class="ghost" id="ess_min_soc_btn" style="white-space:nowrap">Am Cerbo setzen</button></div>
       <small class="hint" id="ess_min_soc_msg">Wird direkt am Cerbo gesetzt (nicht mit „Speichern“).</small></div>
     <div><label>Sollwert Netz am Cerbo (W)
-        <span class="qhelp" role="button" tabindex="0" data-help="ESS „Sollwert Netz“: der Netzbezug, den der Multiplus zu halten versucht. 0 = möglichst weder Bezug noch Einspeisung, ein kleiner negativer Wert (z. B. -10) speist leicht ein, damit nie versehentlich Strom bezogen wird. Wird direkt am Cerbo gesetzt, nicht mit „Speichern“. Erlaubt: -1000 bis 1000.">?</span>
+        <span class="qhelp" role="button" tabindex="0" data-help="ESS „Sollwert Netz“: der Netzbezug, den der Multiplus zu halten versucht. 0 = möglichst weder Bezug noch Einspeisung, ein kleiner negativer Wert (z. B. -10) speist leicht ein, damit nie versehentlich Strom bezogen wird. Wird direkt am Cerbo gesetzt, nicht mit „Speichern“. Erlaubt: -1000 bis 1000 in 10-W-Schritten (wie am Cerbo).">?</span>
       </label>
-      <div style="display:flex;gap:8px"><input id="ess_grid_sp" type="number" min="-1000" max="1000" step="1" placeholder="…"><button type="button" class="ghost" id="ess_grid_sp_btn" style="white-space:nowrap">Am Cerbo setzen</button></div>
+      <div style="display:flex;gap:8px"><input id="ess_grid_sp" type="number" min="-1000" max="1000" step="10" placeholder="…"><button type="button" class="ghost" id="ess_grid_sp_btn" style="white-space:nowrap">Am Cerbo setzen</button></div>
       <small class="hint" id="ess_grid_sp_msg">Wird direkt am Cerbo gesetzt (nicht mit „Speichern“).</small></div>
     <div><label>Immer laden unter (ct/kWh)
         <span class="qhelp" role="button" tabindex="0" data-help="Gegenstück zum Ladelimit: faellt der Preis auf oder unter diesen Wert, wird sofort geladen, unabhaengig davon, ob gerade eine Strategie ueberhaupt Bedarf sieht - fuer Preise, die an dem Tag mit hoher Sicherheit nicht mehr unterboten werden. Bleibt weiterhin unter dem Ladelimit oben. 0 = deaktiviert.">?</span>

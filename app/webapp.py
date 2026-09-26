@@ -1156,6 +1156,8 @@ def api_ess_grid_setpoint():
             return jsonify(error="Bitte eine ganze Zahl (Watt) eintragen"), 400
         if not -1000 <= watt <= 1000:
             return jsonify(error="Sollwert Netz: zwischen -1000 und 1000 W"), 400
+        if watt % 10:
+            return jsonify(error="Sollwert Netz: nur in 10-W-Schritten (wie am Cerbo), z. B. -10 oder -20"), 400
         if cfg.get("dry_run", True):
             return jsonify(error="Der Trockenlauf der Ladesteuerung ist an – dabei wird nichts am Cerbo geändert. Schalte ihn unter Einstellungen aus."), 400
         old = cerbo.read_grid_setpoint()
