@@ -129,8 +129,7 @@ function renderSettings() {
 }
 
 const TYPES = [['time', 'Uhrzeit von–bis'], ['at', 'Uhrzeit (einmal pro Tag)'], ['price', 'Strompreis'], ['cheapest', 'Günstigste Stunden des Tages'], ['budget', 'Tagesziel (Minuten pro Tag)'], ['soc', 'Akkustand'], ['sun_tomorrow', 'Sonne morgen (Prognose)']];
-const MODES = [['on', '🟢 I  Einschalten, wenn'], ['off', '🔴 O  Ausschalten, sobald']];        // I/O wie am Netzschalter: grün = ein, rot = aus
-const badge = on => `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;margin-right:8px;font-size:12px;font-weight:800;color:#0b1f14;background:${on ? 'var(--cheap)' : 'var(--exp)'}">${on ? 'I' : 'O'}</span>`;
+const MODES = [['on', '🟢 Einschalten, wenn'], ['off', '🔴 Ausschalten, sobald']];        // gleiche Symbole im Menue und bei DANN: gruen = ein, rot = aus
 const allowed = (mode, fixed) => TYPES.filter(([t]) => !(fixed && (t === 'price' || t === 'cheapest')) && !(mode === 'on' && t === 'at') && !(mode === 'off' && t === 'budget'));
 const COND_DEFAULT = {
   at: { type: 'at', time: '23:30', days: [] }, time: { type: 'time', from: '09:00', to: '16:00', days: [] }, price: { type: 'price', op: 'below', ct: 25 }, cheapest: { type: 'cheapest', hours: 3 },
@@ -160,7 +159,7 @@ function condRow(c, mode, label) {
   else if (c.type === 'soc') body = `${cmp('c-op', c.op)} ${num('c-pct', c.pct, 70)} %`;
   else if (c.type === 'sun_tomorrow') body = `${cmp('c-op', c.op)} ${num('c-kwh', c.kwh, 70)} kWh`;
   return `<div class="cond" data-type="${c.type}" data-mode="${mode}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border)">
-    <span style="width:46px;font-weight:700;letter-spacing:.05em;color:var(--muted)">${label}</span>
+    <span style="flex:0 0 56px;font-weight:700;letter-spacing:.05em;color:var(--muted)">${label}</span>
     <select class="c-type" style="width:auto" onchange="condTypeChanged(this)">${optHtml(allowed(mode, FIXED), c.type)}</select>
     <span style="flex:1;min-width:160px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${body}</span>
     <button class="ghost" style="padding:2px 9px" title="Bedingung entfernen" onclick="ruleCondDel(this)">✕</button></div>`;
@@ -234,9 +233,9 @@ function statusHtml(r) {                          // Status gibt es nur fuer die
 const statusBlock = r => { const h = statusHtml(r); return h ? `<div style="margin-top:10px">${h}</div>` : ''; };
 function grpHtml(list, mode) {                    // WENN a UND b DANN einschalten  /  WENN c ODER d DANN ausschalten
   if (!list.length) return '';
-  const on = mode === 'on', color = on ? 'var(--cheap)' : 'var(--exp)';
+  const on = mode === 'on', color = on ? 'var(--cheap)' : '#e5544a';
   return `<div style="margin-top:12px;border-left:3px solid ${color};padding-left:10px">${list.map((c, i) => condRow(c, mode, i === 0 ? 'WENN' : (on ? 'UND' : 'ODER'))).join('')}
-    <div style="padding:8px 0 2px;border-top:1px solid var(--border)"><span style="display:inline-block;width:46px;font-weight:700;letter-spacing:.05em;color:var(--muted)">DANN</span>${badge(on)}<b style="color:${color}">${on ? 'Gerät einschalten' : 'Gerät ausschalten'}</b></div></div>`;
+    <div style="padding:8px 0 2px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px"><span style="flex:0 0 56px;font-weight:700;letter-spacing:.05em;color:var(--muted)">DANN</span><span>${on ? '🟢' : '🔴'}</span><b style="color:${color}">${on ? 'Gerät einschalten' : 'Gerät ausschalten'}</b></div></div>`;
 }
 function pendHtml(r) {                            // Zeile in Arbeit: erst Ein/Aus, danach erscheint die Auswahl WAS
   const p = PEND[r.id]; if (!p) return '';
