@@ -297,13 +297,33 @@ class Controller:
             log.warning("PV-Rest-Korrektur fuer die Regelung fehlgeschlagen (%s) - "
                         "nutze die reine Tagesprognose", e)
 
+        # Steuerquelle: Victron VRM (kennt die reale Anlage) - ohne Zugang, bei Ausfall oder
+        # veralteten Werten faellt die Regelung automatisch auf Open-Meteo zurueck.
+        pv_source, vrm_ctl, solar_tom_ctl = "Open-Meteo", None, solar_tom
+        if cfg.get("solar_source", "auto") != "openmeteo":
+            try:
+                vrm_ctl, vrm_why = vrm.control_forecast(vrm.forecast(), now, store.solar_measured_today(now))
+                if vrm_why:
+                    pv_note = vrm_why
+                    log.warning(vrm_why)
+            except Exception as e:                           # noqa: BLE001
+                vrm_ctl = None
+                log.warning("VRM-Prognose fuer die Regelung fehlgeschlagen (%s) - nutze Open-Meteo", e)
+        if vrm_ctl:
+            pv_source = "VRM"
+            solar_today_for_control = vrm_ctl["today_kwh"]
+            if vrm_ctl["tomorrow_kwh"] is not None:
+                solar_tom_ctl = vrm_ctl["tomorrow_kwh"]
+            else:
+                pv_note = "VRM liefert noch keine Prognose für morgen – für morgen Open-Meteo"
+
         # Open-Meteo bringt die Performance Ratio schon mit -> in decide() KEINEN
-        # weiteren Korrekturfaktor anwenden (sonst doppelte Skalierung).
+        # weiteren Korrekturfaktor anwenden (sonst doppelte Skalierung). Das gilt auch fuer VRM.
         params = Params.from_config(cfg)
         params.pv_korrektur_faktor = 1.0
         state = store.load_state()
         d = decide(soc=soc, price_entries=prices, solar_today_raw=solar_today_for_control,
-                   solar_tom_raw=solar_tom, state=state, now=now,
+                   solar_tom_raw=solar_tom_ctl, state=state, now=now,
                    manual_override=forced, force_reason=reason,
                    params=params)
         store.save_state(state)
@@ -367,11 +387,13 @@ class Controller:
                 "charge_power_w": Params.from_config(cfg).charge_power_w,
                 "pv_today": d.solar_today_korr,
                 "pv_tom": d.solar_tom_korr,
-                "pv_today_range": store.pv_forecast_range(
+                # Unsicherheits-Spannen stammen aus den Open-Meteo-Abweichungen - fuer VRM nicht uebertragbar
+                "pv_source": pv_source,
+                "pv_today_range": None if vrm_ctl else store.pv_forecast_range(
                     d.solar_today_korr, now.date().isoformat(), now,
                     remaining_forecast_kwh=self._om_source(cfg).get_remaining_today(
                         now, bucket_factors=bucket_factors)),
-                "pv_tom_range": store.pv_forecast_range(
+                "pv_tom_range": None if vrm_ctl else store.pv_forecast_range(
                     d.solar_tom_korr, (now.date() + timedelta(days=1)).isoformat(), now),
                 "dry_run": dry,
                 "wrote": wrote,
@@ -833,13 +855,15 @@ def api_config():
                "show_week_overview", "show_month_overview", "show_tibber_card",
                "show_override_card", "show_price_plan", "show_charge_log",
                "show_ev_card", "show_shelly_card", "surplus_enabled", "surplus_dry_run",
-               "surplus_min_soc", "tile_order", "scan_networks"] + list(Params().__dict__.keys())
+               "surplus_min_soc", "tile_order", "scan_networks", "solar_source"] + list(Params().__dict__.keys())
     allowed = allowed + ["surplus_" + k for k in surplus.DEFAULTS]     # einstellbare Automatik-Werte
     if "scan_networks" in body:
         try:
             body["scan_networks"] = ", ".join(tuya.parse_networks(body["scan_networks"]))
         except tuya.TuyaError as e:
             return jsonify(error=str(e)), 400
+    if body.get("solar_source") not in (None, "auto", "openmeteo"):
+        return jsonify(error="Ungültige Prognose-Quelle"), 400
     if not (isinstance(body.get("tile_order", []), list)
             and all(isinstance(k, str) for k in body.get("tile_order", []))):
         body.pop("tile_order", None)          # Kachelreihenfolge: nur Liste von Textschluesseln

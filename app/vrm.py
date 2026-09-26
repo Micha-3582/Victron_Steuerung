@@ -119,8 +119,10 @@ def _summarize(rows: list[dict], now: datetime) -> dict:
             tot[dt.date()] += r["wh"]
             hours.append({"ts": r["ts"], "day": "today" if dt.date() == today else "tomorrow",
                           "hour": dt.hour, "wh": r["wh"]})
-        if dt.date() == today and dt + timedelta(hours=1) > now:
-            remaining += r["wh"]
+        start = dt.replace(minute=0, second=0, microsecond=0)
+        if start.date() == today and start + timedelta(hours=1) > now:
+            # laufende Stunde nur anteilig (der schon vergangene Teil steckt in der Messung)
+            remaining += r["wh"] * min(1.0, (start + timedelta(hours=1) - now).total_seconds() / 3600)
     return {"hours": hours, "today_kwh": round(tot[today] / 1000, 2),
             "tomorrow_kwh": round(tot[tomorrow] / 1000, 2),
             "remaining_today_kwh": round(remaining / 1000, 2)}
@@ -265,3 +267,24 @@ def daily_solar() -> dict[str, float]:
         with _lock:
             _daily_cache["until"] = time.time() + ERROR_TTL_S
             return dict(_daily_cache["data"])
+
+
+# ---------------------------------------------------------------- VRM als Steuerquelle (mit Rueckfall auf Open-Meteo)
+MAX_AGE_H = 3          # aeltere Prognosewerte (z. B. nach laengerem VRM-Ausfall) gelten nicht mehr
+
+
+def control_forecast(vf: dict, now: datetime, measured_today_kwh: float) -> tuple[dict | None, str | None]:
+    """Prueft, ob die VRM-Prognose zur Steuerung taugt.
+    Rueckgabe: ({'today_kwh': gemessen + Rest laut VRM, 'tomorrow_kwh': ...|None}, None) oder (None, Grund)."""
+    if not vf or not vf.get("configured"):
+        return None, None                                   # kein VRM eingerichtet -> stiller Rueckfall
+    hours = vf.get("hours") or []
+    why = f" ({vf['error']})" if vf.get("error") else ""
+    try:
+        upd = datetime.fromisoformat(vf["updated"])
+    except (KeyError, ValueError, TypeError):
+        return None, "PV-Prognose (VRM) nicht verfügbar" + why + " – Rückfall auf Open-Meteo"
+    if upd.date() != now.date() or now - upd > timedelta(hours=MAX_AGE_H) or not any(h["day"] == "today" for h in hours):
+        return None, "PV-Prognose (VRM) veraltet" + why + " – Rückfall auf Open-Meteo"
+    tom = vf["tomorrow_kwh"] if any(h["day"] == "tomorrow" for h in hours) else None
+    return {"today_kwh": round(measured_today_kwh + vf["remaining_today_kwh"], 2), "tomorrow_kwh": tom}, None

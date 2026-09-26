@@ -378,6 +378,19 @@
   </div>
 </div>
 
+<div class="card" id="vrm-source-card">
+  <h2>Victron VRM – Prognose für die Steuerung</h2>
+  <div class="muted" style="margin-bottom:10px">Die Ladeplanung braucht eine Vorhersage, wie viel Sonne heute und morgen kommt. Das VRM kennt deine echte Anlage
+    (Ertragsverlauf, Verschattung) und ist deutlich genauer als eine reine Wetter-Rechnung. Fällt das VRM aus oder liefert veraltete Werte,
+    schaltet die Steuerung automatisch auf Open-Meteo um und zeigt einen Hinweis.</div>
+  <label>Quelle</label>
+  <select id="solar-source">
+    <option value="auto">Automatisch: VRM, bei Ausfall Open-Meteo (empfohlen)</option>
+    <option value="openmeteo">Nur Open-Meteo (VRM steuert nichts)</option>
+  </select>
+  <div class="muted" id="solar-source-msg" style="margin-top:8px"></div>
+</div>
+
 <div class="card" id="vrm-restore-card">
   <h2>Victron VRM – Verlauf nachholen</h2>
   <div>
@@ -1051,6 +1064,21 @@ document.getElementById('vrm-save').addEventListener('click', async e => {
   b.disabled = false;
 });
 loadVrmInfo();
+/* --- Prognose-Quelle fuer die Steuerung --- */
+async function loadSolarSource() {
+  try {
+    const cfg = await (await fetch('/api/config')).json();
+    document.getElementById('solar-source').value = cfg.solar_source === 'openmeteo' ? 'openmeteo' : 'auto';
+    const st = (await (await fetch('/api/status')).json()).status || {};
+    document.getElementById('solar-source-msg').textContent = st.pv_source
+      ? `Aktuell steuert: ${st.pv_source}${st.pv_note ? ' – ⚠ ' + st.pv_note : ''}` : '';
+  } catch (e) { /* egal */ }
+}
+document.getElementById('solar-source').addEventListener('change', async e => {
+  try { await shellyApi('/api/config', 'POST', { solar_source: e.target.value }); savedToast(); setTimeout(loadSolarSource, 3000); }
+  catch (err) { document.getElementById('solar-source-msg').textContent = err.message; }
+});
+loadSolarSource();
 /* --- Fehlende Verlaufsdaten aus dem VRM nachholen (erst Vorschau, dann Übernehmen) --- */
 function restoreMsg(t, err) { const m = document.getElementById('vrm-restore-msg'); m.textContent = t; m.style.color = err ? '#e5544a' : ''; }
 function fmtDay(d) { const [Y, M, D] = d.split('-'); return `${D}.${M}.${Y}`; }
