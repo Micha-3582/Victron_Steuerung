@@ -359,7 +359,7 @@
 </div>
 
 <div class="card" id="vrm-admin">
-  <h2>PV-Prognose (Victron VRM)</h2>
+  <h2>Victron VRM – Zugang &amp; Solar-Prognose</h2>
   <div class="muted" style="margin-bottom:10px">Zeigt auf dem Dashboard den Solarertrag, den das Victron-VRM-Portal für heute und morgen erwartet.
     Die Werte werden nur angezeigt und steuern nichts.</div>
   <details id="vrm-setup">
@@ -376,9 +376,12 @@
     <button id="vrm-save" class="ghost">Zugang speichern &amp; testen</button>
     <span class="muted" id="vrm-msg"></span>
   </div>
-  <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">
-    <b>Fehlende Verlaufsdaten aus dem VRM nachholen</b>
-    <div class="muted" style="margin:4px 0 10px">Fehlen im Verlauf, Wochenrückblick oder Energiefluss-Diagramm Zeiträume (z. B. nach einem
+</div>
+
+<div class="card" id="vrm-restore-card">
+  <h2>Victron VRM – Verlauf nachholen</h2>
+  <div>
+    <div class="muted" style="margin:0 0 10px">Fehlen im Verlauf, Wochenrückblick oder Energiefluss-Diagramm Zeiträume (z. B. nach einem
       Datenverlust oder Ausfall), holt die App die Werte der letzten 35 Tage aus dem VRM-Portal. Erst gibt es eine <b>Vorschau</b>;
       übernommen werden nur Viertelstunden, die bei uns fehlen – vorhandene Messwerte bleiben unangetastet, vorher wird eine Sicherung angelegt.
       Die Kosten (€) der nachgeholten Zeiten bleiben 0, weil der damalige Preis nicht bekannt ist.</div>
@@ -1088,6 +1091,7 @@ const ADMIN_TABS = [
   { id: 'anlage', label: 'Anlage', match: ['Victron Cerbo', 'Anlage', 'Batterie-Watchdog', 'Netz-Zähler'] },
   { id: 'tarif', label: 'Tarif & Laden', match: ['Tibber', 'Stromtarif', 'Peak-Schutz', 'SOC-Strategie'] },
   { id: 'solar', label: 'Solar', match: ['Standort', 'Solarfläch', 'PV-Prognose', 'PV-Wechselrichter'] },
+  { id: 'vrm', label: 'VRM', match: ['Victron VRM'] },
   { id: 'geraete', label: 'Geräte & Überschuss', match: ['Geräte', 'Shelly', 'Überschuss'] },
   { id: 'anzeige', label: 'Dashboard', match: ['Kacheln', 'Diagramme'] },
   { id: 'system', label: 'System & Konto', match: ['App-Version', 'Betrieb', 'Konto'] },
@@ -1107,8 +1111,8 @@ const ADMIN_TABS = [
   bar.innerHTML = ADMIN_TABS.map(t => `<button type="button" data-tab="${t.id}">${t.label}</button>`).join('');
   function show(id) {
     if (!ADMIN_TABS.some(t => t.id === id)) id = ADMIN_TABS[0].id;
-    // Speichern-Leiste ueberall ausser bei 'Geraete' (dort speichert jede Aenderung sofort)
-    cards.forEach(c => { c.hidden = c.dataset.tab === '*' ? id === 'geraete' : c.dataset.tab !== id; });
+    // Speichern-Leiste ueberall ausser bei 'Geraete' und 'VRM' (dort speichert jede Aenderung sofort bzw. hat eigene Knoepfe)
+    cards.forEach(c => { c.hidden = c.dataset.tab === '*' ? (id === 'geraete' || id === 'vrm') : c.dataset.tab !== id; });
     bar.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
     if (id !== 'geraete') { const f = document.getElementById('shelly-found'); if (f) f.innerHTML = ''; }   // Suchergebnisse nur solange man im Reiter bleibt
     bar.querySelector('.active')?.scrollIntoView({ inline: 'center', block: 'nearest' });
