@@ -142,9 +142,9 @@ const optHtml = (list, val) => list.map(([v, t]) => `<option value="${v}" ${val 
 function condRow(c, mode, label) {
   const sel = (cls, val, list) => `<select class="${cls}" style="width:auto" onchange="ruleEdited(this)">${optHtml(list, val)}</select>`;
   const num = (cls, val, w) => `<input class="${cls}" type="number" step="any" value="${escH(val)}" style="width:${w}px" oninput="ruleEdited(this)">`;
-  const tm = (cls, val, end) => {
+  const tm = (cls, val, end, quarter) => {        // quarter: nur Viertelstunden (Tagesziel-Fenster arbeitet im 15-Min-Raster der Preise), sonst jede Minute
     const [h, m] = String(val).split(':').map(Number), pad2 = n => String(n).padStart(2, '0');
-    const hours = Array.from({ length: end ? 25 : 24 }, (_, i) => i), mins = [...new Set([0, 15, 30, 45, m])].sort((a, b) => a - b);
+    const hours = Array.from({ length: end ? 25 : 24 }, (_, i) => i), mins = quarter ? [...new Set([0, 15, 30, 45, m])].sort((a, b) => a - b) : Array.from({ length: 60 }, (_, i) => i);
     return `<span class="tsel" data-t="${cls}" style="display:inline-flex;align-items:center;gap:3px"><select class="t-h" style="width:auto" onchange="ruleEdited(this)">${hours.map(i => `<option value="${pad2(i)}" ${i === h ? 'selected' : ''}>${pad2(i)}</option>`).join('')}</select>:`
       + `<select class="t-m" style="width:auto" onchange="ruleEdited(this)">${mins.map(i => `<option value="${pad2(i)}" ${i === m ? 'selected' : ''}>${pad2(i)}</option>`).join('')}</select></span>`;
   };
@@ -156,7 +156,7 @@ function condRow(c, mode, label) {
   else if (c.type === 'price') body = `${cmp('c-op', c.op)} ${num('c-ct', c.ct, 70)} ct/kWh`;
   else if (c.type === 'cheapest') body = `unter den ${num('c-hours', c.hours, 60)} günstigsten Stunden`;
   else if (c.type === 'budget' && mode === 'off') body = `${num('c-min', c.minutes, 70)} Min Laufzeit heute erreicht`;
-  else if (c.type === 'budget') body = `${num('c-min', c.minutes, 70)} Min pro Tag, ${FIXED ? 'so früh wie möglich' : 'zu den günstigsten Zeiten'}, zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to, true)} Uhr`;
+  else if (c.type === 'budget') body = `${num('c-min', c.minutes, 70)} Min pro Tag, ${FIXED ? 'so früh wie möglich' : 'zu den günstigsten Zeiten'}, zwischen ${tm('c-from', c.from, false, true)} und ${tm('c-to', c.to, true, true)} Uhr`;
   else if (c.type === 'soc') body = `${cmp('c-op', c.op)} ${num('c-pct', c.pct, 70)} %`;
   else if (c.type === 'sun_tomorrow') body = `${cmp('c-op', c.op)} ${num('c-kwh', c.kwh, 70)} kWh`;
   return `<div class="cond" data-type="${c.type}" data-mode="${mode}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border)">
