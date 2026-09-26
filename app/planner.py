@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 EFF_CHARGE = 0.95        # Wirkungsgrad Laden (AC -> Akku)
 EFF_DISCHARGE = 0.95     # Wirkungsgrad Entladen (Akku -> Verbrauch)
 LEVEL_KWH = 0.25         # Rasterung des Ladezustands fuer die Optimierung
+MIN_GAIN_CT = 1.0        # Laden nur, wenn es in diesem Slot mindestens so viel spart (verhindert Zick-Zack-Plaene fuer Cent-Betraege)
 
 
 @dataclass
@@ -99,7 +100,7 @@ def optimize(steps: list[Step], e0: float, b: Battery) -> list[bool]:
             e_b, g_b, _, c_b = _advance(b, e, s, True)
             if g_b > 1e-9:
                 cost_b = c_b + interp(nxt, e_b)
-                if cost_b < best - 1e-9:
+                if cost_b < best - MIN_GAIN_CT:
                     best, choose = cost_b, True
             cur[i], dec[i] = best, choose
         decisions[t] = dec

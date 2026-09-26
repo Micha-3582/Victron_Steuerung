@@ -1451,10 +1451,10 @@ function renderPlansim() {
   const tile = (t, big, sub, color) => `<div class="systile"><div class="systile-t">${t}</div><div class="systile-v" style="color:${color}">${big}</div><div class="systile-s">${sub}</div></div>`;
   const diff = r.current.net_ct - r.sim.net_ct;
   $('ps-tiles').innerHTML =
-    tile('🧠 Simulation', fmtE(r.sim.net_ct), `lädt ${r.sim.grid_charge_kwh} kWh · Endstand ${r.sim.end_soc} %`, '#4da3ff') +
-    tile('⚙️ Bisherige Steuerung', fmtE(r.current.net_ct), `lädt ${r.current.grid_charge_kwh} kWh · Endstand ${r.current.end_soc} %`, '#f0a63c') +
-    tile('⛔ Ohne Netzladen', fmtE(r.none.net_ct), `Netzbezug ${r.none.grid_deficit_kwh} kWh · Endstand ${r.none.end_soc} %`, 'var(--muted)') +
-    tile('Unterschied', (diff >= 0 ? '−' : '+') + fmtE(Math.abs(diff)), diff >= 0 ? 'Simulation wäre günstiger' : 'bisherige Steuerung wäre günstiger', diff >= 0 ? 'var(--cheap)' : 'var(--exp)');
+    tile('🧠 Simulation', fmtE(r.sim.cost_ct), `lädt ${r.sim.grid_charge_kwh} kWh · Endstand ${r.sim.end_soc} %`, '#4da3ff') +
+    tile('⚙️ Bisherige Steuerung', fmtE(r.current.cost_ct), `lädt ${r.current.grid_charge_kwh} kWh · Endstand ${r.current.end_soc} %`, '#f0a63c') +
+    tile('⛔ Ohne Netzladen', fmtE(r.none.cost_ct), `Netzbezug ${r.none.grid_deficit_kwh} kWh · Endstand ${r.none.end_soc} %`, 'var(--muted)') +
+    tile('Unterschied', (diff >= 0 ? '−' : '+') + fmtE(Math.abs(diff)), (diff >= 0 ? 'Simulation wäre günstiger' : 'bisherige Steuerung wäre günstiger') + ' (inkl. Akku-Restwert)', diff >= 0 ? 'var(--cheap)' : 'var(--exp)');
   $('ps-wins').innerHTML = `<b style="color:#4da3ff">Simulation lädt:</b> ${psWin(r.sim.windows)}<br><b style="color:#f0a63c">Bisherige Steuerung:</b> ${psWin(r.current.windows)}`
     + (d.current_strategy ? ` <span class="muted">(${escH(d.current_strategy)})</span>` : '');
   const labels = r.times.map(t => t.slice(11, 16));
@@ -1495,7 +1495,7 @@ function renderPlansim() {
   const a = r.assumptions;
   $('ps-assume').innerHTML = `Der Planer rechnet stundenweise (Viertelstunden-Preise) bis zum Ende der bekannten Prognose und wählt die Ladezeiten, bei denen die Stromkosten am kleinsten sind.
     Grundlage: Solarprognose des VRM, ${escH(d.cons_source)}, Tibber-Preise, dein Akku (Ladeleistung ${a.charge_kw} kW, Netzladen bis ${a.grid_cap_soc} %, Reserve ${a.floor_soc} %, Wirkungsgrad ${Math.round(a.eff_charge * 100)} %).
-    „Kosten" sind Netzbezug in €, abzüglich des Restwerts der im Akku verbliebenen Energie (${a.terminal_value_ct} ct/kWh = Preis der günstigsten Viertelstunden) – so sind Pläne mit unterschiedlichem Endstand vergleichbar.
+    Die großen Zahlen sind der Netzbezug in €. Der „Unterschied" rechnet zusätzlich den Restwert der im Akku verbliebenen Energie ein (${a.terminal_value_ct} ct/kWh = Preis der günstigsten Viertelstunden), damit Pläne mit unterschiedlichem Endstand vergleichbar sind.
     Einspeisevergütung ist nicht eingerechnet. Diese Karte ist ein <b>Test</b>: geschaltet wird weiterhin nach der bisherigen Steuerung.`;
 }
 loadPlansim();
