@@ -16,6 +16,7 @@ from datetime import datetime
 
 import requests
 
+import opslog
 import store
 
 log = logging.getLogger("notify")
@@ -169,10 +170,11 @@ def _send_async(text: str):
     def run():
         try:
             send(text)
-        except NotifyError as e:
-            log.warning("Telegram-Meldung nicht gesendet: %s", e)
+            opslog.count("notify_sent")
+            opslog.log("notify", text[:200])
         except Exception as e:                              # noqa: BLE001
             log.warning("Telegram-Meldung nicht gesendet: %s", e)
+            opslog.log("notify_fail", f"{e} | {text[:120]}")
     threading.Thread(target=run, daemon=True).start()
 
 
@@ -229,7 +231,7 @@ def event(key: str, active: bool, text_on: str, text_off: str | None = None, *, 
         _send_async(_prefix(cfg) + send_text)
 
 
-def daily_summary(cfg: dict, now: datetime) -> None:
+def daily_summary(cfg: dict, now: datetime, extra=None) -> None:
     """Abends einmal die Tagesbilanz (ab notify_summary_hour)."""
     if not (configured() and enabled("summary", cfg)):
         return
@@ -248,6 +250,10 @@ def daily_summary(cfg: dict, now: datetime) -> None:
         log.warning("Tages-Zusammenfassung nicht berechenbar: %s", e)
         return
     aut = f" · Autarkie {day['autarky']:.0f} %" if day.get("autarky") is not None else ""
+    try:
+        zusatz = ("\n" + extra()) if extra else ""
+    except Exception:                                       # noqa: BLE001
+        zusatz = ""
     _send_async(_prefix(cfg) + f"📊 Tagesbilanz {now:%d.%m.}: Solar {day['solar']:.1f} kWh · Verbrauch {day['verbrauch']:.1f} kWh · "
                 f"Netzbezug {day['import']:.1f} kWh · Einspeisung {day['export']:.1f} kWh{aut}"
-                + (f" · Netzkosten {day['cost_eur']:.2f} €" if day.get("cost_eur") else ""))
+                + (f" · Netzkosten {day['cost_eur']:.2f} €" if day.get("cost_eur") else "") + zusatz)

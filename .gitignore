@@ -31,3 +31,5 @@ app/plansim_log.json
 app/telegram.json
 app/notify_state.json
 app/price_history.json
+app/events.jsonl
+app/ops_stats.json

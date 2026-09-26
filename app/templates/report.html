@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Betriebsbericht · {{ app_display_name }}{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <h2 style="margin:0">Betriebsbericht – der „schlaue Zettel“</h2>
+    <select id="rp-days" class="ghost" style="width:auto">
+      <option value="3">3 Tage</option><option value="7" selected>7 Tage</option><option value="14">14 Tage</option><option value="30">30 Tage</option>
+    </select>
+    <button id="rp-reload" class="ghost" type="button">Aktualisieren</button>
+    <button id="rp-copy" type="button">📋 Für Claude kopieren</button>
+    <button id="rp-download" class="ghost" type="button">Als Datei speichern</button>
+  </div>
+  <div class="muted" style="margin-top:6px">Alles Wichtige auf einen Blick: läuft die Regelung, sind Prognosen und Preise da, sind die Daten vollständig? Mit „Für Claude kopieren“
+    bekommst du den kompletten Bericht als Text zum Einfügen in den Chat – damit lässt sich die Anlage gemeinsam auswerten.</div>
+  <div id="rp-msg" class="muted" style="margin-top:8px"></div>
+  <div id="rp-verdict" style="margin-top:12px;padding:14px 16px;border-radius:12px;font-size:18px;font-weight:700;border:1px solid var(--border)"></div>
+  <div id="rp-checks" style="margin-top:12px;display:flex;flex-direction:column;gap:2px"></div>
+</div>
+
+<div class="card">
+  <h2>Jetzt</h2>
+  <div id="rp-now" class="muted"></div>
+</div>
+
+<div class="card">
+  <h2>Tage</h2>
+  <div class="muted" style="margin-bottom:8px">Bilanz je Tag mit Preisen, VRM-Prognose, Lade-Durchläufen und Regelungs-Zählern.</div>
+  <div class="table-scroll"><table id="rp-days-table"></table></div>
+</div>
+
+<div class="card">
+  <h2>Ereignisse</h2>
+  <div class="muted" style="margin-bottom:8px">Fehler, Rückfälle (VRM/Tibber), ESS-Umschaltungen, Watchdog, Überschuss-Aktionen, Meldungen – neueste zuerst.</div>
+  <div id="rp-events" style="display:flex;flex-direction:column;gap:2px"></div>
+</div>
+
+<div class="card" id="rp-textcard" hidden>
+  <h2>Text zum Kopieren</h2>
+  <textarea id="rp-text" readonly style="width:100%;min-height:260px;font-family:ui-monospace,Consolas,monospace;font-size:12px"></textarea>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = id => document.getElementById(id);
+const esc = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ICON = { ok: '✅', warn: '⚠️', fail: '❌', info: 'ℹ️' };
+const f = (v, d = 1) => v == null ? '–' : Number(v).toFixed(d);
+let lastText = '';
+async function load() {
+  const days = $('rp-days').value;
+  let r;
+  try { r = await (await fetch('/api/report?days=' + days)).json(); }
+  catch (e) { $('rp-msg').textContent = 'Bericht konnte nicht geladen werden.'; return; }
+  const v = { ok: ['✅ Läuft sauber', 'rgba(53,192,122,.14)', 'var(--cheap)'], warn: ['⚠️ Läuft – mit Hinweisen', 'rgba(240,166,60,.14)', 'var(--timer)'], fail: ['❌ Probleme', 'rgba(229,84,74,.14)', '#e5544a'] }[r.verdict];
+  const box = $('rp-verdict'); box.textContent = v[0]; box.style.background = v[1]; box.style.color = v[2];
+  $('rp-msg').textContent = `Stand ${r.generated.replace('T', ' ')} · Version ${r.version} · gestartet ${r.started ? r.started.replace('T', ' ') : '?'}`;
+  $('rp-checks').innerHTML = r.checks.map((c, i) => `<div style="display:flex;gap:10px;padding:7px 10px;border-radius:8px;${i % 2 ? 'background:rgba(255,255,255,.04)' : ''}">
+    <span>${ICON[c.status]}</span><div><b>${esc(c.title)}</b><div class="muted">${esc(c.detail)}</div></div></div>`).join('');
+  const c = r.current || {};
+  $('rp-now').innerHTML = `Akku <b>${f(c.soc, 0)} %</b> · ESS <b>${esc(c.ess || '–')}</b> · Strategie <b>${esc(c.strategy || '–')}</b> · Preis <b>${f(c.now_price)} ct</b><br>
+    Sonne heute/morgen <b>${f(c.pv_today)}/${f(c.pv_tom)} kWh</b> (${esc(c.pv_source || '?')}) · Ladeplan: ${esc(c.plan_windows || 'kein Netzladen')}`
+    + (r.planner ? `<br>Planer (Test): Simulation <b>${(r.planner.sim_ct / 100).toFixed(2)} €</b> vs. bisherige Steuerung <b>${(r.planner.current_ct / 100).toFixed(2)} €</b>` : '');
+  $('rp-days-table').innerHTML = `<tr class="thead"><td>Tag</td><td>Solar</td><td>Verbr.</td><td>Bezug</td><td>Einsp.</td><td>Autark</td><td>Kosten</td><td>Ø Bezug</td><td>Geladen</td><td>Preis min/Ø/max</td><td>VRM-Prog.</td><td>Durchl. ok/Fehler</td><td>Lade-D.</td><td>ESS-W.</td></tr>`
+    + r.days.map(d => `<tr><td><b>${d.date.slice(8, 10)}.${d.date.slice(5, 7)}.</b></td><td>${f(d.solar)}</td><td>${f(d.verbrauch)}</td><td>${f(d.import)}</td><td>${f(d.export)}</td>
+      <td>${d.autarky == null ? '–' : Math.round(d.autarky) + ' %'}</td><td>${f(d.cost_eur, 2)} €</td><td>${d.avg_import_ct == null ? '–' : f(d.avg_import_ct) + ' ct'}</td><td>${f(d.charged_kwh)} kWh</td>
+      <td>${d.price_min == null ? '–' : Math.round(d.price_min) + '/' + Math.round(d.price_avg) + '/' + Math.round(d.price_max)}</td>
+      <td>${d.vrm_forecast == null ? '–' : f(d.vrm_forecast) + ' (' + (d.vrm_dev_pct == null ? '–' : (d.vrm_dev_pct > 0 ? '+' : '') + Math.round(d.vrm_dev_pct) + ' %') + ')'}</td>
+      <td>${d.ticks_ok ?? '–'}/${d.ticks_err ?? '–'}</td><td>${d.charge_ticks ?? '–'}</td><td>${d.ess_writes ?? '–'}</td></tr>`).join('');
+  $('rp-events').innerHTML = r.events.length ? r.events.map((e, i) => `<div style="padding:6px 10px;border-radius:8px;${i % 2 ? 'background:rgba(255,255,255,.04)' : ''}">
+    <span class="muted">${e.ts.slice(5, 16).replace('T', ' ')}</span> <b>[${esc(e.kind)}]</b> ${esc(e.text)}</div>`).join('') : '<div class="muted">Keine bemerkenswerten Ereignisse im Zeitraum.</div>';
+  try { lastText = await (await fetch('/api/report?format=md&days=' + days)).text(); $('rp-text').value = lastText; } catch (e) { lastText = ''; }
+}
+$('rp-reload').addEventListener('click', load);
+$('rp-days').addEventListener('change', load);
+$('rp-copy').addEventListener('click', async () => {
+  if (!lastText) await load();
+  try { await navigator.clipboard.writeText(lastText); $('rp-msg').textContent = 'Bericht kopiert ✓ – jetzt im Chat einfügen.'; $('rp-textcard').hidden = true; }
+  catch (e) { $('rp-textcard').hidden = false; $('rp-text').focus(); $('rp-text').select(); $('rp-msg').textContent = 'Automatisches Kopieren nicht möglich – Text unten markiert, bitte mit Strg+C kopieren.'; }
+});
+$('rp-download').addEventListener('click', async () => {
+  if (!lastText) await load();
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([lastText], { type: 'text/markdown;charset=utf-8' }));
+  a.download = 'betriebsbericht-' + new Date().toISOString().slice(0, 10) + '.md'; a.click(); URL.revokeObjectURL(a.href);
+});
+load();
+</script>
+{% endblock %}

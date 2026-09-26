@@ -29,7 +29,9 @@ import surplus
 import tuya
 import planner
 import notify
+import opslog
 import price_cache
+import report
 import updater
 import vrm
 import vrm_import
@@ -214,6 +216,10 @@ class Controller:
         self.plansim = {"available": False, "reason": "noch nicht berechnet"}   # Ladeplan-Simulation (nur Anzeige)
         self.last_tick = None
         self.last_error = None
+        self.started_at = datetime.now().isoformat(timespec="seconds")
+        self._tick_failed = False
+        self._last_err_log = ("", 0.0)
+        self._vrm_bad = False
         self._stop = threading.Event()
         self.last_system = None          # letzte Cerbo-Messung (vom Energie-Sampler)
         self.last_system_ts = 0.0
@@ -231,7 +237,7 @@ class Controller:
         thr = int(cfg.get("notify_low_soc", notify.DEFAULT_LOW_SOC))
         notify.event("low_soc", soc < thr or (notify.is_active("low_soc") and soc < thr + 5),
                      f"🪫 Akku niedrig: {soc:.0f} % (Schwelle {thr} %).", f"🔋 Akku wieder bei {soc:.0f} %.", cfg=cfg)
-        notify.daily_summary(cfg, datetime.now())
+        notify.daily_summary(cfg, datetime.now(), extra=self._report_line)
         try:
             system = cerbo.read_system()
         except Exception as e:                           # noqa: BLE001
@@ -256,6 +262,9 @@ class Controller:
         except Exception as e:                               # noqa: BLE001
             vrm_why = "PV-Prognose (VRM) nicht verfügbar – Rückfall auf Durchschnitt der letzten Tage"
             log.warning("VRM-Prognose fuer die Regelung fehlgeschlagen: %s", e)
+        if bool(vrm_why) != self._vrm_bad:
+            self._vrm_bad = bool(vrm_why)
+            opslog.log("vrm", vrm_why if vrm_why else "VRM-Prognose wieder verfügbar")
         if vrm_why:
             notify.event("vrm", True, f"⚠️ {vrm_why}", "✅ Die VRM-Prognose ist wieder verfügbar.", after_min=30)
         elif vrm_ctl:
@@ -301,6 +310,10 @@ class Controller:
         wrote = False
         if d.ess_mode != current_ess:
             wrote = cerbo.write_ess_mode(d.ess_mode, dry_run=dry)
+            opslog.count("ess_writes", now=now)
+            opslog.log("ess", f"ESS-Modus {ESS_TEXT.get(current_ess, current_ess)} → {ESS_TEXT.get(d.ess_mode, d.ess_mode)} "
+                       f"({d.strategy}; Preis {d.now_price} ct, Akku {soc:.0f} %)" + ("" if wrote else " [Trockenlauf: nicht geschrieben]" if dry else " [Schreiben fehlgeschlagen]"),
+                       dry=dry, price=d.now_price, soc=round(soc, 1), strategy=d.strategy)
 
         with self.lock:
             self.prices = self._prep_prices(prices, d, Params.from_config(cfg).absolute_cheap_price)
@@ -334,6 +347,12 @@ class Controller:
         # Hinweis: Das Energie-Logging läuft in einem eigenen, feineren Takt
         # (run_energy / energy_sample_seconds), NICHT hier - sonst würde die
         # Trapez-Integration doppelt zählen.
+
+        opslog.count("src_vrm" if pv_source == "VRM" else "src_avg", now=now)
+        if cfg.get("tariff_mode") != "fixed":
+            opslog.count("tibber_cache" if price_note else "tibber_live", now=now)
+        if d.ess_mode == ESS_CHARGE:
+            opslog.count("charge_ticks", now=now)
 
         self.last_tick = now.isoformat(timespec="seconds")
         self.last_error = None
@@ -414,6 +433,8 @@ class Controller:
             prices = fetch_tibber_prices(cfg["tibber_token"])
             if not prices:
                 raise ValueError("Tibber lieferte keine Preise")
+            if self._price_fail_since is not None:
+                opslog.log("tibber", "Tibber-Preise wieder verfügbar")
             self._price_fail_since = None
             notify.event("tibber", False, "", "✅ Tibber-Preise sind wieder verfügbar.")
             try:
@@ -427,6 +448,8 @@ class Controller:
             return prices, None
         except Exception as e:                               # noqa: BLE001
             log.warning("Tibber-Preise nicht abrufbar: %s", e)
+            if self._price_fail_since is None:
+                opslog.log("tibber", f"Tibber-Abruf fehlgeschlagen: {e}")
             self._price_fail_since = self._price_fail_since or now
             cached = price_cache.load()
             if cached and price_cache.covers(cached["prices"], now):
@@ -440,22 +463,43 @@ class Controller:
                 try:
                     cerbo.write_ess_mode(ESS_IDLE, dry_run=bool(cfg.get("dry_run", True)))
                     stopped = " – Netzladen wurde gestoppt"
+                    opslog.log("tibber", f"Keine brauchbaren Preise seit {waited:.0f} min – Netzladen gestoppt (Ruhe-Modus)")
                     log.warning("Keine brauchbaren Strompreise seit %.0f min - Netzladen gestoppt (Ruhe-Modus)", waited)
                 except Exception as e2:                      # noqa: BLE001
                     log.error("Netzladen konnte nicht gestoppt werden: %s", e2)
             notify.event("tibber", True, "⛔ Keine Strompreise verfügbar" + (" – das laufende Netzladen wurde gestoppt." if stopped else "."), after_min=0)
             raise RuntimeError(f"Keine Strompreise verfügbar ({e}){stopped}")
 
+    def _report_line(self):
+        """Kurzfassung des Betriebsberichts fuer die Tages-Zusammenfassung per Telegram."""
+        try:
+            r = report.build(days=1, ctrl=_ctrl_info())
+        except Exception as e:                               # noqa: BLE001
+            return f"🩺 Systemcheck nicht möglich: {e}"
+        bad = [c for c in r["checks"] if c["status"] in ("fail", "warn")]
+        if not bad:
+            return "🩺 Systemcheck: ✅ läuft sauber"
+        return "🩺 Systemcheck: " + ("❌ Probleme" if r["verdict"] == "fail" else "⚠️ Hinweise") + " – " + "; ".join(f"{c['title']}: {c['detail']}" for c in bad[:4])
+
     def safe_tick(self):
         """Tick mit Fehlerabfang - für Hintergrundschleife und On-Demand-Aufrufe."""
         try:
             self.tick()
+            opslog.note_tick(True)
+            if self._tick_failed:
+                self._tick_failed = False
+                opslog.log("tick_ok", "Steuerung läuft wieder normal")
             notify.event("tick_error", False, "", "✅ Die Steuerung läuft wieder normal.")
         except Exception as e:                           # noqa: BLE001
             self.last_error = str(e)
             with self.lock:
                 self.status = {"ok": False, "reason": f"Fehler: {e}"}
             log.error("Tick fehlgeschlagen: %s", e)
+            opslog.note_tick(False)
+            self._tick_failed = True
+            if str(e) != self._last_err_log[0] or time.time() - self._last_err_log[1] > 1800:      # nicht bei jedem Durchlauf wiederholen
+                opslog.log("tick_error", str(e))
+                self._last_err_log = (str(e), time.time())
             notify.event("tick_error", True, f"⚠️ Die Steuerung meldet seit 10 Minuten einen Fehler: {e}", after_min=10)
 
     def run(self, interval):
@@ -505,8 +549,10 @@ class Controller:
         if wd["just_warned"]:
             notify.push("watchdog", f"🔋 Batterie-Watchdog: Die Batterie reagiert seit 15 Minuten nicht (Netz {grid_w:.0f} W, Batteriestrom {batt_a:.2f} A, "
                                     f"Akku {soc:.0f} %). Möglicher Ladehänger am Multiplus – ggf. Anlage prüfen.")
+            opslog.log("watchdog", f"Batterie reagiert nicht (Netz {grid_w:.0f} W, {batt_a:.2f} A, Akku {soc:.0f} %)")
         if wd["just_resolved"]:
             notify.push("watchdog", f"✅ Batterie-Watchdog: wieder normal nach {wd['just_resolved']['duration_min']:.0f} Minuten.")
+            opslog.log("watchdog", f"wieder normal nach {wd['just_resolved']['duration_min']:.0f} Minuten")
             ev = wd["just_resolved"]
             log.info("Batterie-Watchdog: wieder normal nach %.1f Min (seit %s)",
                      ev["duration_min"], ev["start"])
@@ -594,6 +640,7 @@ class Controller:
             except shelly.ShellyError as e:
                 text = f"{dev['name']}: Schalten fehlgeschlagen ({e})"
         log.info("Ueberschuss-Automatik: %s", text)
+        opslog.log("surplus", text, dry=dry)
         surplus_ctrl.log(text)
         notify.push("surplus", ("🧪 " if dry else "🔌 ") + text, cfg)      # auch im Trockenlauf (Text beginnt dann mit "(Trockenlauf)")
 
@@ -1109,6 +1156,31 @@ def api_notify_test():
     return jsonify(ok=True)
 
 
+def _ctrl_info():
+    with ctrl.lock:
+        st = dict(ctrl.status)
+    return {"status": st, "last_tick": ctrl.last_tick, "last_system_ts": ctrl.last_system_ts, "started": ctrl.started_at,
+            "plansim": getattr(ctrl, "plansim", None)}
+
+
+@app.route("/report")
+def report_page():
+    return render_template("report.html")
+
+
+@app.route("/api/report", methods=["GET"])
+def api_report():
+    """Betriebsbericht ("schlauer Zettel"). ?format=md liefert den kompakten Text zum Kopieren, sonst JSON."""
+    try:
+        days = max(1, min(30, int(request.args.get("days", 7))))
+    except ValueError:
+        days = 7
+    rep_ = report.build(days=days, ctrl=_ctrl_info())
+    if request.args.get("format") == "md":
+        return app.response_class(report.to_markdown(rep_), mimetype="text/plain; charset=utf-8")
+    return jsonify(rep_)
+
+
 @app.route("/api/weather", methods=["GET"])
 def api_weather():
     """Wettervorhersage fuer den Standort (nur Anzeige). ?refresh=1 umgeht den Zwischenspeicher."""
@@ -1308,6 +1380,8 @@ def main():
     except Exception as e:                               # noqa: BLE001
         log.warning("Preis-Historie-Nachtrag fehlgeschlagen: %s", e)
     notify.push("startup", "🔄 Die Steuerung wurde gestartet.", cfg)
+    opslog.count("restarts")
+    opslog.log("startup", "Steuerung gestartet")
     # PORT-Umgebungsvariable hat Vorrang (pm2/systemd), sonst web_port aus Config
     port = int(os.environ.get("PORT", cfg.get("web_port", 5005)))
     log.info("Web-App startet auf Port %s (dry_run=%s)", port, cfg.get("dry_run"))
