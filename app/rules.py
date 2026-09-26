@@ -189,9 +189,7 @@ def normalize_rule(body: dict, rule_id: str | None = None) -> dict:
         raise RuleError("Gerät wählen")
     name = str(body.get("name") or "").strip()[:60]
     return {"id": rule_id or uuid.uuid4().hex[:8], "name": name, "device_id": str(body["device_id"]),
-            "enabled": bool(body.get("enabled", True)), "on": on, "off": off,
-            "min_on_min": _num(body.get("min_on_min", 5) if body.get("min_on_min") not in (None, "") else 5, 0, 1440, "Mind. an (min)"),
-            "min_off_min": _num(body.get("min_off_min", 5) if body.get("min_off_min") not in (None, "") else 5, 0, 1440, "Mind. aus (min)")}
+            "enabled": bool(body.get("enabled", True)), "on": on, "off": off}
 
 
 def add_rule(body: dict) -> dict:
@@ -206,7 +204,7 @@ def update_rule(rule_id: str, body: dict) -> dict | None:
     d = load()
     for i, r in enumerate(d["rules"]):
         if r["id"] == rule_id:
-            merged = {**r, **{k: v for k, v in body.items() if k in ("name", "device_id", "enabled", "on", "off", "min_on_min", "min_off_min")}}
+            merged = {**r, **{k: v for k, v in body.items() if k in ("name", "device_id", "enabled", "on", "off")}}
             d["rules"][i] = normalize_rule(merged, rule_id)
             _save(d)
             return d["rules"][i]
@@ -328,7 +326,6 @@ class RuleEngine:
         self.block_reason: dict[str, str] = {}           # regel -> 'manual' (von Hand ausgeschaltet) | 'off' (Ausschalt-Bedingung)
         self.fired: dict[str, str] = {}                  # regel -> Tag, an dem ein 'Um HH:MM'-Ausloeser schon gefeuert hat
         self._prev_on: dict[str, bool] = {}              # geraet -> Zustand beim letzten Schritt (Erkennung von Handschaltungen am Geraet)
-        self._last_change: dict[str, datetime] = {}
         self._hold_until: dict[str, datetime] = {}
         self._armed: dict[str, datetime] = {}
         self._last_step: datetime | None = None
@@ -418,13 +415,13 @@ class RuleEngine:
                 self.owner.pop(dev_id, None)
                 self.owner_rule.pop(dev_id, None)
                 self._armed.pop(dev_id, None)
-            self._last_change[dev_id] = datetime.now()
         self._save_state()
 
     # ---- Kern
     def step(self, now: datetime, ctx: dict, cfg: dict, devices: list[dict], rules: list[dict]) -> list[tuple]:
-        """Ein Regelschritt. devices: Live-Status (online, on, switchable). Mind. an/aus stehen an der Regel.
-        Rueckgabe: Liste von (aktion 'on'|'off', geraet, begruendung, regel-id)."""
+        """Ein Regelschritt. devices: Live-Status (online, on, switchable). 
+        Rueckgabe: Liste von (aktion, geraet, begruendung, regel-id). aktion: 'on'|'off' = schalten; 'adopt'|'manual' = nur fuers Logbuch
+        (Regel hat ein bereits laufendes Geraet uebernommen / Geraet wurde am Geraet selbst ausgeschaltet)."""
         self._load()
         ctx = {**ctx, "now": now}
         today = now.date().isoformat()
@@ -436,6 +433,7 @@ class RuleEngine:
         info: dict[str, dict] = {}                       # regel -> Auswertung
         wants: dict[str, tuple[str, str]] = {}           # geraet -> (regel-id, Begruendung): soll jetzt eingeschaltet werden
         pure_off_acts: list[tuple] = []
+        notes: list[tuple] = []                          # Ereignisse ohne Schalten (fuers Logbuch)
         rule_ids = {r["id"] for r in rules}
         rule_by_id = {r["id"]: r for r in rules}
         for gone in self.blocked - rule_ids:
@@ -448,6 +446,7 @@ class RuleEngine:
             manual_hold = 60.0
         for d in devices:
             if self._prev_on.get(d["id"]) is True and d.get("online") and not d.get("on") and self.owner.get(d["id"]) == "rule":
+                notes.append(("manual", d, "am Gerät ausgeschaltet – die Regel wartet, bis ihre Einschalt-Bedingungen einmal nicht mehr gelten", self.owner_rule.get(d["id"])))
                 self.note_manual(d["id"], now, manual_hold)
                 hold = dict(self._hold_until)
             if d.get("online"):
@@ -504,6 +503,7 @@ class RuleEngine:
             elif base_on and r["id"] not in self.blocked:
                 if dev.get("on") and dev["id"] not in self.owner:
                     self.set_owner(dev["id"], "rule", r["id"])            # Geraet laeuft schon, waehrend die Bedingungen stimmen: Regel uebernimmt es
+                    notes.append(("adopt", dev, "läuft bereits – die Regel übernimmt es und schaltet es später aus", r["id"]))
                     if has_on_at:
                         self.fired[r["id"] + ":on"] = today
                     status[r["id"]] = {"state": "on", "text": "läuft – von der Regel übernommen", "conds": conds}
@@ -517,11 +517,11 @@ class RuleEngine:
                 why = ("keine Daten für: " + ", ".join(missing)) if missing else "nicht erfüllt: " + ", ".join(x["text"] for x in conds if x["ok"] is False)
                 status[r["id"]] = {"state": "off", "text": why, "conds": conds}
 
-        actions: list[tuple] = list(pure_off_acts)
+        actions: list[tuple] = notes + list(pure_off_acts)
         # ---- 1. Einschalten
         for dev_id, (rid, name) in wants.items():
             d = by_dev[dev_id]
-            if d.get("online") and not d.get("on") and self._waited(rule_by_id.get(rid), dev_id, now, "min_off_min"):
+            if d.get("online") and not d.get("on"):
                 actions.append(("on", d, "Regel: " + name, rid))
                 if any(c["type"] == "at" for c in rule_by_id[rid]["on"]):
                     self.fired[rid + ":on"] = today                  # 'Um HH:MM' hat ausgeloest (einmal pro Tag)
@@ -549,17 +549,11 @@ class RuleEngine:
                     reason = "Bedingungen nicht mehr erfüllt"
                 else:
                     continue
-                if d.get("online") and d.get("switchable", True) and self._waited(r, dev_id, now, "min_on_min"):
+                if d.get("online") and d.get("switchable", True):
                     actions.append(("off", d, reason, rid))
         with self._lock:
             self.status = status
         return actions
-
-    def _waited(self, rule: dict | None, dev_id: str, now: datetime, key: str) -> bool:
-        """Mindest-Ein-/Ausschaltdauer (an der Regel) seit der letzten Aenderung eingehalten?"""
-        t = self._last_change.get(dev_id)
-        need = float((rule or {}).get(key, 5)) * 60
-        return t is None or (now - t).total_seconds() >= need
 
     def flush(self):
         self._save_state()

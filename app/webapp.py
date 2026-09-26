@@ -786,6 +786,12 @@ class Controller:
 
     def _apply_rule(self, act, dry: bool, cfg: dict):
         action, dev, why, rule_id = act
+        if action in ("adopt", "manual"):                # nur ins Logbuch: nichts wird geschaltet
+            text = f"{dev['name']} {why}" + (" (Trockenlauf)" if dry else "")
+            log.info("Regeln: %s", text)
+            opslog.log("rules", text, dry=dry)
+            autolog.log("rules", text, dev=dev["name"], action=action, dry=dry, rule=rule_id)
+            return
         on = action == "on"
         verb = "eingeschaltet" if on else "ausgeschaltet"
         ok = True

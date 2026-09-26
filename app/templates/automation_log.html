@@ -20,7 +20,7 @@ const MODULE = {{ module | tojson }};
 const $ = id => document.getElementById(id);
 const escH = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt = ts => `${ts.slice(8, 10)}.${ts.slice(5, 7)}. ${ts.slice(11, 16)}`;
-const BADGE = { on: ['an', 'var(--cheap)'], off: ['aus', 'var(--exp)'], fail: ['Fehler', '#e5544a'] };
+const BADGE = { on: ['an', 'var(--cheap)'], off: ['aus', '#e5544a'], fail: ['Fehler', '#e5544a'], adopt: ['übernommen', 'var(--muted)'], manual: ['von Hand', 'var(--muted)'] };
 async function load() {
   const days = $('days').value;
   let d;

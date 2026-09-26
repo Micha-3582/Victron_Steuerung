@@ -102,7 +102,7 @@ async function saveAll() {
   const btn = $('btn-save'); btn.disabled = true;
   const cfg = { rules_enabled: CFG.enabled, rules_dry_run: CFG.dry };
   for (const [k, v] of Object.entries(CFG.settings)) cfg['rules_' + k] = v;
-  const body = { config: cfg, rules: R.map(r => ({ id: String(r.id).startsWith('new-') ? undefined : r.id, name: r.name || '', device_id: r.device_id, enabled: r.enabled !== false, on: r.on, off: r.off, min_on_min: r.min_on_min, min_off_min: r.min_off_min })) };
+  const body = { config: cfg, rules: R.map(r => ({ id: String(r.id).startsWith('new-') ? undefined : r.id, name: r.name || '', device_id: r.device_id, enabled: r.enabled !== false, on: r.on, off: r.off })) };
   try { await api('/api/automation', 'POST', body); savedToast('Gespeichert ✓'); await loadServer(); resetDraft(); renderAll(); }
   catch (e) { $('savebar-msg').textContent = '⚠ ' + e.message; $('savebar-msg').style.color = '#e5544a'; setTimeout(() => { $('savebar-msg').style.color = ''; }, 8000); }
   btn.disabled = false;
@@ -185,7 +185,6 @@ function syncRule(box) {                          // Entwurf der Regel aus den s
   r.device_id = box.querySelector('.r-dev').value; r.enabled = box.querySelector('.r-en').checked;
   r.on = []; r.off = [];
   box.querySelectorAll('.cond:not(.pend)').forEach(row => (row.dataset.mode === 'on' ? r.on : r.off).push(collectCond(row)));
-  r.min_on_min = box.querySelector('.r-minon').value; r.min_off_min = box.querySelector('.r-minoff').value;
   return r;
 }
 function ruleEdited(el) {                         // Feld geaendert: nur den Entwurf aktualisieren (kein Speichern, kein Neuzeichnen)
@@ -217,11 +216,11 @@ async function ruleDelete(id) {
 }
 function ruleNew(sel, timer) {
   const d = sel.value; if (!d) return;
-  R.push({ id: 'new-' + (++newId), name: '', device_id: d, enabled: true, min_on_min: 5, min_off_min: 5, on: timer ? [] : [clone(COND_DEFAULT.time)], off: timer ? [clone(COND_DEFAULT.at)] : [] });
+  R.push({ id: 'new-' + (++newId), name: '', device_id: d, enabled: true, on: timer ? [] : [clone(COND_DEFAULT.time)], off: timer ? [clone(COND_DEFAULT.at)] : [] });
   sel.value = ''; touch(); renderRules();
 }
 const norm = v => Array.isArray(v) ? v.map(norm) : (v && typeof v === 'object') ? Object.fromEntries(Object.keys(v).sort().map(k => [k, norm(v[k])])) : (typeof v === 'string' && v.trim() !== '' && !isNaN(v) ? Number(v) : v);
-const sig = r => JSON.stringify(norm({ device_id: r.device_id, enabled: r.enabled !== false, on: r.on || [], off: r.off || [], min_on_min: r.min_on_min ?? 5, min_off_min: r.min_off_min ?? 5 }));
+const sig = r => JSON.stringify(norm({ device_id: r.device_id, enabled: r.enabled !== false, on: r.on || [], off: r.off || [] }));
 function statusHtml(r) {                          // Status gibt es nur fuer die gespeicherte, unveraenderte Regel - waehrend des Bearbeitens steht dort nichts
   if (String(r.id).startsWith('new-') || !(r.on || []).length && !(r.off || []).length) return '';
   const saved = (S.A.rules || []).find(x => x.id === r.id);
@@ -266,11 +265,6 @@ function renderRules() {
       <div class="conds">${grpHtml(r.on, 'on')}${grpHtml(r.off || [], 'off')}${pendHtml(r)}</div>
       ${PEND[r.id] ? '' : `<button type="button" class="ghost" style="margin-top:10px" onclick="addStart('${escH(r.id)}')">+ Bedingung hinzufügen</button>`}
       <div class="r-status">${statusBlock(r)}</div>
-      <details style="margin-top:8px"><summary class="muted">Einstellungen für diese Regel</summary>
-        <div class="grid2" style="margin-top:8px;grid-template-columns:repeat(2,1fr)">
-          <div><label>Mind. an (min)</label><input class="r-minon" type="number" min="0" value="${escH(r.min_on_min ?? 5)}" oninput="ruleEdited(this)"></div>
-          <div><label>Mind. aus (min)</label><input class="r-minoff" type="number" min="0" value="${escH(r.min_off_min ?? 5)}" oninput="ruleEdited(this)"></div>
-        </div><div class="muted" style="margin-top:6px">Verhindert ständiges Ein-/Ausschalten durch diese Regel.</div></details>
     </div>`;
   }).join('') : '<div class="muted">Noch keine Regel. Wähle unten ein Gerät, um eine anzulegen.</div>';
 }
