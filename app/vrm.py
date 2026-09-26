@@ -81,9 +81,12 @@ def _request(c: dict, params: dict) -> dict:
         raise VrmError("Ungültige Antwort von VRM")
 
 
-def _parse(data: dict) -> list[dict]:
+CONS_CODE = "vrm_consumption_fc"       # Verbrauchsprognose des VRM (wie im VRM-Diagramm)
+
+
+def _parse(data: dict, code: str = "solar_yield_forecast") -> list[dict]:
     rec = (data.get("records") or {}) if isinstance(data, dict) else {}
-    rows = rec.get("solar_yield_forecast") if isinstance(rec, dict) else None
+    rows = rec.get(code) if isinstance(rec, dict) else None
     out = []
     for row in rows or []:
         try:
@@ -96,15 +99,15 @@ def _parse(data: dict) -> list[dict]:
     return sorted(out, key=lambda x: x["ts"])
 
 
-def fetch(c: dict, now: datetime | None = None) -> list[dict]:
+def fetch(c: dict, now: datetime | None = None, code: str = "solar_yield_forecast") -> list[dict]:
     """Stuendliche Prognose (Wh je Stunde) ab heute 0 Uhr bis morgen Ende."""
     now = now or datetime.now()
     day0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    base = {"type": "custom", "attributeCodes[]": "solar_yield_forecast", "interval": "hours"}
+    base = {"type": "custom", "attributeCodes[]": code, "interval": "hours"}
     rows = _parse(_request(c, {**base, "start": int(day0.timestamp()),
-                               "end": int((day0 + timedelta(days=2)).timestamp())}))
+                               "end": int((day0 + timedelta(days=2)).timestamp())}), code)
     if not rows:                                   # manche Installationen liefern nur ohne Zeitraum
-        rows = _parse(_request(c, {"type": "custom", "attributeCodes[]": "solar_yield_forecast"}))
+        rows = _parse(_request(c, {"type": "custom", "attributeCodes[]": code}), code)
     return rows
 
 
@@ -142,6 +145,14 @@ def forecast(force: bool = False) -> dict:
         data.update(configured=True, error=None, updated=now.isoformat(timespec="seconds"))
         if not data["hours"]:
             data["error"] = "VRM liefert für diese Installation keine Prognose"
+        try:                                       # Verbrauchsprognose: optional, Fehler betreffen die Solar-Prognose nicht
+            cons = _summarize(fetch(c, now, CONS_CODE), now)
+            if cons["hours"]:
+                data["cons"] = cons
+            else:
+                data["cons_note"] = "Das VRM liefert für diese Installation keine Verbrauchsprognose"
+        except VrmError as e:
+            data["cons_note"] = f"Verbrauchsprognose nicht abrufbar: {e}"
         with _lock:
             _cache.update(until=time.time() + CACHE_TTL_S, data=data, error=None)
         return data

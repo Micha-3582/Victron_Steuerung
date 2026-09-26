@@ -26,6 +26,7 @@
     <span data-k="verbrauch"><i class="sw" style="background:#e5544a"></i>Verbrauch</span>
     <span data-k="solar"><i class="sw" style="background:#f0a63c"></i>Solar</span>
     <span data-k="prognose" style="display:none"><i class="sw sw-hatch"></i>Solarprognose (VRM)</span>
+    <span data-k="cprognose" style="display:none"><i class="sw sw-hatch-red"></i>Verbrauchsprognose (VRM)</span>
     <span data-k="soc"><i class="sw" style="background:#4da3ff"></i>Batterie-SOC</span>
     <span data-k="band"><i class="sw" style="background:rgba(77,163,255,.25);border:1px solid #4da3ff"></i>SOC Min/Max</span>
   </div>
@@ -216,7 +217,7 @@ function applyTileVisibility(ui) {
 }
 let chart, energyChart, flowChart, prices = [], allPrices = [], schedules = [], nowSlot = '', nowIso = '';
 let energyDay = '', energyMinDay = '';
-let fcData = null, lastEnergyHist = [], energyFcFull = [];   // VRM-Prognose, zuletzt gezeigte Messwerte, Prognose je Balken
+let fcData = null, lastEnergyHist = [], energyFcFull = [], energyCFull = [];   // VRM-Prognose, zuletzt gezeigte Messwerte, Prognose je Balken
 const legendHidden = new Set((() => { try { return JSON.parse(localStorage.getItem('energyLegendHidden') || '[]'); } catch (e) { return []; } })());
 let activeDay = 'today', chargePowerW = 3500, overrideBusy = false;
 let drag = null;           // {from, to}
@@ -340,6 +341,9 @@ function buildEnergyChart() {
         // Prognose-Rest ueber dem realen Solarertrag (gestapelt): wird vom Ertrag "ausgemalt", uebertroffen = kein Rest
         { type: 'bar', label: 'Solarprognose', data: [], backgroundColor: hatchPattern('#f0a63c'), borderColor: '#f0a63c',
           borderWidth: 1, borderSkipped: false, yAxisID: 'y', order: 3, stack: 's' },
+        // Verbrauchsprognose des VRM: Rest ueber dem realen Verbrauch (gestapelt auf dem Verbrauchsbalken)
+        { type: 'bar', label: 'Verbrauchsprognose', data: [], backgroundColor: hatchPattern('#e5544a'), borderColor: '#e5544a',
+          borderWidth: 1, borderSkipped: false, yAxisID: 'y', order: 3, stack: 'v' },
       ]
     },
     options: {
@@ -352,6 +356,7 @@ function buildEnergyChart() {
             const l = item.dataset.label;
             if (l === 'SOC Max' || l === 'SOC Min') return null;
             if (l === 'Solarprognose') { const f = energyFcFull[item.dataIndex]; return f ? `Solarprognose: ${f.toFixed(2)} kWh` : null; }
+            if (l === 'Verbrauchsprognose') { const f = energyCFull[item.dataIndex]; return f ? `Verbrauchsprognose: ${f.toFixed(2)} kWh` : null; }
             const v = item.parsed.y;
             if (v == null) return null;
             return l === 'Batterie-SOC' ? `${l}: ${v} %` : `${l}: ${v.toFixed(2)} kWh`;
@@ -413,24 +418,25 @@ function hatchPattern(color) {
 }
 function tomorrowStr() { const d = new Date(todayStr() + 'T00:00'); d.setDate(d.getDate() + 1); return isoDay(d); }
 /* Prognose (Wh je Stunde) fuer heute/morgen aus dem VRM oder null (kein Zugang / keine Daten / anderer Tag) */
-function fcForDay(day) {
-  if (!fcData || !fcData.hours || !fcData.hours.length) return null;
+function fcForDay(day, src) {
+  src = src === undefined ? fcData : src;
+  if (!src || !src.hours || !src.hours.length) return null;
   const key = day === todayStr() ? 'today' : day === tomorrowStr() ? 'tomorrow' : null;
   if (!key) return null;
-  const m = {}; fcData.hours.filter(h => h.day === key).forEach(h => { m[h.hour] = h.wh; });
+  const m = {}; src.hours.filter(h => h.day === key).forEach(h => { m[h.hour] = h.wh; });
   return Object.keys(m).length ? m : null;
 }
 // Legenden-Eintrag -> Datensaetze des Energie-Diagramms
-const LEGEND_DS = { verbrauch: [0], solar: [1], soc: [4], band: [2, 3], prognose: [5] };
+const LEGEND_DS = { verbrauch: [0], solar: [1], soc: [4], band: [2, 3], prognose: [5], cprognose: [6] };
 function renderEnergyChart(hist) {
   if (!energyChart) return;
   hist = hist || [];
   lastEnergyHist = hist;
   if (energyHourly) hist = aggregateHourly(hist);
   const day = energyDay || todayStr();
-  const fc = fcForDay(day);
+  const fc = fcForDay(day), cfc = fcForDay(day, fcData && fcData.cons);
   let rows = hist;
-  if (fc) {               // mit Prognose: ganzer Tag als Raster (wie im VRM), Zukunft bleibt leer
+  if (fc || cfc) {               // mit Prognose: ganzer Tag als Raster (wie im VRM), Zukunft bleibt leer
     const step = energyHourly ? 60 : 15, byLabel = new Map(hist.map(h => [h.hour, h]));
     rows = [];
     for (let m = 0; m < 1440; m += step) { const lab = `${pad(Math.floor(m / 60))}:${pad(m % 60)}`; rows.push(byLabel.get(lab) || { hour: lab }); }
@@ -446,16 +452,20 @@ function renderEnergyChart(hist) {
   energyFcFull = rows.map(h => fc ? (fc[parseInt(h.hour, 10)] || 0) / 1000 * per : null);
   d[5].data = rows.map((h, i) => energyFcFull[i] == null ? null
     : Math.round((legendHidden.has('solar') ? energyFcFull[i] : Math.max(0, energyFcFull[i] - (h.solar || 0))) * 1000) / 1000);
+  energyCFull = rows.map(h => cfc ? (cfc[parseInt(h.hour, 10)] || 0) / 1000 * per : null);
+  d[6].data = rows.map((h, i) => energyCFull[i] == null ? null
+    : Math.round((legendHidden.has('verbrauch') ? energyCFull[i] : Math.max(0, energyCFull[i] - (h.verbrauch || 0))) * 1000) / 1000);
   Object.entries(LEGEND_DS).forEach(([k, idx]) => idx.forEach(i => { d[i].hidden = legendHidden.has(k); }));
   document.querySelectorAll('#energy-legend [data-k]').forEach(el => {
     el.classList.toggle('off', legendHidden.has(el.dataset.k));
     if (el.dataset.k === 'prognose') el.style.display = fc ? '' : 'none';
+    if (el.dataset.k === 'cprognose') el.style.display = cfc ? '' : 'none';
   });
   const hasData = hist.some(h => h.verbrauch || h.solar || h.soc_avg != null);
   const takt = energyHourly ? 'stündlich' : 'im 15-Min-Takt';
   $('energy-hint').textContent = hasData
-    ? `Verbrauch & Solar, Batterie-SOC ${takt} (echte Messwerte)${fc ? ' – gestrichelt: Solarprognose vom Victron-VRM.' : '.'}`
-    : fc ? 'Solarprognose vom Victron-VRM (gestrichelt).' : 'Noch keine Verlaufsdaten – füllt sich mit jedem Regelzyklus.';
+    ? `Verbrauch & Solar, Batterie-SOC ${takt} (echte Messwerte)${fc ? ' – gestrichelt: Prognose vom Victron-VRM.' : '.'}`
+    : (fc || cfc) ? 'Prognose vom Victron-VRM (gestrichelt).' : 'Noch keine Verlaufsdaten – füllt sich mit jedem Regelzyklus.';
   energyChart.update('none');
 }
 $('energy-legend').addEventListener('click', e => {
@@ -886,7 +896,7 @@ function initTileDragging() {
    gekoppelt. Rechnet aus den 15-Min-Verlaufsdaten des Tages (gleiche Quelle
    wie die Charts), nicht aus den Live-Werten. */
 let energyTileDrag = false;   // waehrend Verschieben: Neuaufbau pausieren
-const ENERGY_TILE_DEFAULT = ['export', 'import', 'load', 'solar', 'forecast', 'autarky'];   // Autarkie ganz rechts, Prognose daneben
+const ENERGY_TILE_DEFAULT = ['export', 'import', 'load', 'cforecast', 'solar', 'forecast', 'autarky'];   // Autarkie ganz rechts, Prognose daneben
 function energyTileOrder() {
   let o = []; try { o = JSON.parse(localStorage.getItem('energyTileOrder')) || []; } catch (e) { /* egal */ }
   return mergeEnergyTileOrder(o);
@@ -924,7 +934,10 @@ function renderEnergyTiles(history, day) {
   const fcSum = fcm ? Object.values(fcm).reduce((a, b) => a + b, 0) / 1000 : null;
   if (fcSum != null) tile('forecast', sun + ' Solar-Prognose', fcSum.toFixed(1) + ' kWh',
     day === todayStr() ? `noch ${fcData.remaining_today_kwh.toFixed(1)} kWh bis Tagesende (VRM)` : 'erwartet (VRM)', 'var(--timer)');
-  if (day <= todayStr()) {                         // Zukunft: nur die Prognose
+  const ccm = fcForDay(day, fcData && fcData.cons);
+  if (ccm) tile('cforecast', '🏠 Verbrauchs-Prognose', (Object.values(ccm).reduce((a, b) => a + b, 0) / 1000).toFixed(1) + ' kWh',
+    day === todayStr() ? `noch ${fcData.cons.remaining_today_kwh.toFixed(1)} kWh bis Tagesende (VRM)` : 'erwartet (VRM)', '#e0761f');
+  if (day <= todayStr()) {                         // Zukunft: nur die Prognosen
     // Autarkiegrad: Anteil des Verbrauchs, der aus eigener PV/Batterie gedeckt
     // wurde statt aus dem Netz bezogen zu werden. 100 % = komplett autark.
     const autarky = verbrauch > 0 ? Math.max(0, Math.min(100, (1 - imp / verbrauch) * 100)) : null;

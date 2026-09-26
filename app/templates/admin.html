@@ -960,7 +960,11 @@ document.getElementById('vrm-save').addEventListener('click', async e => {
     document.getElementById('vrm-token').value = '';
     const f = await (await fetch('/api/vrm/forecast?refresh=1')).json();
     if (f.error && !(f.hours || []).length) vrmMsg('Gespeichert, aber: ' + f.error, true);
-    else { vrmMsg(`Verbindung ok ✓ – heute ${f.today_kwh} kWh, morgen ${f.tomorrow_kwh} kWh erwartet.`); savedToast(); }
+    else {
+      vrmMsg(`Verbindung ok ✓ – Solar heute ${f.today_kwh} kWh, morgen ${f.tomorrow_kwh} kWh erwartet. `
+        + (f.cons ? `Verbrauchsprognose: heute ${f.cons.today_kwh} kWh, morgen ${f.cons.tomorrow_kwh} kWh.` : (f.cons_note || '')));
+      savedToast();
+    }
     loadVrmInfo();
   } catch (err) { vrmMsg(err.message, true); }
   b.disabled = false;
