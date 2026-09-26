@@ -240,8 +240,8 @@ function grpHtml(list, mode) {                    // WENN a UND b DANN einschalt
 function pendHtml(r) {                            // Zeile in Arbeit: erst Ein/Aus, danach erscheint die Auswahl WAS
   const p = PEND[r.id]; if (!p) return '';
   return `<div class="cond pend" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border)">
-    <select style="width:auto;font-weight:600" onchange="addMode(this)"><option value="">Einschalten oder Ausschalten …</option>${optHtml(MODES, p.mode)}</select>
-    ${p.mode ? `<select style="width:auto" onchange="addType(this)"><option value="">Bedingung wählen …</option>${optHtml(allowed(p.mode, FIXED), '')}</select>` : ''}
+    <select style="width:auto;font-weight:600" onchange="addMode(this)"><option value="" disabled hidden ${p.mode ? '' : 'selected'}>Einschalten oder Ausschalten …</option>${optHtml(MODES, p.mode)}</select>
+    ${p.mode ? `<select style="width:auto" onchange="addType(this)"><option value="" disabled hidden selected>Bedingung wählen …</option>${optHtml(allowed(p.mode, FIXED), '')}</select>` : ''}
     <button class="ghost" style="padding:2px 9px;margin-left:auto" title="Abbrechen" onclick="addCancel('${escH(r.id)}')">✕</button></div>`;
 }
 function renderRules() {
@@ -249,7 +249,7 @@ function renderRules() {
   const sw = S.devs.filter(d => d.switchable !== false && !d.auto);          // Geraete der Ueberschuss-Automatik gehoeren dieser (getrennt), nicht den Regeln
   const nd = $('rule-new-dev'), nt = $('rule-new-timer');
   const opts = sw.map(d => `<option value="${escH(d.id)}">${escH(d.icon)} ${escH(d.name)}</option>`).join('');
-  nd.innerHTML = `<option value="">+ Neue Regel für …</option>` + opts; nt.innerHTML = `<option value="">+ Ausschalt-Timer für …</option>` + opts;
+  nd.innerHTML = `<option value="" disabled hidden selected>+ Neue Regel für …</option>` + opts; nt.innerHTML = `<option value="" disabled hidden selected>+ Ausschalt-Timer für …</option>` + opts;
   nd.onchange = () => ruleNew(nd); nt.onchange = () => ruleNew(nt, true);
   FIXED = fixed;
   box.innerHTML = R.length ? R.map(r => {

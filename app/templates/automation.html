@@ -126,7 +126,7 @@ function renderSurplus() {
   const box = $('surplus-devs');
   const addable = S.devs.filter(d => !AUTO.includes(d.id) && d.switchable !== false && !S.ruledDevs.includes(d.id));     // Geraete mit Regeln gehoeren den Regeln
   const sel = $('surplus-add');
-  sel.innerHTML = `<option value="">+ Gerät zur Überschuss-Automatik hinzufügen …</option>` + addable.map(d => `<option value="${escH(d.id)}">${escH(d.icon)} ${escH(d.name)}</option>`).join('');
+  sel.innerHTML = `<option value="" disabled hidden selected>+ Gerät zur Überschuss-Automatik hinzufügen …</option>` + addable.map(d => `<option value="${escH(d.id)}">${escH(d.icon)} ${escH(d.name)}</option>`).join('');
   sel.onchange = () => { if (sel.value) { AUTO.push(sel.value); touch(); renderSurplus(); } };
   box.innerHTML = AUTO.length ? AUTO.map((id, n) => {
     const d = dev(id); if (!d) return '';
