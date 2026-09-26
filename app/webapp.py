@@ -752,7 +752,7 @@ class Controller:
             try:
                 cfg = store.load_config()
                 all_rules = rules.list_rules()
-                if rules.enabled(cfg) and any(r.get("enabled", True) for r in all_rules):
+                if rules.enabled(cfg) and (all_rules or rule_engine.owner):        # auch mit nur ausgeschalteten/geloeschten Regeln: was sie eingeschaltet haben, wird abgeschaltet
                     dry = rules.dry_run(cfg)
                     devs = shelly.list_with_status()
                     if dry:      # Trockenlauf: mit gedachtem statt echtem Zustand rechnen
