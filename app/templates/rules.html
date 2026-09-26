@@ -90,7 +90,7 @@ const clone = o => JSON.parse(JSON.stringify(o));
 const dev = id => S.devs.find(d => d.id === id);
 function resetDraft() { R = clone(S.A.rules || []); CFG = { enabled: !!S.A.enabled, dry: !!S.A.dry_run, settings: { ...S.A.settings } }; setDirty(false); }
 function setDirty(v) {
-  dirty = v; $('savebar').style.display = v ? 'flex' : 'none'; document.body.style.paddingBottom = v ? '76px' : '';
+  dirty = v; $('savebar').style.display = v ? 'flex' : 'none'; document.body.style.paddingBottom = v ? '110px' : '';
   if (!v) $('savebar-msg').textContent = '● Ungespeicherte Änderungen – die Steuerung nutzt noch die bisherigen Regeln';
 }
 const touch = () => setDirty(true);
@@ -206,6 +206,7 @@ function addType(sel) {                            // Ein/Aus und WAS gewaehlt: 
   const box = sel.closest('[data-rule]'), r = syncRule(box), mode = PEND[r.id].mode;
   if (!sel.value) return;
   r[mode] = [...r[mode], clone(COND_DEFAULT[sel.value])]; delete PEND[r.id]; touch(); renderRules();
+  const b = document.querySelector(`[data-rule="${r.id}"]`); if (b) b.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
 async function ruleDelete(id) {
   if (!await uiConfirm('Regel löschen?', 'Die Regel wird entfernt, sobald du „Speichern“ drückst. Das Gerät bleibt in der Liste.', 'Löschen')) return;
@@ -221,6 +222,7 @@ function wizType(sel) {
   const c = clone(COND_DEFAULT[sel.value]);
   R.push({ id: 'new-' + (++newId), name: '', device_id: WIZ.dev, enabled: true, on: WIZ.mode === 'on' ? [c] : [], off: WIZ.mode === 'off' ? [c] : [] });
   WIZ = null; touch(); renderRules(); renderWizard();
+  const boxes = document.querySelectorAll('#rules-list [data-rule]'); if (boxes.length) boxes[boxes.length - 1].scrollIntoView({ block: 'center', behavior: 'smooth' });      // neue Regel nicht hinter der Speichern-Leiste
 }
 function renderWizard() {
   const w = $('rule-wizard'), fab = $('fab-add');

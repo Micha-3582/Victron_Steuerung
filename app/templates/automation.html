@@ -97,7 +97,7 @@ function resetDraft() {
   setDirty(false);
 }
 function setDirty(v) {
-  dirty = v; $('savebar').style.display = v ? 'flex' : 'none'; document.body.style.paddingBottom = v ? '76px' : '';
+  dirty = v; $('savebar').style.display = v ? 'flex' : 'none'; document.body.style.paddingBottom = v ? '110px' : '';
   if (!v) $('savebar-msg').textContent = '● Ungespeicherte Änderungen – die Steuerung nutzt noch die bisherigen Einstellungen';
 }
 const touch = () => setDirty(true);
