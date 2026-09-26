@@ -1159,3 +1159,127 @@ def forecast_hours_for_day(day: str) -> dict:
     data = _load_json_recovering(FORECAST_HOURS_PATH, lambda: {"days": {}})
     e = (data.get("days", {}) if isinstance(data, dict) else {}).get(day) or {}
     return {"solar": e.get("solar") or {}, "cons": e.get("cons") or {}}
+
+
+# --- Ersparnis-Auswertung ------------------------------------------------------------------------------
+# Vergleich je Tag: "ohne Anlage" = derselbe Verbrauch, jede Viertelstunde komplett aus dem Netz zum damaligen Preis.
+# "Bezahlt" = Netzbezug x Preis. Die Tageswerte bleiben in savings_days.json (der Verlauf haelt nur 35 Tage).
+SAVINGS_PATH = os.path.join(_DIR, "savings_days.json")
+SAVINGS_KEEP_DAYS = 800
+_SAVINGS_MIN_COVERAGE = 0.9
+
+
+def _savings_day(items: list, prices, fixed_ct: float):
+    """items: [(viertelstunde_index, bucket)]. prices: 96 Preise (ct) oder None. Rueckgabe: Tagesergebnis (ct) oder None."""
+    without = cost = imp_sum = cons_sum = 0.0
+    total = missing = 0
+    for idx, b in items:
+        v = b.get("verbrauch", 0.0) or 0.0
+        imp = (b.get("g_load", 0.0) or 0.0) + (b.get("g_batt", 0.0) or 0.0)
+        if v <= 0 and imp <= 0:
+            continue
+        total += 1
+        price = fixed_ct if fixed_ct else (prices[idx] if prices and idx < len(prices) else None)
+        if price is None:
+            missing += 1
+            continue
+        without += v * price
+        cost += imp * price
+        imp_sum += imp
+        cons_sum += v
+    if not total or cons_sum <= 0 or missing > (1 - _SAVINGS_MIN_COVERAGE) * total:
+        return None
+    known = [p for p in prices if p is not None] if prices else []
+    avg = fixed_ct if fixed_ct else (sum(known) / len(known) if known else None)
+    if avg is None:
+        return None
+    timing = imp_sum * avg - cost                    # Netzbezug guenstiger (+) bzw. teurer (-) als zum Tagesdurchschnittspreis
+    saving = without - cost
+    return {"verbrauch": round(cons_sum, 2), "import": round(imp_sum, 2), "without_ct": round(without, 1), "cost_ct": round(cost, 1),
+            "saving_ct": round(saving, 1), "timing_ct": round(timing, 1), "self_ct": round(saving - timing, 1), "avg_price": round(avg, 2)}
+
+
+def _savings_total(rows: list) -> dict:
+    t = {k: sum(r[k] for r in rows) for k in ("without_ct", "cost_ct", "saving_ct", "timing_ct", "self_ct")}
+    return {"days": len(rows), **{k[:-3] + "_eur": round(v / 100.0, 2) for k, v in t.items()}}
+
+
+def savings(cfg: dict, now: datetime | None = None, keep_days: int = 60) -> dict:
+    """Ersparnis heute (laufend), 7/30 Tage und gesamt. Abgeschlossene Tage werden einmal berechnet und dauerhaft gespeichert."""
+    now = now or datetime.now()
+    today = now.date().isoformat()
+    fixed_mode = cfg.get("tariff_mode") == "fixed"
+    fixed = float(cfg.get("fixed_price_ct") or 0) if fixed_mode else 0.0
+    if fixed_mode and fixed <= 0:
+        return {"available": False, "reason": "Kein fester Preis eingetragen."}
+    by_day: dict = {}
+    for k, b in _load_history().get("hours", {}).items():
+        try:
+            idx = int(k[11:13]) * 4 + int(k[14:16]) // 15
+        except ValueError:
+            continue
+        by_day.setdefault(k[:10], []).append((idx, b))
+    pdays = _price_days()
+    data = _load_json_recovering(SAVINGS_PATH, lambda: {"days": {}})
+    if not isinstance(data, dict):
+        data = {"days": {}}
+    saved = data.setdefault("days", {})
+    changed = False
+    live = None
+    for day in sorted(by_day):
+        if day < today and day in saved:
+            continue                                                # eingefroren
+        items = by_day[day]
+        if day < today and len(items) < 80:
+            continue                                                # unvollstaendig aufgezeichneter Tag
+        rec = pdays.get(day)
+        prices = rec["p"] if rec and rec.get("src") == "tibber" else None
+        res = _savings_day(items, prices, fixed)
+        if res is None:
+            continue
+        res["mode"] = "fixed" if fixed_mode else "tibber"
+        if day == today:
+            live = {"date": day, **res}
+        else:
+            saved[day] = res
+            changed = True
+    if changed:
+        for old in sorted(saved)[:-SAVINGS_KEEP_DAYS]:
+            del saved[old]
+        _dump_json(SAVINGS_PATH, data, indent=None)
+    rows = ([live] if live else []) + [{"date": d, **saved[d]} for d in sorted(saved, reverse=True) if d != today]
+    if not rows:
+        return {"available": False, "reason": "Noch keine Tage mit vollständigen Preisdaten – füllt sich ab dem ersten vollständigen Tag."}
+    d7 = (now.date() - timedelta(days=6)).isoformat()
+    d30 = (now.date() - timedelta(days=29)).isoformat()
+    return {"available": True, "mode": "fixed" if fixed_mode else "tibber", "days": rows[:keep_days],
+            "totals": {"today": _savings_total([live]) if live else None,
+                       "d7": _savings_total([r for r in rows if r["date"] >= d7]),
+                       "d30": _savings_total([r for r in rows if r["date"] >= d30]),
+                       "all": _savings_total(rows)}}
+
+
+# --- Automatische Kalibrierung der VRM-Prognose --------------------------------------------------------
+PV_CAL_MIN_DAYS = 5
+PV_CAL_WINDOW = 14
+
+
+def pv_calibration(now: datetime | None = None) -> dict:
+    """Lernt aus dem Solarlogbuch, um wie viel die VRM-Tagesprognose im Schnitt daneben liegt: Faktor = Ertrag / Prognose ueber die
+    letzten Tage (begrenzt auf 0,6-1,1). Tage mit vollem Akku (Ertrag evtl. gedeckelt) zaehlen nicht, wenn der Ertrag unter der Prognose lag."""
+    now = now or datetime.now()
+    good = []
+    for r in solar_log(now)["rows"]:
+        fc, act = r.get("vrm_forecast"), r.get("actual")
+        if r.get("provisional") or not fc or fc < 1 or not act or act <= 0:
+            continue
+        if r.get("curtailed") and act < fc:
+            continue
+        good.append(r)
+        if len(good) >= PV_CAL_WINDOW:
+            break
+    n = len(good)
+    if n < PV_CAL_MIN_DAYS:
+        return {"ready": False, "factor": 1.0, "days": n, "min_days": PV_CAL_MIN_DAYS}
+    f = max(0.6, min(1.1, sum(r["actual"] for r in good) / sum(r["vrm_forecast"] for r in good)))
+    return {"ready": True, "factor": round(f, 2), "days": n, "min_days": PV_CAL_MIN_DAYS, "avg_dev_pct": round((f - 1) * 100)}

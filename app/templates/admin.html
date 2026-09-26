@@ -205,6 +205,13 @@
     <div><label>Morgen-Faktor (0–1)</label><input id="pv_tom_morning_factor" type="number" step="0.01"></div>
     <div></div>
   </div>
+  <div style="margin-top:14px">
+    <label style="display:flex;align-items:center;gap:8px;font-weight:normal">
+      <input type="checkbox" id="pv_auto_calibration" style="width:auto"> Prognose für morgen automatisch an die Wirklichkeit anpassen
+      <span class="qhelp" role="button" tabindex="0" data-help="Liegt das VRM im Schnitt der letzten Tage zu hoch oder zu niedrig, rechnet die Steuerung die Prognose für morgen entsprechend um (mindestens 5 Tage nötig, Faktor zwischen 0,6 und 1,1). Basis ist das Solarlogbuch.">?</span>
+    </label>
+    <div class="muted" id="pv-cal-msg" style="margin-top:4px"></div>
+  </div>
   <div style="margin-top:12px">
     <a href="/solar-log"><button type="button" class="ghost">☀︎ Solarlogbuch öffnen</button></a>
     <span class="muted" style="margin-left:8px">VRM-Prognose vs. realer Ertrag der letzten Tage.</span>
@@ -571,6 +578,7 @@ const TILE_DEFS = [
   { key: 'show_charge_log', label: 'Ladevorgänge (heute)', hint: 'Protokoll geplanter/durchgeführter Ladungen.' },
   { key: 'show_ev_card', label: 'Manuelle Ladetermine', hint: 'Formular zum Anlegen eines Ladetermins.' },
   { key: 'show_shelly_card', label: 'Geräte (Shelly/Tasmota/Tuya)', hint: 'Schalter für smarte Steckdosen auf dem Dashboard.' },
+  { key: 'show_savings_card', label: 'Ersparnis', hint: 'Was PV, Akku und Steuerung gegenüber „alles aus dem Netz“ sparen.' },
   { key: 'show_plansim_card', label: 'Ladeplan-Simulation (Test)', hint: 'Vorschlag des EMS-Planers im Vergleich zur bisherigen Steuerung – steuert nichts. Nur bei dynamischem Tarif.' },
   { key: 'show_weather_card', label: 'Wetter', hint: 'Wettervorhersage für den Standort (Standort im Reiter „Wetter“).' },
 ];
@@ -615,6 +623,7 @@ async function init() {
   document.getElementById('cerbo_port').value = cfg.cerbo_port || 502;
   document.getElementById('has_pv_inverter').checked = cfg.has_pv_inverter !== false;
   document.getElementById('has_mppt').checked = cfg.has_mppt !== false;
+  document.getElementById('pv_auto_calibration').checked = !!cfg.pv_auto_calibration;
   document.getElementById(cfg.tariff_mode === 'fixed' ? 'tariff_fixed' : 'tariff_tibber').checked = true;
   document.getElementById('tibber_token').value = cfg.tibber_token || '';
   document.getElementById('fixed_price_ct').value = cfg.fixed_price_ct ?? '';
@@ -678,6 +687,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     cerbo_port: parseInt(document.getElementById('cerbo_port').value) || 502,
     has_pv_inverter: document.getElementById('has_pv_inverter').checked,
     has_mppt: document.getElementById('has_mppt').checked,
+    pv_auto_calibration: document.getElementById('pv_auto_calibration').checked,
     tariff_mode: document.getElementById('tariff_fixed').checked ? 'fixed' : 'tibber',
     tibber_token: document.getElementById('tibber_token').value.trim(),
     fixed_price_ct: numDE(document.getElementById('fixed_price_ct').value),
@@ -1312,5 +1322,10 @@ const ADMIN_TABS = [
 })();
 
 init();
+fetch('/api/pv-calibration').then(r => r.json()).then(c => {
+  document.getElementById('pv-cal-msg').textContent = c.ready
+    ? `Gelernt: Faktor ${c.factor.toFixed(2)} (Ø ${c.avg_dev_pct > 0 ? '+' : ''}${c.avg_dev_pct} % gegenüber der VRM-Prognose) aus den letzten ${c.days} Tagen – ${c.enabled ? 'wird angewendet' : 'noch nicht aktiv'}.`
+    : `Sammelt noch Tage: ${c.days} von ${c.min_days} nötig.`;
+}).catch(() => {});
 </script>
 {% endblock %}

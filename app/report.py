@@ -246,6 +246,8 @@ def build(days: int = 7, ctrl: dict | None = None, now: datetime | None = None) 
     warns = [c for c in checks if c["status"] == "warn"]
     verdict = "fail" if fails else ("warn" if warns else "ok")
     plan = ctrl.get("plansim") or {}
+    sv = _safe(store.savings, cfg, now)
+    cal = _safe(store.pv_calibration, now)
     settings = {k: cfg.get(k) for k in ("battery_usable_kwh", "daily_usage_kwh", "charge_power_w", "pv_reserve_kwh", "max_charge_soc", "absolute_cheap_price",
                                         "pv_tom_morning_factor", "min_peak_soc", "night_safety_soc", "target_safe_soc", "hysterese_soc",
                                         "peak_avoid_price", "poll_seconds", "dry_run", "surplus_enabled", "surplus_dry_run", "surplus_min_soc", "tariff_mode")
@@ -256,6 +258,8 @@ def build(days: int = 7, ctrl: dict | None = None, now: datetime | None = None) 
                         "ess": (ctrl.get("status") or {}).get("ess_text"), "pv_source": (ctrl.get("status") or {}).get("pv_source"),
                         "pv_today": (ctrl.get("status") or {}).get("pv_today"), "pv_tom": (ctrl.get("status") or {}).get("pv_tom"),
                         "plan_windows": (ctrl.get("status") or {}).get("plan_windows"), "now_price": (ctrl.get("status") or {}).get("now_price")},
+            "savings": sv if "_error" not in sv else None,
+            "pv_cal": ({**cal, "enabled": bool(cfg.get("pv_auto_calibration"))} if "_error" not in cal else None),
             "planner": ({"available": True, "sim_ct": plan["result"]["sim"]["cost_ct"], "current_ct": plan["result"]["current"]["cost_ct"],
                          "sim_net": plan["result"]["sim"]["net_ct"], "current_net": plan["result"]["current"]["net_ct"],
                          "sim_end_soc": plan["result"]["sim"]["end_soc"], "current_end_soc": plan["result"]["current"]["end_soc"],
@@ -284,6 +288,15 @@ def to_markdown(r: dict) -> str:
         L.append(f"Planer (Test), Horizont bis {p['horizon_end'][5:16].replace('T', ' ')}: Simulation lädt [{w(p['sim_windows'])}] → Netzbezug {p['sim_ct'] / 100:.2f} €, Akku-Endstand {p['sim_end_soc']:.0f} % · "
                  f"bisherige Steuerung [{w(p['current_windows'])}] → {p['current_ct'] / 100:.2f} €, Endstand {p['current_end_soc']:.0f} % · "
                  f"Unterschied inkl. Akku-Restwert: {'Simulation' if diff >= 0 else 'bisherige Steuerung'} {abs(diff) / 100:.2f} € günstiger")
+    sv = r.get("savings")
+    if sv and sv.get("available"):
+        t = sv["totals"]
+        part = lambda k: f"{t[k]['saving_eur']:.2f} € (Eigenversorgung {t[k]['self_eur']:.2f}, Preis-Timing {t[k]['timing_eur']:.2f})" if t.get(k) else "–"
+        L.append(f"Ersparnis ggü. „alles aus dem Netz“: heute {part('today')} · 7 Tage {part('d7')} [{t['d7']['days']} Tage] · gesamt {t['all']['saving_eur']:.2f} € über {t['all']['days']} Tage")
+    pc = r.get("pv_cal")
+    if pc:
+        L.append(("PV-Kalibrierung: Faktor %.2f (Ø %+d %%) aus %d Tagen – %s" % (pc["factor"], pc["avg_dev_pct"], pc["days"], "ANGEWENDET" if pc["enabled"] else "nicht aktiv"))
+                 if pc.get("ready") else f"PV-Kalibrierung: sammelt Tage ({pc['days']}/{pc['min_days']}), {'aktiviert' if pc['enabled'] else 'nicht aktiviert'}")
     L += ["", "## Tage (neueste zuerst)", "| Tag | Solar | Verbr. | Bezug | Einsp. | Autark | Kosten € | Ø Bezugspreis | Geladen kWh | Preis min/Ø/max | VRM-Prog. (Abw.) | Durchl. ok/Fehler | Lade-Durchl. | ESS-Wechsel | Plan-Vorteil ct |",
           "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for d in r["days"]:

@@ -253,6 +253,7 @@ class Controller:
         self.lock = threading.Lock()
         self.status = {"ok": False, "reason": "startet ..."}
         self.prices = []          # aufbereitete Slots für die Kurve
+        self.pv_cal = 1.0                                   # gelernter Korrekturfaktor der Prognose fuer morgen (1.0 = aus)
         self.plansim = {"available": False, "reason": "noch nicht berechnet"}   # Ladeplan-Simulation (nur Anzeige)
         self.last_tick = None
         self.last_error = None
@@ -290,6 +291,7 @@ class Controller:
         else:
             prices, price_note = self._tibber_prices(cfg, cerbo, current_ess)
         pv_note = None
+        self.pv_cal = 1.0
 
         now = datetime.now()
         ev = store.active_ev(now)
@@ -321,6 +323,13 @@ class Controller:
             if solar_tom_ctl is None:                        # VRM hat (noch) nichts fuer morgen
                 solar_tom_ctl = store.recent_solar_average(7, now) or 0.0
                 pv_note = "VRM liefert noch keine Prognose für morgen – für morgen Ø der letzten Tage"
+            elif cfg.get("pv_auto_calibration"):             # gelernte Abweichung der VRM-Prognose (Solarlogbuch)
+                cal = store.pv_calibration(now)
+                if cal["ready"] and abs(cal["factor"] - 1) >= 0.01:
+                    solar_tom_ctl = round(solar_tom_ctl * cal["factor"], 2)
+                    self.pv_cal = cal["factor"]
+                    pv_note = (f"Prognose für morgen um {abs(round((1 - cal['factor']) * 100))} % "
+                               f"{'gesenkt' if cal['factor'] < 1 else 'erhöht'} (gelernt aus {cal['days']} Tagen)")
         else:
             avg = store.recent_solar_average(7, now)
             pv_source = "Ø letzte Tage"
@@ -353,6 +362,12 @@ class Controller:
             store.record_vrm_forecast(vrm_data["today_kwh"] if vrm_data and vrm_data.get("hours") else None, now)
         except Exception as e:                               # noqa: BLE001
             log.warning("Solar-Logbuch konnte nicht geschrieben werden: %s", e)
+        if time.time() - getattr(self, "_savings_ts", 0) > 3600:      # abgeschlossene Tage stuendlich in die Ersparnis-Datei uebernehmen
+            self._savings_ts = time.time()
+            try:
+                store.savings(cfg, now)
+            except Exception as e:                           # noqa: BLE001
+                log.warning("Ersparnis-Auswertung fehlgeschlagen: %s", e)
         try:
             store.record_forecast_hours(vrm_data, now)
         except Exception as e:                               # noqa: BLE001
@@ -451,6 +466,9 @@ class Controller:
         if not vrm_data or not vrm_data.get("hours"):
             return {"available": False, "reason": "Die Simulation braucht die VRM-Prognose (Einstellungen → VRM)."}
         solar = self._hour_map(vrm_data["hours"], now)
+        if self.pv_cal != 1.0:                               # gleiche Korrektur wie in der Steuerung (nur morgen)
+            today_iso = now.date().isoformat()
+            solar = {k: (v if k[0] == today_iso else v * self.pv_cal) for k, v in solar.items()}
         cons = self._hour_map((vrm_data.get("cons") or {}).get("hours"), now)
         # eigene Slot-Liste: logic.build_slots dedupliziert nach Uhrzeit (nur 24 h) - der Planer braucht heute UND morgen
         now_q = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
@@ -878,6 +896,7 @@ def api_status():
                "show_ev_card": bool(cfg.get("show_ev_card", True)),
                "show_shelly_card": bool(cfg.get("show_shelly_card", True)),
                "show_weather_card": bool(cfg.get("show_weather_card", True)),
+               "show_savings_card": bool(cfg.get("show_savings_card", True)),
                "show_plansim_card": bool(cfg.get("show_plansim_card", True)) and cfg.get("tariff_mode") != "fixed",
                "tile_order": [k for k in (cfg.get("tile_order") or []) if isinstance(k, str)]},
         "prices": prices,
@@ -1001,7 +1020,7 @@ def api_config():
                "show_live_values", "show_energy_chart", "show_flow_chart",
                "show_week_overview", "show_month_overview", "show_tibber_card",
                "show_override_card", "show_price_plan", "show_charge_log",
-               "show_ev_card", "show_shelly_card", "show_weather_card", "show_plansim_card", "surplus_enabled", "surplus_dry_run",
+               "show_ev_card", "show_shelly_card", "show_weather_card", "show_plansim_card", "show_savings_card", "pv_auto_calibration", "surplus_enabled", "surplus_dry_run",
                "surplus_min_soc", "tile_order", "scan_networks",
                "has_pv_inverter", "has_mppt", "tariff_mode",
                "fixed_price_ct", "pv_inverters"] + list(Params().__dict__.keys())
@@ -1265,6 +1284,18 @@ def api_report():
     if request.args.get("format") == "md":
         return app.response_class(report.to_markdown(rep_), mimetype="text/plain; charset=utf-8")
     return jsonify(rep_)
+
+
+@app.route("/api/savings", methods=["GET"])
+def api_savings():
+    """Ersparnis gegenueber "alles aus dem Netz": heute, 7/30 Tage, gesamt + Tagesliste."""
+    return jsonify(store.savings(store.load_config()))
+
+
+@app.route("/api/pv-calibration", methods=["GET"])
+def api_pv_calibration():
+    """Gelernter Korrekturfaktor der VRM-Prognose (aus dem Solarlogbuch) und ob er angewendet wird."""
+    return jsonify({**store.pv_calibration(), "enabled": bool(store.load_config().get("pv_auto_calibration"))})
 
 
 @app.route("/api/weather", methods=["GET"])

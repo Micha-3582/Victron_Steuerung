@@ -166,6 +166,18 @@
   #wx-days .d .m { color: var(--muted); font-size: 12px; }
   @media (max-width: 560px) { #wx-days .d { grid-template-columns: 64px 28px 76px 1fr; font-size: 13px; } }
 </style>
+<div class="card full" id="savings-card" hidden style="margin-bottom:14px">
+  <style>
+    #savings-card table { margin-top: 10px; }
+    #savings-card details { margin-top: 10px; }
+  </style>
+  <h2 style="margin:0 0 4px">Ersparnis</h2>
+  <div class="muted" id="sv-sub">Was PV, Akku und Steuerung gegenüber „alles aus dem Netz“ sparen.</div>
+  <div class="sysgrid" id="sv-tiles" style="margin-top:10px"></div>
+  <div class="table-scroll"><table id="sv-table"></table></div>
+  <details><summary class="muted">So wird gerechnet</summary><div class="muted" id="sv-explain" style="margin-top:6px"></div></details>
+</div>
+
 <div class="card full" id="plansim-card" hidden style="margin-bottom:14px">
   <style>
     #plansim-card .ps-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
@@ -229,17 +241,18 @@ const TILE_IDS = {
   show_charge_log: 'charge-log-card', show_ev_card: 'ev-card',
 };
 // Reihenfolge der Kacheln (Einstellungen -> Kacheln); Standard = Reihenfolge dieser Liste.
-const ORDER_IDS = { ...TILE_IDS, show_shelly_card: 'shelly-card', show_weather_card: 'weather-card', show_plansim_card: 'plansim-card' };
+const ORDER_IDS = { ...TILE_IDS, show_shelly_card: 'shelly-card', show_weather_card: 'weather-card', show_plansim_card: 'plansim-card', show_savings_card: 'savings-card' };
 function applyTileOrder(order) {
   const keys = Object.keys(ORDER_IDS), given = (order || []).filter(k => keys.includes(k));
   [...given, ...keys.filter(k => !given.includes(k))].forEach((k, i) => { const el = $(ORDER_IDS[k]); if (el) el.style.order = i; });
 }
-let shellyEnabled = true, weatherEnabled = true, plansimEnabled = true;
+let shellyEnabled = true, weatherEnabled = true, plansimEnabled = true, savingsEnabled = true;
 function applyTileVisibility(ui) {
   applyTileOrder(ui.tile_order);
   shellyEnabled = ui.show_shelly_card !== false;
   if (weatherEnabled !== (ui.show_weather_card !== false)) { weatherEnabled = ui.show_weather_card !== false; if (typeof loadWeather === 'function') loadWeather(); }
   if (plansimEnabled !== (ui.show_plansim_card !== false)) { plansimEnabled = ui.show_plansim_card !== false; if (typeof loadPlansim === 'function') loadPlansim(); }
+  if (savingsEnabled !== (ui.show_savings_card !== false)) { savingsEnabled = ui.show_savings_card !== false; if (typeof loadSavings === 'function') loadSavings(); }
   for (const [key, id] of Object.entries(TILE_IDS)) {
     const el = $(id);
     if (el) el.hidden = ui[key] === false;
@@ -1580,5 +1593,28 @@ function renderPlansim() {
 }
 loadPlansim();
 setInterval(loadPlansim, 120000);
+
+/* --- Ersparnis (Vergleich mit "alles aus dem Netz") --- */
+async function loadSavings() {
+  const card = $('savings-card');
+  if (!savingsEnabled) { card.hidden = true; return; }
+  let d; try { d = await (await fetch('/api/savings')).json(); } catch (e) { return; }
+  if (!d.available) { card.hidden = true; return; }
+  card.hidden = false;
+  const eur = c => (c / 100).toFixed(2) + ' €';
+  const fixed = d.mode === 'fixed';
+  const tile = (title, t, sub) => t ? `<div class="systile"><div class="systile-t">${title}</div><div class="systile-v" style="color:${t.saving_eur >= 0 ? 'var(--cheap)' : 'var(--exp)'}">${t.saving_eur.toFixed(2)} €</div>
+      <div class="systile-s">${sub}: ohne Anlage ${t.without_eur.toFixed(2)} € → bezahlt ${t.cost_eur.toFixed(2)} €</div></div>` : '';
+  const T = d.totals;
+  $('sv-tiles').innerHTML = tile('Heute (läuft)', T.today, 'bisher') + tile('7 Tage', T.d7, T.d7.days + ' Tage') + tile('30 Tage', T.d30, T.d30.days + ' Tage') + tile('Gesamt', T.all, T.all.days + ' Tage');
+  const rows = d.days.slice(0, 14).map(r => `<tr><td>${r.date.slice(8, 10)}.${r.date.slice(5, 7)}.${r.date === todayStr() ? ' <span class="muted">(läuft)</span>' : ''}</td><td>${eur(r.without_ct)}</td><td>${eur(r.cost_ct)}</td>
+      <td style="color:var(--cheap);font-weight:600">${eur(r.saving_ct)}</td><td>${eur(r.self_ct)}</td>${fixed ? '' : `<td>${eur(r.timing_ct)}</td>`}</tr>`).join('');
+  $('sv-table').innerHTML = `<tr class="thead"><td>Tag</td><td>Ohne Anlage</td><td>Bezahlt</td><td>Ersparnis</td><td>Eigenversorgung</td>${fixed ? '' : '<td>Preis-Timing</td>'}</tr>` + rows;
+  $('sv-explain').innerHTML = `<b>Ohne Anlage</b>: dein Verbrauch, jede Viertelstunde komplett aus dem Netz ${fixed ? 'zum festen Preis' : 'zum damaligen Tibber-Preis'}. <b>Bezahlt</b>: dein echter Netzbezug × Preis.
+    <b>Ersparnis</b> = Differenz. ${fixed ? '' : '<b>Preis-Timing</b> ist der Anteil, der daher kommt, dass du eher in günstigen Stunden aus dem Netz beziehst (Vergleich mit dem Tagesdurchschnittspreis); <b>Eigenversorgung</b> ist der Rest (Sonne und Akku statt Netz).'}
+    Nicht enthalten: Einspeisevergütung, Grundgebühr, Netzentgelte und der Akkustand am Tagesende (gleicht sich über mehrere Tage aus).`;
+}
+loadSavings();
+setInterval(loadSavings, 300000);
 </script>
 {% endblock %}
