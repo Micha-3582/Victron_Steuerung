@@ -29,6 +29,7 @@ import surplus
 import tuya
 import updater
 import vrm
+import vrm_import
 from auth import UserError, UserStore, new_secret_key
 from datasources import (OPENMETEO_PR, PvForecast, PvForecastOpenMeteo,
                          fetch_tibber_prices)
@@ -1004,6 +1005,19 @@ def api_vrm_credentials():
     except vrm.VrmError as e:
         return jsonify(error=str(e)), 400
     return jsonify(ok=True)
+
+
+@app.route("/api/vrm/restore", methods=["POST"])
+def api_vrm_restore():
+    """Fehlende Verlaufsdaten aus dem VRM nachholen. Ohne {"apply": true} nur Vorschau."""
+    body = request.get_json(silent=True) or {}
+    try:
+        return jsonify(vrm_import.run(apply=bool(body.get("apply"))))
+    except vrm.VrmError as e:
+        return jsonify(error=str(e)), 400
+    except Exception as e:                               # noqa: BLE001
+        log.warning("VRM-Import fehlgeschlagen: %s", e)
+        return jsonify(error=f"Import fehlgeschlagen: {e}"), 500
 
 
 @app.route("/api/vrm/forecast", methods=["GET"])

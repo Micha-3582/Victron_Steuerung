@@ -376,6 +376,19 @@
     <button id="vrm-save" class="ghost">Zugang speichern &amp; testen</button>
     <span class="muted" id="vrm-msg"></span>
   </div>
+  <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">
+    <b>Fehlende Verlaufsdaten aus dem VRM nachholen</b>
+    <div class="muted" style="margin:4px 0 10px">Fehlen im Verlauf, Wochenrückblick oder Energiefluss-Diagramm Zeiträume (z. B. nach einem
+      Datenverlust oder Ausfall), holt die App die Werte der letzten 35 Tage aus dem VRM-Portal. Erst gibt es eine <b>Vorschau</b>;
+      übernommen werden nur Viertelstunden, die bei uns fehlen – vorhandene Messwerte bleiben unangetastet, vorher wird eine Sicherung angelegt.
+      Die Kosten (€) der nachgeholten Zeiten bleiben 0, weil der damalige Preis nicht bekannt ist.</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <button id="vrm-restore-preview" class="ghost">Vorschau: Was fehlt?</button>
+      <button id="vrm-restore-apply" class="ghost" hidden>Jetzt übernehmen</button>
+    </div>
+    <div class="muted" id="vrm-restore-msg" style="margin-top:8px"></div>
+    <div id="vrm-restore-list" style="margin-top:6px"></div>
+  </div>
 </div>
 
 <div class="card" id="shelly-admin">
@@ -1035,6 +1048,35 @@ document.getElementById('vrm-save').addEventListener('click', async e => {
   b.disabled = false;
 });
 loadVrmInfo();
+/* --- Fehlende Verlaufsdaten aus dem VRM nachholen (erst Vorschau, dann Übernehmen) --- */
+function restoreMsg(t, err) { const m = document.getElementById('vrm-restore-msg'); m.textContent = t; m.style.color = err ? '#e5544a' : ''; }
+function fmtDay(d) { const [Y, M, D] = d.split('-'); return `${D}.${M}.${Y}`; }
+async function vrmRestore(apply) {
+  const pb = document.getElementById('vrm-restore-preview'), ab = document.getElementById('vrm-restore-apply');
+  pb.disabled = ab.disabled = true; restoreMsg(apply ? 'Übernehme …' : 'Frage das VRM ab … (kann etwas dauern)');
+  try {
+    const r = await shellyApi('/api/vrm/restore', 'POST', { apply });
+    const list = document.getElementById('vrm-restore-list');
+    if (apply) {
+      restoreMsg(`Fertig ✓ – ${r.added || 0} Viertelstunden ergänzt. Die Ansichten zeigen es nach dem nächsten Neuladen.`);
+      list.innerHTML = ''; ab.hidden = true; savedToast('Verlauf ergänzt ✓');
+    } else if (!r.slots) {
+      restoreMsg(r.interval === 'keine' ? 'Das VRM liefert für diesen Zeitraum keine Verlaufsdaten.' : 'Nichts zu tun – es fehlt kein Zeitraum, für den das VRM Daten hat.');
+      list.innerHTML = ''; ab.hidden = true;
+    } else {
+      restoreMsg(`${r.slots} fehlende Viertelstunden gefunden (VRM-Auflösung: ${r.interval}${r.soc ? ', mit Batterie-SOC' : ', ohne Batterie-SOC'}). Vorschau – noch nichts gespeichert:`);
+      list.innerHTML = r.days.map((d, i) => `<div style="display:flex;gap:14px;flex-wrap:wrap;padding:5px 8px;border-radius:6px;${i % 2 ? 'background:rgba(255,255,255,.04)' : ''}">
+        <b style="min-width:92px">${fmtDay(d.day)}</b><span>${d.slots} Slots</span><span>Solar ${d.solar} kWh</span><span>Verbrauch ${d.verbrauch} kWh</span>
+        <span>Bezug ${d.import} kWh</span><span>Einspeisung ${d.export} kWh</span></div>`).join('');
+      ab.hidden = false;
+    }
+  } catch (e) { restoreMsg(e.message, true); }
+  pb.disabled = ab.disabled = false;
+}
+document.getElementById('vrm-restore-preview').addEventListener('click', () => vrmRestore(false));
+document.getElementById('vrm-restore-apply').addEventListener('click', async () => {
+  if (await uiDialog({ title: 'Verlauf ergänzen?', message: 'Die in der Vorschau gezeigten Zeiträume werden aus dem VRM in den Verlauf übernommen. Vorhandene Daten bleiben unverändert, eine Sicherung wird vorher angelegt.', okText: 'Übernehmen', confirm: true })) vrmRestore(true);
+});
 
 loadShellyAdmin();
 loadSurplus(true);

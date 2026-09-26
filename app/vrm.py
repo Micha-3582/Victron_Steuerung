@@ -150,3 +150,84 @@ def forecast(force: bool = False) -> dict:
         if old:                                    # alte Werte weiter zeigen, Fehler dazu melden
             return {**old, "error": str(e)}
         return {"configured": True, "error": str(e), "hours": []}
+
+
+# ---------------------------------------------------------------- Verlauf (Energieflüsse) aus dem VRM
+# VRM-Kürzel der 7 Energiepfade (type=kwh) -> unsere Schlüssel in history.json
+KWH_CODES = {"Pc": "s_load", "Pb": "s_batt", "Pg": "s_grid", "Gc": "g_load", "Gb": "g_batt",
+             "Bc": "b_load", "Bg": "b_grid"}
+CHUNK_DAYS = 7
+
+
+def _slot_key(dt: datetime) -> str:
+    return f"{dt:%Y-%m-%dT%H}:{(dt.minute // 15) * 15:02d}"
+
+
+def _points(rec, code) -> list[tuple[int, float]]:
+    out = []
+    for row in (rec.get(code) or []) if isinstance(rec, dict) else []:
+        try:
+            if row[1] is not None:
+                out.append((int(row[0]) // 1000, float(row[1])))
+        except (TypeError, ValueError, IndexError):
+            continue
+    return out
+
+
+def _spread(points, hourly: bool, divide: bool = True) -> dict[str, float]:
+    """Punkte -> {Slot-Schlüssel: Wert}. Stundenwerte kommen auf alle 4 Viertelstunden
+    (kWh werden dabei geteilt, Prozentwerte wie der SOC nur kopiert)."""
+    out: dict[str, float] = {}
+    for ts, v in points:
+        dt = datetime.fromtimestamp(ts)
+        if hourly:
+            base = dt.replace(minute=0, second=0, microsecond=0)
+            for q in range(4):
+                out[_slot_key(base + timedelta(minutes=15 * q))] = v / 4 if divide else v
+        else:
+            out[_slot_key(dt)] = v
+    return out
+
+
+def fetch_flow_slots(c: dict, start: datetime, end: datetime) -> tuple[dict[str, dict], set[str]]:
+    """Energieflüsse (kWh je Viertelstunde) aus dem VRM für [start, end).
+    Rückgabe: ({Slot: {flow: kWh}}, benutzte Auflösungen). Bevorzugt 15-Min-Werte, sonst Stundenwerte."""
+    slots: dict[str, dict] = {}
+    used: set[str] = set()
+    t = start
+    while t < end:
+        t2 = min(end, t + timedelta(days=CHUNK_DAYS))
+        for interval in ("15mins", "hours"):
+            data = _request(c, {"type": "kwh", "interval": interval,
+                                "start": int(t.timestamp()), "end": int(t2.timestamp())})
+            rec = data.get("records") if isinstance(data, dict) else None
+            series = {code: _points(rec, code) for code in KWH_CODES} if isinstance(rec, dict) else {}
+            if not any(series.values()):
+                continue
+            for code, pts in series.items():
+                for key, v in _spread(pts, interval == "hours").items():
+                    slots.setdefault(key, {})[KWH_CODES[code]] = v
+            used.add(interval)
+            break
+        t = t2
+    return slots, used
+
+
+def fetch_soc_slots(c: dict, start: datetime, end: datetime) -> dict[str, float]:
+    """Batterie-SOC (%) je Viertelstunde - optional; bei jedem Fehler bleibt der SOC im Verlauf einfach leer."""
+    out: dict[str, float] = {}
+    try:
+        t = start
+        while t < end:
+            t2 = min(end, t + timedelta(days=CHUNK_DAYS))
+            for interval in ("15mins", "hours"):
+                data = _request(c, {"type": "custom", "attributeCodes[]": "bs", "interval": interval,
+                                    "start": int(t.timestamp()), "end": int(t2.timestamp())})
+                pts = _points((data or {}).get("records") or {}, "bs")
+                if pts:
+                    out.update(_spread(pts, interval == "hours", divide=False))
+                    break
+            t = t2
+    except (VrmError, AttributeError, TypeError):
+        pass
+    return out

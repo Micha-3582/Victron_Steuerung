@@ -402,8 +402,17 @@ def _load_history() -> dict:
     return d
 
 
+_HISTORY_LOCK = threading.RLock()      # history.json wird gelesen-veraendert-geschrieben: Regeltakt und VRM-Import nie gleichzeitig
+
+
 def log_energy_sample(system: dict | None, now: datetime | None = None,
                        price_ct: float | None = None):
+    with _HISTORY_LOCK:
+        _log_energy_sample(system, now, price_ct)
+
+
+def _log_energy_sample(system: dict | None, now: datetime | None = None,
+                        price_ct: float | None = None):
     """Integriert Momentanleistung zu Stunden-kWh auf: Verbrauch, Solar, die 7
     Energieflüsse (VRM-Stil), SOC (Min/Ø/Max) und - falls price_ct übergeben -
     die Netzbezugskosten (ct), fuer den Wochenrueckblick. Nur echte Messwerte.
@@ -487,15 +496,37 @@ def log_energy_sample(system: dict | None, now: datetime | None = None,
     _dump_json(HISTORY_PATH, data, indent=2, backup=True)
 
 
+def history_keys() -> set:
+    """Alle vorhandenen Viertelstunden-Slots (Schluessel) in history.json."""
+    return set(_load_history().get("hours", {}).keys())
+
+
+def import_history_slots(slots: dict) -> int:
+    """Ergaenzt fehlende Viertelstunden (z. B. aus dem VRM). Vorhandene Slots werden NIE ueberschrieben;
+    vorher wird eine Sicherung angelegt. Rueckgabe: Anzahl neu eingetragener Slots."""
+    with _HISTORY_LOCK:
+        data = _load_history()
+        hours = data["hours"]
+        new = {k: v for k, v in slots.items() if k not in hours}
+        if not new:
+            return 0
+        if os.path.exists(HISTORY_PATH):
+            _forced_backup(HISTORY_PATH, "vorVrmImport")
+        hours.update(new)
+        _dump_json(HISTORY_PATH, data, indent=2, backup=True)
+        return len(new)
+
+
 def _row_from_bucket(label: str, b: dict | None) -> dict:
-    if b and b.get("soc_n"):
+    if b and (b.get("soc_n") or b.get("restored")):
+        n = b.get("soc_n") or 0            # aus dem VRM nachgeholte Slots koennen ohne SOC sein
         row = {
             "hour": label,
             "verbrauch": round(b["verbrauch"], 3),
             "solar": round(b["solar"], 3),
-            "soc_avg": round(b["soc_sum"] / b["soc_n"], 1),
-            "soc_min": round(b["soc_min"], 1),
-            "soc_max": round(b["soc_max"], 1),
+            "soc_avg": round(b["soc_sum"] / n, 1) if n else None,
+            "soc_min": round(b["soc_min"], 1) if b.get("soc_min") is not None else None,
+            "soc_max": round(b["soc_max"], 1) if b.get("soc_max") is not None else None,
         }
         for k in _FLOW_KEYS:
             row[k] = round(b.get(k, 0.0), 3)
