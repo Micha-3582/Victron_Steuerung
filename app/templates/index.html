@@ -1604,12 +1604,13 @@ async function loadSavings() {
   const eur = c => (c / 100).toFixed(2) + ' €';
   const fixed = d.mode === 'fixed';
   const tile = (title, t, sub) => t ? `<div class="systile"><div class="systile-t">${title}</div><div class="systile-v" style="color:${t.saving_eur >= 0 ? 'var(--cheap)' : 'var(--exp)'}">${t.saving_eur.toFixed(2)} €</div>
-      <div class="systile-s">${sub}: ohne Anlage ${t.without_eur.toFixed(2)} € → bezahlt ${t.cost_eur.toFixed(2)} €</div></div>` : '';
+      <div class="systile-s">${sub}ohne Anlage ${t.without_eur.toFixed(2)} € → bezahlt ${t.cost_eur.toFixed(2)} €</div></div>` : '';
   const T = d.totals;
-  $('sv-tiles').innerHTML = tile('Heute (läuft)', T.today, 'bisher') + tile('7 Tage', T.d7, T.d7.days + ' Tage') + tile('30 Tage', T.d30, T.d30.days + ' Tage') + tile('Gesamt', T.all, T.all.days + ' Tage');
+  $('sv-tiles').innerHTML = tile('Heute (läuft)', T.today, 'bisher: ') + tile('7 Tage', T.d7, T.d7.days < 7 ? T.d7.days + ' Tage erfasst · ' : '') + tile('30 Tage', T.d30, T.d30.days < 30 ? T.d30.days + ' Tage erfasst · ' : '')
+    + (T.all.days > T.d30.days ? tile('Gesamt', T.all, T.all.days + ' Tage · ') : '');
   const rows = d.days.slice(0, 14).map(r => `<tr><td>${r.date.slice(8, 10)}.${r.date.slice(5, 7)}.${r.date === todayStr() ? ' <span class="muted">(läuft)</span>' : ''}</td><td>${eur(r.without_ct)}</td><td>${eur(r.cost_ct)}</td>
-      <td style="color:var(--cheap);font-weight:600">${eur(r.saving_ct)}</td><td>${eur(r.self_ct)}</td>${fixed ? '' : `<td>${eur(r.timing_ct)}</td>`}</tr>`).join('');
-  $('sv-table').innerHTML = `<tr class="thead"><td>Tag</td><td>Ohne Anlage</td><td>Bezahlt</td><td>Ersparnis</td><td>Eigenversorgung</td>${fixed ? '' : '<td>Preis-Timing</td>'}</tr>` + rows;
+      <td style="color:var(--cheap);font-weight:600">${eur(r.saving_ct)}</td>${fixed ? '' : `<td>${eur(r.self_ct)}</td><td>${eur(r.timing_ct)}</td>`}</tr>`).join('');
+  $('sv-table').innerHTML = `<tr class="thead"><td>Tag</td><td>Ohne Anlage</td><td>Bezahlt</td><td>Ersparnis</td>${fixed ? '' : '<td>Eigenversorgung</td><td>Preis-Timing</td>'}</tr>` + rows;
   $('sv-explain').innerHTML = `<b>Ohne Anlage</b>: dein Verbrauch, jede Viertelstunde komplett aus dem Netz ${fixed ? 'zum festen Preis' : 'zum damaligen Tibber-Preis'}. <b>Bezahlt</b>: dein echter Netzbezug × Preis.
     <b>Ersparnis</b> = Differenz. ${fixed ? '' : '<b>Preis-Timing</b> ist der Anteil, der daher kommt, dass du eher in günstigen Stunden aus dem Netz beziehst (Vergleich mit dem Tagesdurchschnittspreis); <b>Eigenversorgung</b> ist der Rest (Sonne und Akku statt Netz).'}
     Nicht enthalten: Einspeisevergütung, Grundgebühr, Netzentgelte und der Akkustand am Tagesende (gleicht sich über mehrere Tage aus).`;
