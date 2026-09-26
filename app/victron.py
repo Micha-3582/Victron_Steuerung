@@ -3,10 +3,14 @@ Victron Cerbo GX Anbindung über Modbus TCP.
 Lesen: SOC (BMS, Faktor 10) + ESS-Mode.  Schreiben: ESS-Mode (mit Dry-Run-Sperre).
 """
 import logging
+import time
 
 from pymodbus.client import ModbusTcpClient
 
 log = logging.getLogger("victron")
+
+_last_grid_counter_warning = 0.0
+_GRID_COUNTER_WARNING_INTERVAL = 600   # nur alle 10 Min erneut loggen (Live-/Sampler-Polling fragt sonst im Sekundentakt an)
 
 # Register (verifiziert am Cerbo 192.168.2.241, 22.07.2026)
 SOC_BMS_UNIT, SOC_BMS_REG = 225, 266      # Wert = %*10  -> /10
@@ -66,9 +70,12 @@ class Cerbo:
         finally:
             c.close()
 
-    def read_system(self):
+    def read_system(self, has_pv_inverter=True, has_mppt=True):
         """Liest die aggregierten System-Werte (Unit 100) für die Live-Ansicht.
-        Register per Discovery gegen die Victron-App verifiziert (22.07.2026)."""
+        Register per Discovery gegen die Victron-App verifiziert (22.07.2026).
+        `has_pv_inverter`/`has_mppt`: Anlagen ohne AC-PV-Wechselrichter bzw. ohne
+        MPPT-Solarladeregler lassen den jeweiligen Block aus – sonst würde ein
+        Registerblock gelesen, den es am Cerbo gar nicht gibt (Fehler/Fantasiewerte)."""
         def sgn(v):
             return v - 65536 if v >= 32768 else v
 
@@ -77,8 +84,20 @@ class Cerbo:
             # Blöcke gezielt lesen (Lücken im Registerraum vermeiden):
             blk1 = _read_block(c, 811, 12, SOC_SYS_UNIT)  # PV-WR 811-813, Last 817-819, Netz 820-822
             blk2 = _read_block(c, 840, 7, SOC_SYS_UNIT)   # Batterie 840-846
-            blk3 = _read_block(c, 850, 2, SOC_SYS_UNIT)   # PV-Ladegerät 850-851
-            blk4 = _read_block(c, 2622, 12, SOC_SYS_UNIT)  # Netz-Energiezähler (uint32, Wh)
+            blk3 = _read_block(c, 850, 2, SOC_SYS_UNIT) if has_mppt else None  # PV-Ladegerät 850-851
+            try:
+                # Nicht jede Cerbo-Konfiguration hat einen registrierten Netz-Zähler
+                # (z.B. wenn kein separates Grid-Meter am Cerbo angemeldet ist) -
+                # dann liefert das Gerät hier einen Modbus-Fehler (Exception Code 10).
+                # Das darf nicht die kompletten Live-Werte (PV/Last/Batterie) mitreißen.
+                blk4 = _read_block(c, 2622, 12, SOC_SYS_UNIT)  # Netz-Energiezähler (uint32, Wh)
+            except Exception as e:                        # noqa: BLE001
+                global _last_grid_counter_warning
+                now_ts = time.monotonic()
+                if now_ts - _last_grid_counter_warning > _GRID_COUNTER_WARNING_INTERVAL:
+                    log.warning("Netz-Energiezähler (2622ff) nicht lesbar, setze auf 0: %s", e)
+                    _last_grid_counter_warning = now_ts
+                blk4 = [0] * 12
         finally:
             c.close()
 
@@ -87,16 +106,16 @@ class Cerbo:
         grid_import = (u32(0, 1) + u32(2, 3) + u32(4, 5)) / 1000.0   # 2622/2624/2626
         grid_export = (u32(6, 7) + u32(8, 9) + u32(10, 11)) / 1000.0  # 2628/2630/2632
 
-        pv_ac = [sgn(blk1[0]), sgn(blk1[1]), sgn(blk1[2])]          # 811/812/813
+        pv_ac = [sgn(blk1[0]), sgn(blk1[1]), sgn(blk1[2])] if has_pv_inverter else [0, 0, 0]  # 811/812/813
         load = [sgn(blk1[6]), sgn(blk1[7]), sgn(blk1[8])]          # 817/818/819
         grid = [sgn(blk1[9]), sgn(blk1[10]), sgn(blk1[11])]        # 820/821/822
-        pv_dc = sgn(blk3[0])                                        # 850
+        pv_dc = sgn(blk3[0]) if blk3 is not None else 0             # 850
         return {
             "grid": {"l1": grid[0], "l2": grid[1], "l3": grid[2], "total": sum(grid)},
             "loads": {"l1": load[0], "l2": load[1], "l3": load[2], "total": sum(load)},
             "pv_inverter": {"l1": pv_ac[0], "l2": pv_ac[1], "l3": pv_ac[2], "total": sum(pv_ac)},
             "pv_charger": pv_dc,
-            "pv_charger_current": sgn(blk3[1]) / 10.0,
+            "pv_charger_current": (sgn(blk3[1]) / 10.0) if blk3 is not None else 0.0,
             "solar_total": sum(pv_ac) + pv_dc,
             "grid_energy_total": {"import": round(grid_import, 2), "export": round(grid_export, 2)},
             "battery": {
@@ -107,6 +126,21 @@ class Cerbo:
                 "state": blk2[4],                   # 844 (0=idle,1=laden,2=entladen)
             },
         }
+
+    def read_pvinverter_power(self, unit):
+        """Liest die Gesamt-Wirkleistung (W) EINES einzelnen PV-Wechselrichter-Dienstes
+        (com.victronenergy.pvinverter). Unit = die Geräte-Instanz (Deviceinstance) dieses
+        Wechselrichters am Cerbo, NICHT die System-Unit 100 - jeder Wechselrichter (auch
+        ein per Shelly/MQTT eingespeister) hat dort seine eigene Modbus-Unit-ID.
+        Register 1052 lt. offizieller Victron Modbus-TCP-Registerliste
+        (com.victronenergy.pvinverter, "Total Power", int32, 1 W, Pfad /Ac/Power)."""
+        c = self._client()
+        try:
+            regs = _read_block(c, 1052, 2, unit)
+        finally:
+            c.close()
+        raw = (regs[0] << 16) | regs[1]
+        return raw - 2**32 if raw >= 2**31 else raw
 
     def read_ess_mode(self):
         c = self._client()

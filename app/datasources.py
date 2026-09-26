@@ -75,3 +75,21 @@ def fetch_tibber_prices(token, timeout=15):
         pass
     pi = _post(token, TIBBER_QUERY_HOURLY, timeout)
     return list(pi.get("today") or []) + list(pi.get("tomorrow") or [])
+
+
+def build_fixed_price_entries(price_ct_per_kwh, now=None):
+    """Für Anlagen mit normalem (nicht-dynamischem) Stromvertrag: liefert das gleiche
+    Format wie fetch_tibber_prices() (['startsAt','total'(EUR/kWh),'level']), aber mit
+    konstantem Preis über alle Viertelstunden von heute 00:00 bis morgen 23:45. So kann
+    logic.decide() unverändert weiterlaufen (Peak-Schutz/Nacht-Puffer/Morgen-Brücke
+    arbeiten weiter zeitfensterbasiert) - es findet nur keine Preis-Optimierung mehr statt,
+    weil jeder Slot denselben Preis hat."""
+    from datetime import datetime as _dt
+    now = now or _dt.now()
+    price_eur = float(price_ct_per_kwh) / 100.0
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    entries = []
+    for i in range(4 * 24 * 2):   # heute + morgen, 15-Min-Raster
+        ts = start + timedelta(minutes=15 * i)
+        entries.append({"startsAt": ts.isoformat(), "total": price_eur, "level": "NORMAL"})
+    return entries

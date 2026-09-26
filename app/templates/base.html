@@ -84,6 +84,7 @@
       left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; }
     .switch input:checked + .slider { background: var(--green); }
     .switch input:checked + .slider:before { transform: translateX(22px); }
+    .switch input:disabled + .slider { opacity: .4; cursor: not-allowed; }
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
     td { padding: 8px 4px; border-bottom: 1px solid var(--border); }
     .muted { color: var(--muted); font-size: 13px; }
@@ -196,6 +197,22 @@
     .help-body b { color: var(--fg); }
     .help-body code { background: var(--card2); padding: 1px 6px; border-radius: 5px; font-size: 13px; }
     .help-body .muted { color: var(--muted); }
+    /* Kompakte Feld-Hilfe: "?"-Knopf statt Dauertext unter dem Feld.
+       BEWUSST <span>, kein <button>: steckt oft innerhalb eines <label>, und
+       <button> gilt als "labelable" - der ganze <label>-Bereich hätte dann den
+       :hover-Zustand des Buttons ausgelöst, nicht nur der Knopf selbst. */
+    .qhelp { display: inline-flex; align-items: center; justify-content: center;
+      width: 17px; height: 17px; border-radius: 50%; border: 1px solid var(--border);
+      background: var(--card2); color: var(--muted); font-size: 11px; font-weight: 700;
+      line-height: 1; cursor: pointer; padding: 0; margin-left: 6px; vertical-align: middle; }
+    .qhelp:hover, .qhelp[aria-expanded="true"] { color: #14171c; background: var(--accent);
+      border-color: var(--accent); }
+    .qpop { position: fixed; max-width: 320px; background: var(--card2);
+      border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+      font-size: 13px; line-height: 1.5; color: var(--fg); box-shadow: 0 8px 24px rgba(0,0,0,.4);
+      z-index: 80; }
+    .qpop b { color: var(--fg); }
+    .qpop code { background: var(--bg); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
   </style>
 </head>
 <body>
@@ -218,6 +235,42 @@
   </header>
   <main>{% block content %}{% endblock %}</main>
   {% block scripts %}{% endblock %}
+  <script>
+    // Kompakte Feld-Hilfe: Klick auf einen .qhelp-Knopf zeigt sein data-help
+    // als kleines Popover neben dem Knopf, Klick woanders schliesst es wieder.
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('.qhelp');
+      const wasOpen = btn && btn.getAttribute('aria-expanded') === 'true';
+      const openPop = document.querySelector('.qpop');
+      if (openPop) {
+        openPop.remove();
+        document.querySelectorAll('.qhelp[aria-expanded="true"]')
+          .forEach(b => b.setAttribute('aria-expanded', 'false'));
+      }
+      if (!btn || wasOpen) return;
+      e.stopPropagation();
+      btn.setAttribute('aria-expanded', 'true');
+      const pop = document.createElement('div');
+      pop.className = 'qpop';
+      pop.innerHTML = btn.dataset.help || '';
+      document.body.appendChild(pop);
+      const r = btn.getBoundingClientRect();
+      let top = r.bottom + 6;
+      let left = r.left;
+      if (left + pop.offsetWidth > window.innerWidth - 10) left = window.innerWidth - pop.offsetWidth - 10;
+      if (top + pop.offsetHeight > window.innerHeight - 10) top = r.top - pop.offsetHeight - 6;
+      pop.style.left = Math.max(10, left) + 'px';
+      pop.style.top = Math.max(10, top) + 'px';
+    });
+    // .qhelp ist bewusst ein <span> statt <button> (siehe CSS-Kommentar oben) -
+    // dadurch fehlt die native Enter/Leertaste-Aktivierung, hier nachgerüstet.
+    document.addEventListener('keydown', (e) => {
+      if ((e.key === 'Enter' || e.key === ' ') && e.target.closest('.qhelp')) {
+        e.preventDefault();
+        e.target.click();
+      }
+    });
+  </script>
   <script src="{{ url_for('static', filename='pwa.js') }}"></script>
 </body>
 </html>

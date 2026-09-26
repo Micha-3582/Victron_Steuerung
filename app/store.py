@@ -121,6 +121,7 @@ CONFIG_DEFAULTS = {
     "energy_sample_seconds": 10,   # eigener, feiner Takt für die Energie-Messung
     "manual_override": False,
     "web_port": 5005,
+    "pv_inverters": [],            # [{"name": "...", "unit": 80}, ...] - einzeln benannte PV-Wechselrichter fuer die Live-Anzeige
 }
 
 
@@ -138,10 +139,15 @@ def save_config(cfg: dict):
 
 
 def is_configured(cfg=None) -> bool:
-    """Minimal nötig: Cerbo + Tibber. Die PV-Prognose kommt aus dem VRM (optional einzurichten) -
-    ohne VRM rechnet die Steuerung mit dem Durchschnitt der letzten Tageserträge."""
+    """Minimal nötig: Cerbo + eine gültige Strompreis-Quelle (Tibber-Token bei
+    dynamischem Tarif, sonst ein fester Preis > 0). Die PV-Prognose kommt aus dem VRM
+    (optional einzurichten) - ohne VRM rechnet die Steuerung mit dem Durchschnitt der letzten Tageserträge."""
     cfg = cfg or load_config()
-    return bool(cfg.get("cerbo_host") and cfg.get("tibber_token"))
+    if not cfg.get("cerbo_host"):
+        return False
+    if cfg.get("tariff_mode") == "fixed":
+        return bool(cfg.get("fixed_price_ct", 0) > 0)
+    return bool(cfg.get("tibber_token"))
 
 
 # --- Interner State -------------------------------------------------------
@@ -573,28 +579,6 @@ def energy_min_day() -> str | None:
     return min(days) if days else None
 
 
-def energy_grid_today(now: datetime | None = None) -> dict:
-    """Tages-Netzbezug/-Einspeisung aus der integrierten Netzleistung (nicht aus
-    den kumulierten Zählerregistern, die unzuverlässig zählen). Aus/Zum Netz =
-    Summe der heutigen Netz-Flüsse plus manuelle Korrektur (siehe set_grid_today).
-    Reset um Mitternacht ergibt sich automatisch."""
-    now = now or datetime.now()
-    imp, exp = _raw_grid_sum(now)
-    corr = get_grid_correction(now)
-    return {"import": round(imp + corr["import"], 2), "export": round(exp + corr["export"], 2)}
-
-
-def _raw_grid_sum(now: datetime) -> tuple:
-    """Reine Tagessumme der gemessenen Netz-Fluesse, ohne manuelle Korrektur."""
-    today = now.strftime("%Y-%m-%d")
-    imp = exp = 0.0
-    for k, b in _load_history().get("hours", {}).items():
-        if k[:10] == today:
-            imp += b.get("g_load", 0.0) + b.get("g_batt", 0.0)   # Netz→Verbrauch/Batterie
-            exp += b.get("s_grid", 0.0) + b.get("b_grid", 0.0)   # Solar/Batterie→Netz
-    return imp, exp
-
-
 def energy_week_summary(now: datetime | None = None, days: int = 7, offset_weeks: int = 0) -> dict:
     """Tagesweise Bilanz (Solar/Verbrauch/Netz/Kosten) einer 7-Tage-Woche fuer
     den Wochenrueckblick. offset_weeks=0 ist die aktuelle Woche (bis heute),
@@ -744,6 +728,28 @@ def monthly_overview(now: datetime | None = None, limit_months: int = 120) -> di
     return {"months": rows}
 
 
+def energy_grid_today(now: datetime | None = None) -> dict:
+    """Tages-Netzbezug/-Einspeisung aus der integrierten Netzleistung (nicht aus
+    den kumulierten Zählerregistern, die unzuverlässig zählen). Aus/Zum Netz =
+    Summe der heutigen Netz-Flüsse plus manuelle Korrektur (siehe set_grid_today).
+    Reset um Mitternacht ergibt sich automatisch."""
+    now = now or datetime.now()
+    imp, exp = _raw_grid_sum(now)
+    corr = get_grid_correction(now)
+    return {"import": round(imp + corr["import"], 2), "export": round(exp + corr["export"], 2)}
+
+
+def _raw_grid_sum(now: datetime) -> tuple:
+    """Reine Tagessumme der gemessenen Netz-Fluesse, ohne manuelle Korrektur."""
+    today = now.strftime("%Y-%m-%d")
+    imp = exp = 0.0
+    for k, b in _load_history().get("hours", {}).items():
+        if k[:10] == today:
+            imp += b.get("g_load", 0.0) + b.get("g_batt", 0.0)   # Netz→Verbrauch/Batterie
+            exp += b.get("s_grid", 0.0) + b.get("b_grid", 0.0)   # Solar/Batterie→Netz
+    return imp, exp
+
+
 # --- Solar-Logbuch (Prognose vs. reale Erzeugung) -------------------------
 def _load_solar_log() -> dict:
     if os.path.exists(SOLAR_LOG_PATH):
@@ -876,6 +882,203 @@ def recent_solar_average(days: int = 7, now: datetime | None = None) -> float | 
     if len(vals) < 3:
         return None
     return round(sum(vals) / len(vals), 2)
+
+
+# --- Preis-Historie (Tibber-Preise je Viertelstunde, lange aufbewahrt) --------------------------
+# price_history.json: {"days": {"YYYY-MM-DD": {"p": [96 Werte in ct/kWh oder null], "src": "tibber" | "derived"}}}
+# "tibber" = Originalpreise, "derived" = aus Bezugskosten/-menge im Verlauf zurueckgerechnet (nur Slots mit Netzbezug, lueckenhaft).
+PRICE_HISTORY_PATH = os.path.join(_DIR, "price_history.json")
+_PRICE_KEEP_DAYS = 800            # rund 2 Jahre; die Datei bleibt trotzdem klein (~0,5 MB)
+_PRICE_LOCK = threading.Lock()
+_price_cache: dict | None = None
+
+
+def _price_days() -> dict:
+    global _price_cache
+    if _price_cache is None:
+        d = _load_json_recovering(PRICE_HISTORY_PATH, lambda: {"days": {}})
+        _price_cache = d.get("days", {}) if isinstance(d, dict) and isinstance(d.get("days"), dict) else {}
+    return _price_cache
+
+
+def _save_price_days(days: dict):
+    for old in sorted(days)[:-_PRICE_KEEP_DAYS]:
+        del days[old]
+    _dump_json(PRICE_HISTORY_PATH, {"days": days}, indent=None, backup=True)
+
+
+def record_prices(entries: list) -> int:
+    """Haelt die Tibber-Preise fest (heute UND morgen, sobald sie da sind). Schreibt nur bei Aenderungen; ein Tag mit
+    Originalpreisen wird nur ergaenzt bzw. korrigiert, nie durch weniger Daten ersetzt. Rueckgabe: Anzahl geaenderter Tage."""
+    from logic import _parse_iso
+    starts = []
+    for e in entries or []:
+        try:
+            starts.append((_parse_iso(e["startsAt"]), round(float(e["total"]) * 100, 2)))
+        except (KeyError, TypeError, ValueError):
+            continue
+    starts.sort()
+    new: dict[str, list] = {}
+    for i, (t, ct) in enumerate(starts):
+        if i + 1 < len(starts):
+            gap = (starts[i + 1][0] - t).total_seconds() / 60
+        else:                                                       # letzter Eintrag: gleiche Dauer wie der davor
+            gap = (t - starts[i - 1][0]).total_seconds() / 60 if i else 15
+        n = 4 if gap >= 55 else 1                                  # Stundenpreis gilt fuer alle 4 Viertelstunden
+        vals = new.setdefault(t.date().isoformat(), [None] * 96)
+        base = t.hour * 4 + t.minute // 15
+        for k in range(n):
+            if base + k < 96:
+                vals[base + k] = ct
+    changed = 0
+    with _PRICE_LOCK:
+        days = _price_days()
+        for day, vals in new.items():
+            rec = days.get(day)
+            if rec and rec.get("src") == "tibber":
+                merged = [v if v is not None else o for v, o in zip(vals, rec["p"])]
+                if merged == rec["p"]:
+                    continue
+                vals = merged
+            days[day] = {"p": vals, "src": "tibber"}
+            changed += 1
+        if changed:
+            _save_price_days(days)
+    return changed
+
+
+def backfill_prices_from_history() -> int:
+    """Rechnet fuer Tage OHNE Tibber-Originalpreise aus dem Verlauf zurueck: Preis = Bezugskosten / Bezugsmenge (nur Slots mit
+    Netzbezug). Idempotent; laeuft beim Start. Rueckgabe: Anzahl neu gefuellter Slots."""
+    per_day: dict[str, dict[int, float]] = {}
+    for key, b in _load_history().get("hours", {}).items():
+        imp = b.get("g_load", 0.0) + b.get("g_batt", 0.0)
+        cost = b.get("grid_cost_ct", 0.0)
+        if imp > 0.005 and cost > 0 and len(key) >= 16:
+            try:
+                slot = int(key[11:13]) * 4 + int(key[14:16]) // 15
+            except ValueError:
+                continue
+            per_day.setdefault(key[:10], {})[slot] = round(cost / imp, 2)
+    filled = 0
+    with _PRICE_LOCK:
+        days = _price_days()
+        for day, m in per_day.items():
+            rec = days.get(day)
+            if rec and rec.get("src") == "tibber":
+                continue
+            vals = list(rec["p"]) if rec else [None] * 96
+            for slot, p in m.items():
+                if vals[slot] is None:
+                    vals[slot] = p
+                    filled += 1
+            days[day] = {"p": vals, "src": "derived"}
+        if filled:
+            _save_price_days(days)
+    return filled
+
+
+def price_history_info() -> dict:
+    with _PRICE_LOCK:
+        days = _price_days()
+        real = sum(1 for r in days.values() if r.get("src") == "tibber")
+        return {"days": len(days), "tibber_days": real, "derived_days": len(days) - real,
+                "first": min(days) if days else None, "last": max(days) if days else None}
+
+
+def price_history(days: int = 90) -> dict:
+    with _PRICE_LOCK:
+        d = _price_days()
+        return {k: d[k] for k in sorted(d)[-days:]}
+
+
+def energy_grid_charge_buckets(day: str) -> dict:
+    """{slot_key 'YYYY-MM-DDTHH:MM': gemessene Netz→Batterie-kWh} eines Tages.
+    Basis für die tatsächliche (statt geschätzte) Lademenge in den Ladevorgängen."""
+    hours = _load_history().get("hours", {})
+    return {k: round(b.get("g_batt", 0.0), 4) for k, b in hours.items() if k[:10] == day}
+
+
+def active_ev(now: datetime | None = None):
+    """Gibt den aktuell laufenden E-Auto-Termin zurück (oder None)."""
+    now = now or datetime.now()
+    for i in _load_ev():
+        if not i.get("enabled"):
+            continue
+        try:
+            s = datetime.fromisoformat(i["start"])
+            e = datetime.fromisoformat(i["end"])
+        except (ValueError, KeyError):
+            continue
+        if s <= now < e:
+            return i
+    return None
+
+
+# --- Batterie-Watchdog ------------------------------------------------------
+# Erkennt den Multiplus-Ladealgorithmus-Haenger vom 01.09.2026 (siehe Projekt-
+# Notiz): Batterie laedt/entlaedt praktisch nicht (|Strom| < 0.5 A), obwohl
+# gleichzeitig ein nennenswerter Netzfluss da ist (>150 W) - normalerweise
+# wuerde die Batterie mithelfen. Reine Erkennung + Protokollierung, KEIN
+# automatischer Eingriff (ein manueller ESS-Mode-Befehl blieb beim echten
+# Vorfall wirkungslos, nur ein physischer Reset half).
+def _load_watchdog() -> dict:
+    if os.path.exists(WATCHDOG_PATH):
+        with open(WATCHDOG_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    return {"active": False, "since": None, "notified": False,
+            "last_detail": None, "events": []}
+
+
+def battery_watchdog_update(is_frozen: bool, now: datetime, detail: dict,
+                            threshold_min: float = 15.0) -> dict:
+    """Fuehrt die Zustandsverfolgung fort und persistiert sie. Gibt zurueck,
+    ob der Aufrufer gerade jetzt warnen ('just_warned') bzw. Entwarnung geben
+    soll ('just_resolved', mit Episoden-Details oder None)."""
+    data = _load_watchdog()
+    result = {"just_warned": False, "just_resolved": None}
+    if is_frozen:
+        if not data.get("active"):
+            data["active"] = True
+            data["since"] = now.isoformat(timespec="seconds")
+            data["notified"] = False
+        data["last_detail"] = detail
+        since = datetime.fromisoformat(data["since"])
+        duration_min = (now - since).total_seconds() / 60.0
+        if not data.get("notified") and duration_min >= threshold_min:
+            data["notified"] = True
+            result["just_warned"] = True
+        result["duration_min"] = round(duration_min, 1)
+    else:
+        if data.get("active"):
+            since = datetime.fromisoformat(data["since"])
+            duration_min = (now - since).total_seconds() / 60.0
+            if data.get("notified"):
+                event = {"start": data["since"], "end": now.isoformat(timespec="seconds"),
+                         "duration_min": round(duration_min, 1), "detail": data.get("last_detail")}
+                events = [event] + data.get("events", [])
+                data["events"] = events[:50]
+                result["just_resolved"] = event
+        data["active"] = False
+        data["since"] = None
+        data["notified"] = False
+        data["last_detail"] = None
+    _dump_json(WATCHDOG_PATH, data, indent=2)
+    return result
+
+
+def battery_watchdog_state() -> dict:
+    """Fuer die UI/API: aktueller Zustand + juengste abgeschlossene Episoden."""
+    data = _load_watchdog()
+    status = {"active": bool(data.get("active")), "since": data.get("since"),
+              "detail": data.get("last_detail")}
+    if status["active"] and status["since"]:
+        try:
+            since = datetime.fromisoformat(status["since"])
+            status["duration_min"] = round((datetime.now() - since).total_seconds() / 60.0, 1)
+        except ValueError:
+            status["duration_min"] = None
+    return {"status": status, "events": data.get("events", [])[:20]}
 
 
 # --- Ladeplan-Simulation: Tages-Schnappschuss fuers Vergleichen ueber mehrere Tage ---------------

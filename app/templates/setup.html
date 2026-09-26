@@ -2,91 +2,393 @@
 {% block title %}Einrichtung{% endblock %}
 {% block content %}
 
-<div class="banner warn">Willkommen! Richte deine Anlage ein. Alle Werte kannst du
-später unter „Einstellungen" ändern.</div>
+<style>
+  .wiz-overlay { position: fixed; inset: 0; background: rgba(10,12,16,.72);
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+    z-index: 50; overflow-y: auto; }
+  .wiz-modal { background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    width: 100%; max-width: 620px; padding: 26px 26px 20px; margin: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,.4); }
+  .wiz-progress { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; }
+  .wiz-dot { flex: 1; height: 4px; border-radius: 999px; background: var(--border); }
+  .wiz-dot.done { background: var(--accent); }
+  .wiz-dot.active { background: var(--timer); }
+  .wiz-step-label { font-size: 12px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .05em; margin-bottom: 4px; }
+  .wiz-title { font-size: 20px; font-weight: 700; margin: 0 0 14px; }
+  .wiz-why { background: rgba(77,163,255,.1); border: 1px solid rgba(77,163,255,.25);
+    border-radius: 10px; padding: 12px 14px; font-size: 14px; line-height: 1.5;
+    margin-bottom: 18px; }
+  .wiz-why b { color: var(--accent); }
+  .wiz-body { min-height: 40px; }
+  .wiz-nav { display: flex; justify-content: space-between; align-items: center;
+    margin-top: 22px; gap: 10px; }
+  .wiz-step { display: none; }
+  .wiz-step.active { display: block; }
+  .wiz-intro { text-align: center; padding: 10px 0 4px; }
+  .wiz-intro .sun-big { font-size: 44px; }
+  .wiz-intro p { color: var(--muted); font-size: 15px; line-height: 1.6; margin: 14px 0; }
+</style>
 
-<div class="card">
-  <h2>1 · Victron Cerbo GX</h2>
-  <small class="hint">Am Cerbo unter Einstellungen → Dienste → Modbus TCP aktivieren.</small>
-  <div class="grid2">
-    <div><label>Cerbo IP-Adresse</label><input id="cerbo_host" value="{{ cfg.cerbo_host }}" placeholder="192.168.2.241"></div>
-    <div><label>Port</label><input id="cerbo_port" value="{{ cfg.cerbo_port }}"></div>
-  </div>
-  <details class="help">
-    <summary>Wie finde ich IP & Port, und wie aktiviere ich Modbus?</summary>
-    <div class="help-body">
-      Die App liest die Werte direkt vom Cerbo GX über das Netzwerk. Dafür muss am Cerbo einmalig Modbus TCP eingeschaltet sein.
-      <ol>
-        <li><b>Modbus aktivieren:</b> am Cerbo (oder im VRM/Remote Console) auf
-          <b>Einstellungen → Dienste → Modbus TCP</b> und den Schalter auf <b>AN</b>.</li>
-        <li><b>IP-Adresse finden:</b> unter <b>Einstellungen → Ethernet</b> (oder WLAN) steht die
-          <b>IP-Adresse</b>, z.B. <code>192.168.2.241</code>. Diese oben eintragen.</li>
-        <li><b>Port:</b> bleibt bei <code>502</code> (Modbus-Standard), nur ändern wenn du es bewusst umgestellt hast.</li>
-      </ol>
-      <span class="muted">Tipp: Gib dem Cerbo im Router eine feste IP, damit sie sich nicht ändert. Mit „Verbindung testen" unten prüfst du sofort, ob es klappt.</span>
+<div class="wiz-overlay">
+  <div class="wiz-modal">
+    <div class="wiz-progress" id="wiz-progress"></div>
+
+    <!-- Schritt 0: Willkommen -->
+    <div class="wiz-step active" data-step="0">
+      <div class="wiz-intro">
+        <div class="sun-big">🔆</div>
+        <h2 style="margin:14px 0 0">Willkommen bei der Victron Steuerung</h2>
+        <p>Dieser Assistent fragt dich Schritt für Schritt alle Angaben ab, die deine
+        Anlage braucht – jede Anlage ist anders (Batteriegröße, Wechselrichter-Typ,
+        Stromtarif), deshalb wird hier nichts automatisch angenommen.</p>
+        <p>Du kannst jederzeit zurückgehen und Werte ändern. Alles lässt sich später
+        auch unter „Einstellungen" anpassen.</p>
+      </div>
     </div>
-  </details>
-</div>
 
-<div class="card">
-  <h2>2 · Tibber</h2>
-  <small class="hint">Access-Token von developer.tibber.com.</small>
-  <label>Tibber Access Token</label>
-  <input id="tibber_token" value="{{ cfg.tibber_token }}" placeholder="Token einfügen">
-  <a class="help-link" href="https://developer.tibber.com/" target="_blank" rel="noopener">Token bei developer.tibber.com holen ↗</a>
-  <details class="help">
-    <summary>Wie komme ich an meinen Tibber Access Token?</summary>
-    <div class="help-body">
-      Der Token verbindet die App mit deinem Tibber-Konto, um die Strompreise abzurufen. So bekommst du ihn:
-      <ol>
-        <li>Öffne <b>developer.tibber.com</b> und melde dich mit deinem normalen <b>Tibber-Login</b> an.</li>
-        <li>Klicke oben auf <b>„API Explorer"</b> bzw. auf dein Profil.</li>
-        <li>Dort steht dein persönlicher <b>Access Token</b> – ein langer Zeichen-String.</li>
-        <li>Kopiere ihn komplett und füge ihn oben ein.</li>
-      </ol>
-      <span class="muted">Behandle den Token wie ein Passwort. Er wird nur lokal gespeichert.</span>
+    <!-- Schritt 1: Cerbo -->
+    <div class="wiz-step" data-step="1">
+      <div class="wiz-step-label">Verbindung zur Anlage</div>
+      <h2 class="wiz-title">Victron Cerbo GX</h2>
+      <div class="wiz-why">
+        <b>Warum?</b> Die App liest alle Live-Werte (SOC, Leistungen) direkt vom Cerbo
+        und schaltet darüber das Netzladen. Ohne IP-Adresse kann sie nichts sehen und
+        nichts steuern.
+      </div>
+      <div class="wiz-body">
+        <small class="hint">Am Cerbo unter Einstellungen → Dienste → Modbus TCP aktivieren.</small>
+        <div class="grid2">
+          <div><label>Cerbo IP-Adresse</label><input id="cerbo_host" value="{{ cfg.cerbo_host }}" placeholder="192.168.2.241"></div>
+          <div><label>Port</label><input id="cerbo_port" value="{{ cfg.cerbo_port }}"></div>
+        </div>
+        <details class="help">
+          <summary>Wie finde ich IP & Port, und wie aktiviere ich Modbus?</summary>
+          <div class="help-body">
+            <ol>
+              <li><b>Modbus aktivieren:</b> am Cerbo (oder im VRM/Remote Console) auf
+                <b>Einstellungen → Dienste → Modbus TCP</b> und den Schalter auf <b>AN</b>.</li>
+              <li><b>IP-Adresse finden:</b> unter <b>Einstellungen → Ethernet</b> (oder WLAN) steht die
+                <b>IP-Adresse</b>, z.B. <code>192.168.2.241</code>.</li>
+              <li><b>Port:</b> bleibt bei <code>502</code> (Modbus-Standard).</li>
+            </ol>
+            <span class="muted">Tipp: Gib dem Cerbo im Router eine feste IP, damit sie sich nicht ändert.</span>
+          </div>
+        </details>
+      </div>
     </div>
-  </details>
-</div>
 
-<div class="card">
-  <h2>3 · Victron VRM <span class="muted" style="font-size:13px;text-transform:none;letter-spacing:0">(Solar-Prognose, empfohlen)</span></h2>
-  <small class="hint">Die Sonnenprognose kommt vom Victron-Portal – Standort und Dachflächen musst du nicht eintragen. Auch später im Reiter „VRM“ nachholbar.</small>
-  <div class="grid2" style="margin-top:10px">
-    <div><label>Installations-ID</label><input id="vrm_inst" inputmode="numeric" placeholder="z. B. 844297" autocomplete="off"></div>
-    <div><label>Zugriffstoken</label><input id="vrm_token" type="password" autocomplete="new-password"></div>
-  </div>
-  <details class="help">
-    <summary>Wo finde ich die Zugangsdaten?</summary>
-    <div class="help-body">
-      <ol>
-        <li>Im <b>VRM-Portal</b> (vrm.victronenergy.com) anmelden → links <b>Präferenzen</b> → <b>Integrationen</b> → <b>Zugangs-Token</b> →
-          oben rechts <b>Hinzufügen</b>, einen Namen vergeben und den Token sofort kopieren.</li>
-        <li>Die <b>Installations-ID</b> findest du unter <b>Installationen</b> → deine Anlage → <b>Einstellungen</b> → <b>Allgemeines</b>
-          (Zeile „VRM-Installations-ID“, nicht die „Portal-ID“).</li>
-      </ol>
+    <!-- Schritt 2: Anlage & Speicher -->
+    <div class="wiz-step" data-step="2">
+      <div class="wiz-step-label">Anlagendaten</div>
+      <h2 class="wiz-title">Anlage & Speicher</h2>
+      <div class="wiz-why">
+        <b>Warum?</b> Diese Werte bestimmen, wie viel Energie noch in die Batterie passt,
+        wie schnell der Haushalt sie verbraucht und wie schnell aus dem Netz nachgeladen
+        werden kann.
+      </div>
+      <div class="wiz-body">
+        <div class="grid2">
+          <div><label>Nutzbare Batteriekapazität (kWh)</label><input id="battery_usable_kwh" value="{{ cfg.battery_usable_kwh or '' }}" placeholder="z.B. 10">
+            <small class="hint">Nicht die Nennkapazität aus dem Datenblatt – siehe unten.</small></div>
+          <div><label>Ø Tagesverbrauch Haushalt (kWh)</label><input id="daily_usage_kwh" value="{{ cfg.daily_usage_kwh or '' }}" placeholder="z.B. 15"></div>
+          <div><label>Ladelimit / max. SOC (%)</label><input id="max_charge_soc" value="{{ cfg.max_charge_soc or '' }}" placeholder="z.B. 90"></div>
+          <div><label>PV-Reserve (kWh)</label><input id="pv_reserve_kwh" value="{{ cfg.pv_reserve_kwh if cfg.pv_reserve_kwh is defined else '' }}" placeholder="z.B. 0">
+            <small class="hint">Nur bei dynamischem Tarif relevant. 0, wenn unsicher.</small></div>
+        </div>
+
+        <div class="grid2" style="margin-top:10px">
+          <div><label>Ladestrom beim Netzladen (A)</label><input id="charge_current_a" value="" placeholder="z.B. 70">
+            <small class="hint">VictronConnect/VEConfigure → Ladegerät → Ladestrom.</small></div>
+          <div><label>Batterie-Systemspannung (V)</label>
+            <select id="battery_voltage_v">
+              <option value="12">12 V</option>
+              <option value="24">24 V</option>
+              <option value="48" selected>48 V</option>
+            </select>
+            <small class="hint">Typenschild Multiplus/Quattro, z.B. „48/5000" = 48 V.</small></div>
+        </div>
+        <div class="muted" style="margin-top:8px;font-size:13px">
+          Ladeleistung: <b id="charge_power_preview">–</b> (automatisch berechnet)
+        </div>
+        <details class="help">
+          <summary>Wo finde ich diese Werte?</summary>
+          <div class="help-body">
+            <ol>
+              <li><b>Nutzbare Batteriekapazität:</b> gesucht ist die „Usable Capacity", nicht
+                die „Nominal/Nennkapazität" (die ist immer größer). Steht sie nicht im
+                Datenblatt: ca. 95 % der Nennkapazität ansetzen. Beispiel: Pylontech US5000 –
+                4,8 kWh nominal, 4,56 kWh nutzbar. Mehrere Batterien: Werte addieren.</li>
+              <li><b>Ø Tagesverbrauch:</b> Jahresverbrauch laut Stromrechnung ÷ 365.</li>
+              <li><b>Ladestrom:</b> VictronConnect/VEConfigure → Ladegerät → Ladestrom, in A
+                genauso eintragen. Die App rechnet selbst in Watt um. Unsicher? Lieber
+                niedriger schätzen (z.B. 40 statt 70 A) – dauert dann nur etwas länger,
+                statt dass die App zu optimistisch rechnet.</li>
+              <li><b>Batterie-Systemspannung:</b> Typenschild Multiplus/Quattro (z.B.
+                „48/5000" → 48 V). Bei den meisten Heimspeichern 48 V.</li>
+              <li><b>Ladelimit:</b> maximaler SOC, bis zu dem aus dem Netz geladen wird.
+                90 % ist ein üblicher Wert.</li>
+              <li><b>PV-Reserve:</b> Puffer, der beim Netzladen frei bleibt, damit mittags noch
+                Platz für Solarstrom ist. Wirkt nur bei dynamischem Tarif. Unsicher? 0 eintragen.</li>
+            </ol>
+          </div>
+        </details>
+      </div>
     </div>
-  </details>
-</div>
 
-<div class="card">
-  <div style="display:flex;gap:10px;flex-wrap:wrap">
-    <button class="ghost" id="btn-test">Verbindung testen</button>
-    <button id="btn-save">Speichern & starten</button>
+    <!-- Schritt 3: Geräte -->
+    <div class="wiz-step" data-step="3">
+      <div class="wiz-step-label">Hardware</div>
+      <h2 class="wiz-title">Solarerzeugung – welche Geräte hast du?</h2>
+      <div class="wiz-why">
+        <b>Warum?</b> Die App liest am Cerbo nur die Register der Geräte, die du hier
+        ankreuzt. Nicht jede Anlage hat beides – wird ein nicht vorhandenes Gerät
+        trotzdem abgefragt, gibt es Fehler oder falsche Werte.
+      </div>
+      <div class="wiz-body">
+        <div class="grid2">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:normal">
+            <input type="checkbox" id="has_pv_inverter" style="width:auto"> PV-Wechselrichter (AC-gekoppelt)
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-weight:normal">
+            <input type="checkbox" id="has_mppt" style="width:auto"> MPPT-Solarladeregler (DC-gekoppelt)
+          </label>
+        </div>
+        <details class="help">
+          <summary>Wie finde ich heraus, was ich habe?</summary>
+          <div class="help-body">
+            <ol>
+              <li><b>PV-Wechselrichter (AC-gekoppelt):</b> eigener Wechselrichter für die
+                Solarmodule, liefert Wechselstrom.</li>
+              <li><b>MPPT-Solarladeregler (DC-gekoppelt):</b> Module hängen direkt über einen
+                Victron-MPPT-Laderegler an der Batterie.</li>
+              <li>Beides möglich (Hybrid-Anlage) – dann beide ankreuzen. Keine Solaranlage?
+                Beide leer lassen.</li>
+            </ol>
+            <span class="muted">Victron Remote Console/VRM → Geräteliste zeigt, was am Cerbo
+            angemeldet ist.</span>
+          </div>
+        </details>
+
+        <div id="pv-inverters-block" style="margin-top:18px">
+          <label>Mehrere PV-Wechselrichter einzeln anzeigen <span class="muted" style="font-weight:normal">(optional)</span></label>
+          <small class="hint">Für getrennte Anzeige im Dashboard: Name + Geräte-Instanz je
+          Wechselrichter eintragen.</small>
+          <details class="help">
+            <summary>Was ist die „Geräte-Instanz"?</summary>
+            <div class="help-body">
+              Jedes Gerät am Cerbo hat eine Geräte-Instanz-Nummer: Victron Remote Console/VRM
+              → Geräteliste → Wechselrichter → Gerät → Instanz.
+              <span class="muted">Ohne Eintrag zeigt das Dashboard die Gesamtsumme.</span>
+            </div>
+          </details>
+          <div id="pv-inverter-rows" style="margin-top:10px"></div>
+          <button class="ghost" onclick="addPvInverter()" type="button">+ Wechselrichter</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Schritt 4: Stromtarif -->
+    <div class="wiz-step" data-step="4">
+      <div class="wiz-step-label">Kosten</div>
+      <h2 class="wiz-title">Stromtarif</h2>
+      <div class="wiz-why">
+        <b>Warum?</b> Bestimmt, ob die App gezielt zu günstigen Zeiten aus dem Netz
+        lädt (dynamischer Tarif) oder ob sich Netzladen preislich nie lohnt und nur
+        noch PV-Vorrang + Ladelimit gefahren werden (fester Vertrag).
+      </div>
+      <div class="wiz-body">
+        <div class="grid2">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:normal">
+            <input type="radio" name="tariff_mode" id="tariff_tibber" value="tibber" style="width:auto"> Dynamischer Tarif (Tibber)
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-weight:normal">
+            <input type="radio" name="tariff_mode" id="tariff_fixed" value="fixed" style="width:auto"> Normaler Vertrag (fester Preis)
+          </label>
+        </div>
+
+        <div id="tariff-tibber-fields" style="margin-top:12px">
+          <label>Tibber Access Token</label>
+          <input id="tibber_token" value="{{ cfg.tibber_token }}" placeholder="Token einfügen">
+          <a class="help-link" href="https://developer.tibber.com/" target="_blank" rel="noopener">Token bei developer.tibber.com holen ↗</a>
+          <details class="help">
+            <summary>Wie komme ich an meinen Tibber Access Token?</summary>
+            <div class="help-body">
+              <ol>
+                <li>Öffne <b>developer.tibber.com</b> und melde dich mit deinem normalen <b>Tibber-Login</b> an.</li>
+                <li>Klicke oben auf <b>„API Explorer"</b> bzw. auf dein Profil.</li>
+                <li>Dort steht dein persönlicher <b>Access Token</b>.</li>
+                <li>Kopiere ihn komplett und füge ihn oben ein.</li>
+              </ol>
+              <span class="muted">Behandle den Token wie ein Passwort. Er wird nur lokal gespeichert.</span>
+            </div>
+          </details>
+        </div>
+
+        <div id="tariff-fixed-fields" style="margin-top:12px">
+          <label>Preis pro kWh (ct, Bruttopreis laut Vertrag/Rechnung)</label>
+          <input id="fixed_price_ct" value="{{ cfg.fixed_price_ct or '' }}" placeholder="z.B. 32,5">
+          <details class="help">
+            <summary>Was bedeutet das bei einem festen Tarif?</summary>
+            <div class="help-body">
+              Ohne Preisunterschiede über den Tag lädt die App <b>nie von sich aus aus dem
+              Netz</b>. Die Batterie lädt nur aus PV, den Rest übernimmt der Wechselrichter
+              normal. Ladelimit und Sofort-Override funktionieren unverändert.
+            </div>
+          </details>
+        </div>
+      </div>
+    </div>
+
+    <!-- Schritt 5: Victron VRM (Solar-Prognose) -->
+    <div class="wiz-step" data-step="5">
+      <div class="wiz-step-label">PV-Prognose</div>
+      <h2 class="wiz-title">Victron VRM <span class="muted" style="font-size:13px;text-transform:none;letter-spacing:0">(empfohlen)</span></h2>
+      <div class="wiz-why">
+        <b>Warum?</b> Wie viel Sonne heute und morgen kommt, holt die App vom Victron-Portal (VRM). Das VRM lernt aus dem Ertragsverlauf deiner
+        Anlage – Standort, Dachflächen und Neigung musst du nicht eintragen. Ohne VRM rechnet die Steuerung mit dem Durchschnitt deiner
+        letzten Tageserträge. Du kannst das auch später in den Einstellungen (Reiter „VRM“) nachholen.
+      </div>
+      <div class="wiz-body">
+        <div class="grid2">
+          <div><label>Installations-ID</label><input id="vrm_inst" inputmode="numeric" placeholder="z. B. 844297" autocomplete="off"></div>
+          <div><label>Zugriffstoken</label><input id="vrm_token" type="password" autocomplete="new-password"></div>
+        </div>
+        <details class="help">
+          <summary>Wo finde ich die Zugangsdaten?</summary>
+          <div class="help-body">
+            <ol>
+              <li>Im <b>VRM-Portal</b> (vrm.victronenergy.com) anmelden → links <b>Präferenzen</b> → <b>Integrationen</b> → <b>Zugangs-Token</b> →
+                oben rechts <b>Hinzufügen</b>, einen Namen vergeben und den Token sofort kopieren.</li>
+              <li>Die <b>Installations-ID</b> findest du unter <b>Installationen</b> → deine Anlage → <b>Einstellungen</b> → <b>Allgemeines</b>
+                (Zeile „VRM-Installations-ID“, nicht die „Portal-ID“).</li>
+            </ol>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <!-- Schritt 6: Test & Speichern -->
+    <div class="wiz-step" data-step="6">
+      <div class="wiz-step-label">Letzter Schritt</div>
+      <h2 class="wiz-title">Verbindung testen & starten</h2>
+      <div class="wiz-why">
+        <b>Warum?</b> Bevor die App scharf geschaltet wird, prüfen wir, ob Cerbo und
+        Strompreis-Quelle mit deinen Angaben tatsächlich erreichbar sind – so siehst
+        du Tippfehler sofort, statt sie erst im Live-Betrieb zu bemerken.
+      </div>
+      <div class="wiz-body">
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="ghost" id="btn-test" type="button">Verbindung testen</button>
+        </div>
+        <div id="test-result" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <div class="wiz-nav">
+      <button class="ghost" id="wiz-back" type="button">← Zurück</button>
+      <span class="muted" id="wiz-counter" style="font-size:13px"></span>
+      <button id="wiz-next" type="button">Weiter →</button>
+    </div>
   </div>
-  <div id="test-result" style="margin-top:12px"></div>
 </div>
 
 {% endblock %}
 {% block scripts %}
 <script>
+const STEP_COUNT = 7;   // 0..6
+let step = 0;
 // Komma ODER Punkt als Dezimaltrenner akzeptieren (parseFloat("0,6") wäre sonst 0)
 const numDE = v => parseFloat(String(v).replace(',', '.'));
+
+function renderProgress() {
+  const el = document.getElementById('wiz-progress');
+  el.innerHTML = '';
+  for (let i = 0; i < STEP_COUNT; i++) {
+    const d = document.createElement('div');
+    d.className = 'wiz-dot' + (i < step ? ' done' : (i === step ? ' active' : ''));
+    el.appendChild(d);
+  }
+}
+
+function showStep(n) {
+  step = Math.max(0, Math.min(STEP_COUNT - 1, n));
+  document.querySelectorAll('.wiz-step').forEach(s => {
+    s.classList.toggle('active', parseInt(s.dataset.step) === step);
+  });
+  document.getElementById('wiz-back').style.visibility = step === 0 ? 'hidden' : 'visible';
+  document.getElementById('wiz-counter').textContent = `Schritt ${step + 1} von ${STEP_COUNT}`;
+  const nextBtn = document.getElementById('wiz-next');
+  nextBtn.textContent = step === STEP_COUNT - 1 ? 'Speichern & starten' : 'Weiter →';
+  renderProgress();
+  window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
+}
+
+document.getElementById('wiz-back').addEventListener('click', () => showStep(step - 1));
+document.getElementById('wiz-next').addEventListener('click', async () => {
+  if (step === STEP_COUNT - 1) {
+    await doSave();
+  } else {
+    showStep(step + 1);
+  }
+});
+
+document.getElementById('has_pv_inverter').checked = {{ (cfg.has_pv_inverter if cfg.has_pv_inverter is defined else true) | tojson }};
+document.getElementById('has_mppt').checked = {{ (cfg.has_mppt if cfg.has_mppt is defined else true) | tojson }};
+
+// Stromtarif: Radios vorbefüllen + Felder je nach Auswahl ein-/ausblenden
+const tariffMode = {{ (cfg.tariff_mode if cfg.tariff_mode is defined else 'tibber') | tojson }};
+document.getElementById(tariffMode === 'fixed' ? 'tariff_fixed' : 'tariff_tibber').checked = true;
+function updateTariffFields() {
+  const fixed = document.getElementById('tariff_fixed').checked;
+  document.getElementById('tariff-tibber-fields').hidden = fixed;
+  document.getElementById('tariff-fixed-fields').hidden = !fixed;
+}
+document.querySelectorAll('input[name="tariff_mode"]').forEach(r => r.addEventListener('change', updateTariffFields));
+updateTariffFields();
+
+const initialPvInverters = {{ cfg.pv_inverters | tojson }};
+function pvInverterRow(p = {}) {
+  const d = document.createElement('div'); d.className = 'plane-row';
+  d.style.gridTemplateColumns = '1.4fr 1fr auto';
+  d.innerHTML = `
+    <div><label>Name</label><input class="pvi-name" value="${p.name||''}" placeholder="z.B. PV-1100"></div>
+    <div><label>Geräte-Instanz</label><input class="pvi-unit" value="${p.unit??''}" placeholder="z.B. 80"></div>
+    <button class="danger" type="button" onclick="this.parentElement.remove()">✕</button>`;
+  return d;
+}
+function addPvInverter(p) { document.getElementById('pv-inverter-rows').appendChild(pvInverterRow(p)); }
+initialPvInverters.forEach(addPvInverter);
+function collectPvInverters() {
+  return [...document.querySelectorAll('#pv-inverter-rows .plane-row')].map(r => ({
+    name: r.querySelector('.pvi-name').value.trim(),
+    unit: parseInt(r.querySelector('.pvi-unit').value),
+  })).filter(p => p.name && !isNaN(p.unit));
+}
+
+function updateChargePowerPreview() {
+  const a = numDE(document.getElementById('charge_current_a').value);
+  const v = parseInt(document.getElementById('battery_voltage_v').value);
+  const el = document.getElementById('charge_power_preview');
+  el.textContent = (!isNaN(a) && a > 0) ? `${Math.round(a * v)} W (${a} A × ${v} V)` : '–';
+}
+document.getElementById('charge_current_a').addEventListener('input', updateChargePowerPreview);
+document.getElementById('battery_voltage_v').addEventListener('change', updateChargePowerPreview);
 function collect() {
   return {
     cerbo_host: document.getElementById('cerbo_host').value.trim(),
     cerbo_port: parseInt(document.getElementById('cerbo_port').value) || 502,
+    battery_usable_kwh: numDE(document.getElementById('battery_usable_kwh').value),
+    daily_usage_kwh: numDE(document.getElementById('daily_usage_kwh').value),
+    charge_power_w: Math.round(numDE(document.getElementById('charge_current_a').value) * parseInt(document.getElementById('battery_voltage_v').value)),
+    max_charge_soc: numDE(document.getElementById('max_charge_soc').value),
+    pv_reserve_kwh: numDE(document.getElementById('pv_reserve_kwh').value),
+    has_pv_inverter: document.getElementById('has_pv_inverter').checked,
+    has_mppt: document.getElementById('has_mppt').checked,
+    pv_inverters: collectPvInverters(),
+    tariff_mode: document.getElementById('tariff_fixed').checked ? 'fixed' : 'tibber',
     tibber_token: document.getElementById('tibber_token').value.trim(),
+    fixed_price_ct: numDE(document.getElementById('fixed_price_ct').value),
   };
 }
 
@@ -99,10 +401,10 @@ document.getElementById('btn-test').addEventListener('click', async () => {
   const line = (name, x) => x.ok
     ? `<div class="banner" style="background:rgba(63,185,80,.12);color:#3fb950">${name}: OK ${x.soc!==undefined?('· SOC '+x.soc+'%'):''}${x.slots!==undefined?('· '+x.slots+' Preis-Slots'):''}</div>`
     : `<div class="banner err">${name}: ${x.error}</div>`;
-  el.innerHTML = line('Cerbo', d.cerbo) + line('Tibber', d.tibber);
+  el.innerHTML = line('Cerbo', d.cerbo) + line(c.tariff_mode === 'fixed' ? 'Stromtarif' : 'Tibber', d.tibber);
 });
 
-document.getElementById('btn-save').addEventListener('click', async () => {
+async function doSave() {
   const r = await fetch('/api/config', {method:'POST',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify(collect())});
   const d = await r.json();
@@ -115,7 +417,9 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     }
     location.href = '/';
   } else document.getElementById('test-result').innerHTML =
-    '<div class="banner err">Noch unvollständig – bitte alle Felder ausfüllen.</div>';
-});
+    '<div class="banner err">Noch unvollständig – bitte Cerbo-IP und Stromtarif prüfen.</div>';
+}
+
+showStep(0);
 </script>
 {% endblock %}

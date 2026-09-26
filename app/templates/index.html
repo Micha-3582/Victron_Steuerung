@@ -71,9 +71,9 @@
 </div>
 
   <div class="card" id="tibber-card">
-    <h2>Tibber</h2>
+    <h2 id="strategy-card-title">Strompreis</h2>
     <div class="row">
-      <div class="metric"><div class="val" id="price">–</div><div class="lbl">Preis jetzt (ct/kWh)</div></div>
+      <div class="metric" id="price-tile"><div class="val" id="price">–</div><div class="lbl">Preis jetzt (ct/kWh)</div></div>
       <div class="metric"><div class="val" id="mode">–</div><div class="lbl">ESS-Modus</div></div>
     </div>
     <div style="margin-top:14px" id="strategy"></div>
@@ -86,7 +86,7 @@
       <label class="switch" style="margin:0">
         <input type="checkbox" id="override"><span class="slider"></span>
       </label>
-      <div class="muted">Erzwingt Netzladen, unabhängig vom Preis. Zum Beenden wieder ausschalten.</div>
+      <div class="muted" id="override-hint">Erzwingt Netzladen, unabhängig vom Preis. Zum Beenden wieder ausschalten.</div>
     </div>
     <div class="muted" id="override-note" style="margin-top:10px"></div>
   </div>
@@ -219,6 +219,8 @@ const LEVEL_COLORS = {
 };
 // Jede Dashboard-Kachel einzeln ein-/ausblendbar (Einstellungen -> Kacheln),
 // Schluessel muessen exakt zu den ui.show_*-Feldern aus /api/status passen.
+// (show_tibber_card wird bei festem Tarif zusaetzlich in den Admin-Einstellungen
+// gesperrt/ausgegraut - siehe admin.html updateTariffFields.)
 const TILE_IDS = {
   show_live_values: 'live-card', show_energy_chart: 'energy-card',
   show_flow_chart: 'flow-card', show_week_overview: 'week-card',
@@ -236,8 +238,8 @@ let shellyEnabled = true, weatherEnabled = true, plansimEnabled = true;
 function applyTileVisibility(ui) {
   applyTileOrder(ui.tile_order);
   shellyEnabled = ui.show_shelly_card !== false;
-  if (plansimEnabled !== (ui.show_plansim_card !== false)) { plansimEnabled = ui.show_plansim_card !== false; if (typeof loadPlansim === 'function') loadPlansim(); }
   if (weatherEnabled !== (ui.show_weather_card !== false)) { weatherEnabled = ui.show_weather_card !== false; if (typeof loadWeather === 'function') loadWeather(); }
+  if (plansimEnabled !== (ui.show_plansim_card !== false)) { plansimEnabled = ui.show_plansim_card !== false; if (typeof loadPlansim === 'function') loadPlansim(); }
   for (const [key, id] of Object.entries(TILE_IDS)) {
     const el = $(id);
     if (el) el.hidden = ui[key] === false;
@@ -740,6 +742,22 @@ async function load() {
 
   if (s.ok) {
     chargePowerW = s.charge_power_w || 3500;
+    // Fester Tarif: kein Preis-Timing, kein Ladeplan - der ganze
+    // preisbezogene UI-Teil (Kurve, Markieren, manuelle Ladetermine per
+    // Drag) waere ohne echte dynamische Preise nur eine leere Huelle.
+    // Dashboard bleibt dann reines Live-Monitoring.
+    const isFixedTariff = s.tariff_mode === 'fixed';
+    // Fester Tarif erzwingt das Ausblenden zusaetzlich zur Kachel-Einstellung
+    // (die eigene .hidden-Vorbelegung aus applyTileVisibility() oben wird nur
+    // per ODER verschaerft, nicht ueberschrieben - eine bewusst ausgeblendete
+    // Kachel bleibt also auch bei dynamischem Tarif ausgeblendet).
+    $('price-plan-card').hidden = isFixedTariff || $('price-plan-card').hidden;
+    $('ev-card').hidden = isFixedTariff || $('ev-card').hidden;
+    $('price-tile').hidden = isFixedTariff;
+    $('strategy-card-title').textContent = isFixedTariff ? 'Status' : 'Strompreis';
+    $('override-hint').textContent = isFixedTariff
+      ? 'Erzwingt Netzladen. Zum Beenden wieder ausschalten.'
+      : 'Erzwingt Netzladen, unabhängig vom Preis. Zum Beenden wieder ausschalten.';
     const priceEl = $('price'); priceEl.textContent = s.now_price;
     // exakt die aktuelle Viertelstunde matchen (HH:MM), nicht nur die Stunde,
     // damit die Zahl dieselbe Ampelfarbe wie der aktuelle Balken hat
@@ -750,8 +768,13 @@ async function load() {
     $('strategy').innerHTML = `<span class="pill amber">${s.strategy}</span>` +
       (s.ev_active ? ` <span class="pill green">Ladetermin läuft</span>` : '');
     // "Bilanz" als Klartext: reicht der Strom bis zum nächsten Mittag oder fehlt was?
+    // Bei festem Tarif ist eine NEGATIVE Bilanz kein Hinweis auf irgendeine Aktion (es
+    // gibt kein "guenstig nachladen") und suggeriert mit dem Warn-Symbol faelschlich ein
+    // Problem, wo keins ist - Netzbezug kostet ja so oder so immer gleich viel. Deshalb
+    // wird die Zeile in dem Fall komplett weggelassen, nicht nur umformuliert.
     const bal = Number(s.balance);
     const ok = bal >= 0;
+    const showBalance = ok || !isFixedTariff;
     // Konkret benennen, welcher Mittag gemeint ist: vor 12 Uhr = heute, ab 12 = morgen
     // (identisch zur Horizont-Logik im Backend: nächster 12-Uhr-Punkt).
     const nowH = parseInt((nowIso || '').slice(11, 13), 10);
@@ -763,8 +786,10 @@ async function load() {
       + 'Positiv = Überschuss, es muss nichts extra aus dem Netz geladen werden. '
       + 'Negativ = so viel fehlt und wird in den günstigsten Viertelstunden nachgeladen.';
     $('meta').innerHTML =
-      `<div style="font-size:15px;font-weight:600;color:${ok ? 'var(--cheap)' : 'var(--exp)'}" title="${tip}">`
-      + `${ok ? '✓' : '⚠'} ${balTxt} <span style="opacity:.55;font-weight:400;cursor:help">ⓘ</span></div>`
+      (showBalance
+        ? `<div style="font-size:15px;font-weight:600;color:${ok ? 'var(--cheap)' : 'var(--exp)'}" title="${tip}">`
+          + `${ok ? '✓' : '⚠'} ${balTxt} <span style="opacity:.55;font-weight:400;cursor:help">ⓘ</span></div>`
+        : '')
       + `<div class="muted" style="margin-top:4px">Sonne (${s.pv_source || '–'}) heute ${pvRangeTxt(s.pv_today, s.pv_today_range)} / `
       + `morgen ${pvRangeTxt(s.pv_tom, s.pv_tom_range)} kWh · Stand ${d.last_tick || '–'}`
       + (s.pv_note ? ` · ⚠ ${s.pv_note}` : '') + `</div>`;
@@ -792,21 +817,24 @@ function pvRangeTxt(point, range) {
 function w(v) { return (v > 0 ? '+' : '') + Math.round(v) + ' W'; }
 function kv(rows) { return rows.map(r => `<div class="kv"><span class="k">${r[0]}</span><span class="v">${r[1]}</span></div>`).join(''); }
 function phases(o) { return kv([['L1', Math.round(o.l1) + ' W'], ['L2', Math.round(o.l2) + ' W'], ['L3', Math.round(o.l3) + ' W']]); }
-let tileDragActive = false;   // waehrend Verschieben: renderSystem() pausieren
+let tileDragActive = false;   // waehrend des Verschiebens keine Neuaufbauten durch loadLive()
+
 function getTileOrder() {
-  try { return JSON.parse(localStorage.getItem('sysTileOrder')) || []; } catch (e) { return []; }
+  try { return JSON.parse(localStorage.getItem('sysTileOrder') || '[]'); } catch (e) { return []; }
 }
 function saveTileOrder(order) {
   try { localStorage.setItem('sysTileOrder', JSON.stringify(order)); } catch (e) { /* egal, nur Komfort */ }
 }
 
-function renderSystem(sys, batteryUsableKwh) {
+function renderSystem(sys, hasInv, hasMppt, pvSources, batteryUsableKwh) {
   if (tileDragActive) return;   // Nutzer verschiebt gerade eine Kachel - nicht dazwischenfunken
   const g = $('sysgrid');
   if (!sys) { g.innerHTML = '<div class="muted">Keine Verbindung zum Cerbo.</div>'; return; }
   const b = sys.battery;
   const stateTxt = { 0: 'Ruhe', 1: 'Laden', 2: 'Entladen' }[b.state] || '–';
   const gridColor = sys.grid.total > 5 ? 'var(--vexp)' : (sys.grid.total < -5 ? 'var(--cheap)' : 'var(--fg)');
+  // Jede Kachel bekommt eine stabile ID (data-tile-id), damit die vom Nutzer per
+  // Drag festgelegte Reihenfolge ueber Neuaufbauten hinweg erhalten bleibt.
   const tiles = [];
   const tile = (id, title, big, sub, color) => tiles.push({ id, html: `
     <div class="systile" data-tile-id="${id}">
@@ -815,11 +843,29 @@ function renderSystem(sys, batteryUsableKwh) {
       <div class="systile-s">${sub || ''}</div>
     </div>` });
   const sun = '<span class="sun-ico">☀︎</span>';
+  hasInv = hasInv !== false;
+  hasMppt = hasMppt !== false;
+  pvSources = pvSources || [];
+  const solarLabel = hasInv && hasMppt ? 'PV-WR + MPPT' : (hasInv ? 'PV-WR' : (hasMppt ? 'MPPT' : '–'));
+
   tile('grid', '⚡ Netz', w(sys.grid.total), phases(sys.grid), gridColor);
   tile('loads', '🏠 Gesamtverbrauch', Math.round(sys.loads.total) + ' W', phases(sys.loads), '#e0761f');
-  tile('pv_inverter', sun + ' PV-Wechselrichter', Math.round(sys.pv_inverter.total) + ' W', phases(sys.pv_inverter), 'var(--timer)');
-  tile('mppt', sun + ' PV-Ladegerät (MPPT)', Math.round(sys.pv_charger) + ' W', kv([['DC-Strom', sys.pv_charger_current.toFixed(1) + ' A']]), 'var(--timer)');
-  tile('solar_total', sun + ' Gesamt Solar', Math.round(sys.solar_total) + ' W', kv([['Quelle', 'PV-WR + MPPT']]), 'var(--timer)');
+  if (pvSources.length) {
+    // Jeder benannte Wechselrichter einzeln - die Summe steht schon in der
+    // "Gesamt Solar"-Kachel weiter unten, eine eigene Summenkachel wäre hier
+    // nur eine Wiederholung derselben Zahl (bzw. + MPPT-Anteil).
+    pvSources.forEach((s, i) => {
+      tile('pvsrc_' + (s.unit ?? i), sun + ' ' + s.name,
+        s.power === null ? '–' : Math.round(s.power) + ' W',
+        s.power === null ? 'nicht erreichbar' : '', 'var(--timer)');
+    });
+  } else if (hasInv) {
+    tile('pv_inverter', sun + ' PV-Wechselrichter', Math.round(sys.pv_inverter.total) + ' W', phases(sys.pv_inverter), 'var(--timer)');
+  }
+  if (hasMppt) {
+    tile('mppt', sun + ' PV-Ladegerät (MPPT)', Math.round(sys.pv_charger) + ' W', kv([['DC-Strom', sys.pv_charger_current.toFixed(1) + ' A']]), 'var(--timer)');
+  }
+  tile('solar_total', sun + ' Gesamt Solar', Math.round(sys.solar_total) + ' W', kv([['Quelle', solarLabel]]), 'var(--timer)');
   const kwhInfo = batteryUsableKwh > 0
     ? [['Geladen', (batteryUsableKwh * b.soc / 100).toFixed(1) + ' kWh']] : [];
   tile('battery', '🔋 Batterie', b.soc + ' %',
@@ -827,7 +873,8 @@ function renderSystem(sys, batteryUsableKwh) {
        b.state === 1 ? 'var(--cheap)' : (b.state === 2 ? 'var(--exp)' : 'var(--fg)'));
 
   // Gespeicherte Reihenfolge anwenden: bekannte IDs zuerst in gemerkter
-  // Reihenfolge, neue/unbekannte IDs haengen sich hinten an.
+  // Reihenfolge, neue/unbekannte IDs (z.B. ein frisch hinzugefuegter
+  // Wechselrichter) haengen sich hinten in ihrer Standardreihenfolge an.
   const order = getTileOrder();
   tiles.sort((a, b2) => {
     const ia = order.indexOf(a.id), ib = order.indexOf(b2.id);
@@ -1028,7 +1075,7 @@ async function loadLive() {
   try {
     const l = await (await fetch('/api/live')).json();
     if (!l.ok) return;
-    renderSystem(l.system, l.battery_usable_kwh);
+    renderSystem(l.system, l.has_pv_inverter, l.has_mppt, l.pv_sources, l.battery_usable_kwh);
   } catch (e) { /* still */ }
 }
 
@@ -1188,8 +1235,9 @@ function renderWeek(data) {
   $('w-range').textContent = weekOffset === 0 ? 'Diese Woche'
     : first.slice(8, 10) + '.' + first.slice(5, 7) + '. – ' + last.slice(8, 10) + '.' + last.slice(5, 7) + '.';
   if (!data || !data.days || !data.days.length) { t.innerHTML = ''; return; }
+  const showCost = data.tariff_mode !== 'fixed' || data.totals.cost_eur > 0;
   const head = `<tr class="thead"><td>Tag</td><td>Solar</td><td>Verbrauch</td>` +
-    `<td>Netzbezug</td><td>Autarkie</td><td>Kosten</td></tr>`;
+    `<td>Netzbezug</td><td>Autarkie</td>${showCost ? '<td>Kosten</td>' : ''}</tr>`;
   // "Heute" ist per Konstruktion immer der letzte Tag der aktuellen Woche
   // (offset 0) - nicht ueber Datumsvergleich mit der (evtl. im Hintergrund
   // veralteten) Browser-Uhr ermitteln, das lief nach Mitternacht sonst
@@ -1204,7 +1252,7 @@ function renderWeek(data) {
       <td>${d.verbrauch.toFixed(1)} kWh</td>
       <td>${d.import.toFixed(1)} kWh</td>
       <td>${d.autarky != null ? Math.round(d.autarky) + ' %' : '–'}</td>
-      <td>${d.cost_eur.toFixed(2)} €</td>
+      ${showCost ? `<td>${d.cost_eur.toFixed(2)} €</td>` : ''}
     </tr>`;
   }).join('');
   const tot = data.totals;
@@ -1214,7 +1262,7 @@ function renderWeek(data) {
     <td>${tot.verbrauch.toFixed(1)} kWh</td>
     <td>${tot.import.toFixed(1)} kWh</td>
     <td>${tot.autarky != null ? Math.round(tot.autarky) + ' %' : '–'}</td>
-    <td>${tot.cost_eur.toFixed(2)} €</td>
+    ${showCost ? `<td>${tot.cost_eur.toFixed(2)} €</td>` : ''}
   </tr>`;
   t.innerHTML = head + rows + totalRow;
   markWeekRow();
@@ -1246,8 +1294,9 @@ function renderMonth(data) {
   const t = $('month-table');
   const rows = (data && data.months) || [];
   if (!rows.length) { t.innerHTML = ''; return; }
+  const anyCost = data.tariff_mode !== 'fixed' || rows.some(m => m.cost_eur > 0);
   const head = `<tr class="thead"><td>Monat</td><td>Solar</td><td>Verbrauch</td>` +
-    `<td>Netzbezug</td><td>Autarkie</td><td>Kosten</td></tr>`;
+    `<td>Netzbezug</td><td>Autarkie</td>${anyCost ? '<td>Kosten</td>' : ''}</tr>`;
   // Zeilen sind neuester Monat zuerst - je Jahr eine "Summe <Jahr>"-Zwischensumme
   // einfuegen, sobald das Jahr wechselt (bzw. am Ende fuer das letzte/aelteste Jahr).
   const yearRow = (year, acc) => {
@@ -1259,7 +1308,7 @@ function renderMonth(data) {
       <td>${acc.verbrauch.toFixed(1)} kWh</td>
       <td>${acc.import.toFixed(1)} kWh</td>
       <td>${autarky != null ? autarky + ' %' : '–'}</td>
-      <td>${acc.cost_eur.toFixed(2)} €</td>
+      ${anyCost ? `<td>${acc.cost_eur.toFixed(2)} €</td>` : ''}
     </tr>`;
   };
   let body = '', curYear = null, acc = null;
@@ -1275,7 +1324,7 @@ function renderMonth(data) {
       <td>${m.verbrauch.toFixed(1)} kWh</td>
       <td>${m.import.toFixed(1)} kWh</td>
       <td>${m.autarky != null ? Math.round(m.autarky) + ' %' : '–'}</td>
-      <td>${m.cost_eur.toFixed(2)} €</td>
+      ${anyCost ? `<td>${m.cost_eur.toFixed(2)} €</td>` : ''}
     </tr>`;
   });
   if (acc) body += yearRow(curYear, acc);

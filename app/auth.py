@@ -78,6 +78,11 @@ class UserStore:
             self._sync()
             return not self._users
 
+    def usernames(self) -> list[str]:
+        with self._lock:
+            self._sync()
+            return [u["username"] for u in self._users.values()]
+
     def verify(self, username: str, password: str):
         """Gibt den Benutzer zurueck oder None. Aktualisiert last_login."""
         with self._lock:
@@ -124,28 +129,26 @@ class UserStore:
             self._write()
             return dict(user)
 
-    def ensure_initial_user(self, username: str, data_dir: str) -> str | None:
-        """Legt beim allerersten Start den einzigen Benutzer mit Zufallspasswort an.
+    def rename(self, old_username: str, new_username: str) -> dict:
+        """Aendert den Benutzernamen (Passwort-Hash bleibt erhalten)."""
+        old_key = _norm(old_username)
+        new_key = _norm(new_username)
+        if not new_key:
+            raise UserError("Benutzername darf nicht leer sein.")
+        with self._lock:
+            self._sync()
+            user = self._users.get(old_key)
+            if not user:
+                raise UserError("Benutzer nicht gefunden.")
+            if new_key != old_key and new_key in self._users:
+                raise UserError("Benutzername ist bereits vergeben.")
+            user["username"] = new_username.strip()
+            if new_key != old_key:
+                del self._users[old_key]
+                self._users[new_key] = user
+            self._write()
+            return dict(user)
 
-        Gibt das Klartext-Passwort zurueck (nur dieses eine Mal), sonst None.
-        """
-        if not self.is_empty():
-            return None
-        password = secrets.token_urlsafe(12)
-        self.create(username, password)
-        note = os.path.join(data_dir, "initial-password.txt")
-        try:
-            with open(note, "w", encoding="utf-8") as fh:
-                fh.write(
-                    "Victron Steuerung -- Zugangsdaten beim Erststart\n"
-                    f"Benutzer: {username}\n"
-                    f"Passwort: {password}\n\n"
-                    "Bitte nach der ersten Anmeldung unter Einstellungen das Passwort\n"
-                    "aendern und diese Datei loeschen.\n"
-                )
-        except OSError:
-            pass
-        return password
 
 
 def new_secret_key(path: str) -> bytes:

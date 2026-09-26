@@ -37,6 +37,8 @@
 
 <div class="tabbar" id="tabbar"></div>
 
+<div id="tab-settings">
+
 <div class="card">
   <h2><svg class="h2i" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>App-Version & Update</h2>
   <div class="muted">Installierte Version: <b id="app-version">…</b></div>
@@ -49,27 +51,26 @@
   <details class="help">
     <summary>Wie funktioniert das Update?</summary>
     <div class="help-body">
-      Die App holt sich neue Versionen direkt von GitHub. Deine persönlichen Einstellungen
-      (Cerbo-IP, Tibber-Token, Parameter, Termine, Zählerstände) bleiben dabei <b>erhalten</b> –
-      aktualisiert wird nur der Programmcode.
+      Holt neue Versionen von GitHub. Einstellungen (Cerbo-IP, Token, Parameter, Termine)
+      bleiben erhalten, nur der Programmcode wird ersetzt.
       <ol>
-        <li><b>Nach Updates suchen</b> prüft, ob auf GitHub eine neuere Version liegt.</li>
-        <li>Ist eine verfügbar, erscheint <b>Jetzt aktualisieren</b>. Ein Klick lädt sie und
-          startet die App neu (auf dem Raspberry Pi automatisch per Dienst).</li>
+        <li><b>Nach Updates suchen</b> – prüft, ob eine neuere Version vorliegt.</li>
+        <li><b>Jetzt aktualisieren</b> – lädt sie und startet die App neu (als Dienst automatisch,
+          sonst einmal von Hand).</li>
       </ol>
-      <span class="muted">Läuft die App nicht als Dienst (z.B. beim Testen am PC), musst du sie nach dem Update einmal von Hand neu starten.</span>
     </div>
   </details>
 </div>
 
 <div class="card">
   <h2><svg class="h2i" viewBox="0 0 24 24"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>Betrieb</h2>
-  <label>Anzeigename</label>
+  <label>Anzeigename
+    <span class="qhelp" role="button" tabindex="0" data-help="Steht oben in der Kopfzeile und im Browser-Tab. Nur zur Unterscheidung, z.B. wenn mehrere Anlagen laufen.">?</span>
+  </label>
   <input id="app_display_name" placeholder="Victron Steuerung" style="margin-bottom:16px">
   <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px">
     <label class="switch" style="margin:0"><input type="checkbox" id="dry_run"><span class="slider"></span></label>
-    <div><b>Dry-Run</b><div class="muted">An = nur beobachten, der Cerbo wird nicht geschaltet.
-      Erst nach erfolgreichem Parallelvergleich ausschalten (und das alte ioBroker-Skript stoppen!).</div></div>
+    <div><b>Dry-Run</b><div class="muted">An = nur beobachten, der Cerbo wird nicht geschaltet.</div></div>
   </div>
   <div class="grid2">
     <div><label>Regel-Intervall (Sekunden)</label><input id="poll_seconds" type="number"></div>
@@ -78,17 +79,13 @@
   <details class="help">
     <summary>Was bedeuten Dry-Run und Abfrage-Intervall?</summary>
     <div class="help-body">
-      <b>Dry-Run</b> ist der Sicherheits-Modus:
-      <ol>
-        <li><b>An (empfohlen zum Start):</b> die App liest alles und rechnet den Ladeplan,
-          <b>schaltet den Cerbo aber nicht</b>. So kannst du sie gefahrlos beobachten und mit deiner
-          bisherigen Steuerung (ioBroker) vergleichen.</li>
-        <li><b>Aus (scharf):</b> die App steuert aktiv den ESS-Modus. <b>Wichtig:</b> vorher die alte
-          ioBroker-Steuerung stoppen, sonst schreiben zwei Regler gleichzeitig.</li>
-      </ol>
-      <b>Abfrage-Intervall</b> – wie oft der Regelzyklus läuft (Preise holen, Plan rechnen, ESS setzen).
-      <code>300</code> Sekunden (5 Min) sind ideal, weil sich die Strompreise nur viertelstündlich ändern.
-      Die Live-Kacheln im Dashboard aktualisieren davon unabhängig alle 2 Sekunden.
+      <b>Dry-Run An:</b> App rechnet den Ladeplan, schaltet den Cerbo aber nicht – zum
+      gefahrlosen Testen. <b>Aus:</b> App steuert aktiv. Läuft parallel noch eine andere
+      Automatisierung, die ebenfalls den ESS-Modus setzt, vorher stoppen – sonst schreiben
+      zwei Regler gegeneinander.<br><br>
+      <b>Abfrage-Intervall:</b> wie oft neu gerechnet wird. <code>300</code> s (5 Min) passt,
+      weil sich Strompreise nur viertelstündlich ändern. Die Live-Kacheln aktualisieren
+      unabhängig davon alle 2 Sekunden.
     </div>
   </details>
 </div>
@@ -106,10 +103,8 @@
   <details class="help">
     <summary>Wann welche Auflösung?</summary>
     <div class="help-body">
-      Die <b>15-Min-Auflösung</b> zeigt jede Viertelstunde einzeln – am genauesten und passend
-      zum Regeltakt. <b>Stündlich</b> fasst je vier Viertelstunden zu einem Balken zusammen und
-      entspricht damit der Darstellung im Victron-VRM-Portal – praktisch zum direkten Vergleich.
-      Beide Diagramme lassen sich unabhängig umstellen.
+      <b>15-Min:</b> jede Viertelstunde einzeln, am genauesten. <b>Stündlich:</b> vier
+      Viertelstunden zu einem Balken zusammengefasst, wie im Victron-VRM-Portal.
     </div>
   </details>
 </div>
@@ -130,34 +125,69 @@
   <details class="help">
     <summary>Wie finde ich IP & Port, und wie aktiviere ich Modbus?</summary>
     <div class="help-body">
-      Die App liest die Werte direkt vom Cerbo GX über das Netzwerk. Dafür muss Modbus TCP am Cerbo aktiv sein.
       <ol>
         <li><b>Modbus aktivieren:</b> am Cerbo unter <b>Einstellungen → Dienste → Modbus TCP</b> → <b>AN</b>.</li>
-        <li><b>IP finden:</b> unter <b>Einstellungen → Ethernet</b> (oder WLAN), z.B. <code>192.168.2.241</code>.</li>
+        <li><b>IP finden:</b> unter <b>Einstellungen → Ethernet</b> (oder WLAN).</li>
         <li><b>Port:</b> Standard <code>502</code>.</li>
       </ol>
-      <span class="muted">Am besten dem Cerbo im Router eine feste IP geben, damit sie sich nicht ändert.</span>
+      <span class="muted">Feste IP am Cerbo im Router einrichten, sonst ändert sie sich.</span>
     </div>
   </details>
+  <hr style="border-color:var(--border);margin:16px 0">
+  <label style="font-weight:600">Solarerzeugung – welche Geräte hast du?
+    <span class="qhelp" role="button" tabindex="0" data-help="Nur ankreuzen, was tatsächlich vorhanden ist.">?</span>
+  </label>
+  <div class="grid2" style="margin-top:10px">
+    <label style="display:flex;align-items:center;gap:8px;font-weight:normal">
+      <input type="checkbox" id="has_pv_inverter" style="width:auto"> PV-Wechselrichter (AC-gekoppelt)
+    </label>
+    <label style="display:flex;align-items:center;gap:8px;font-weight:normal">
+      <input type="checkbox" id="has_mppt" style="width:auto"> MPPT-Solarladeregler (DC-gekoppelt)
+    </label>
+  </div>
+
+  <div style="margin-top:18px">
+    <label>Mehrere PV-Wechselrichter einzeln anzeigen <span class="muted" style="font-weight:normal">(optional)</span>
+      <span class="qhelp" role="button" tabindex="0" data-help="Geräte-Instanz: Victron Remote Console/VRM → Geräteliste → Wechselrichter → Gerät → Instanz.">?</span>
+    </label>
+    <div id="pv-inverter-rows" style="margin-top:10px"></div>
+    <button class="ghost" type="button" onclick="addPvInverter()">+ Wechselrichter</button>
+  </div>
 </div>
 
 <div class="card">
-  <h2><svg class="h2i" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Tibber</h2>
-  <label>Access Token</label><input id="tibber_token">
-  <a class="help-link" href="https://developer.tibber.com/" target="_blank" rel="noopener">Token bei developer.tibber.com holen ↗</a>
-  <details class="help">
-    <summary>Wie komme ich an meinen Tibber Access Token?</summary>
-    <div class="help-body">
-      Der Token verbindet die App mit deinem Tibber-Konto, um die Strompreise abzurufen. So bekommst du ihn:
-      <ol>
-        <li>Öffne <b>developer.tibber.com</b> und melde dich mit deinem normalen <b>Tibber-Login</b> an (dieselben Daten wie in der Tibber-App).</li>
-        <li>Klicke oben auf <b>„API Explorer"</b> bzw. auf dein Profil.</li>
-        <li>Dort wird dein persönlicher <b>Access Token</b> angezeigt – ein langer Zeichen-String.</li>
-        <li>Kopiere ihn komplett und füge ihn oben in das Feld ein.</li>
-      </ol>
-      <span class="muted">Der Token ist ein Geheimnis – behandle ihn wie ein Passwort. Er wird nur lokal gespeichert und nicht weitergegeben.</span>
-    </div>
-  </details>
+  <h2><svg class="h2i" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Stromtarif</h2>
+  <div class="grid2">
+    <label style="display:flex;align-items:center;gap:8px;font-weight:normal">
+      <input type="radio" name="tariff_mode" id="tariff_tibber" value="tibber" style="width:auto"> Dynamischer Tarif (Tibber)
+    </label>
+    <label style="display:flex;align-items:center;gap:8px;font-weight:normal">
+      <input type="radio" name="tariff_mode" id="tariff_fixed" value="fixed" style="width:auto"> Normaler Vertrag (fester Preis)
+    </label>
+  </div>
+
+  <div id="tariff-tibber-fields" style="margin-top:12px">
+    <label>Access Token</label><input id="tibber_token">
+    <a class="help-link" href="https://developer.tibber.com/" target="_blank" rel="noopener">Token bei developer.tibber.com holen ↗</a>
+    <details class="help">
+      <summary>Wie komme ich an meinen Tibber Access Token?</summary>
+      <div class="help-body">
+        <ol>
+          <li><b>developer.tibber.com</b> öffnen, mit deinem Tibber-Login anmelden.</li>
+          <li>Unter <b>„API Explorer"</b> bzw. deinem Profil steht der <b>Access Token</b>.</li>
+          <li>Kopieren und hier einfügen.</li>
+        </ol>
+        <span class="muted">Wie ein Passwort behandeln. Wird nur lokal gespeichert.</span>
+      </div>
+    </details>
+  </div>
+
+  <div id="tariff-fixed-fields" style="margin-top:12px">
+    <label>Preis pro kWh (ct, Bruttopreis laut Vertrag/Rechnung)
+      <span class="qhelp" role="button" tabindex="0" data-help="Bei festem Preis lädt die App nie aktiv aus dem Netz – nur PV-Vorrang, Ladelimit und Sofort-Override wirken.">?</span>
+    </label>
+    <input id="fixed_price_ct" placeholder="z.B. 32,5">
+  </div>
 </div>
 
 <div class="card" id="pv-forecast-card">
@@ -194,44 +224,58 @@
   <details class="help">
     <summary>Wozu dienen diese Werte?</summary>
     <div class="help-body">
-      Damit rechnet die Steuerung, wie viel Netzladung nötig ist. An deine Anlage anpassen:
       <ol>
-        <li><b>Nutzbare Akkukapazität</b> – die real nutzbare Speichergröße in kWh (nicht die Brutto-Kapazität).
-          Beispiel: 2× Pylontech US5000 ≈ 24 kWh nutzbar.</li>
-        <li><b>Tagesverbrauch</b> – dein durchschnittlicher Stromverbrauch pro Tag in kWh.</li>
-        <li><b>Ladeleistung</b> – wie viel Leistung beim Netzladen im Akku ankommt (W). Begrenzt vom Lader/Wechselrichter.</li>
-        <li><b>PV-Reserve</b> – Puffer in kWh, der für die Mittags-PV freigehalten wird (nicht aus dem Netz vollladen).</li>
-        <li><b>Ladelimit (max. SOC)</b> – harte Obergrenze: ab diesem Ladestand wird <b>nie</b> aus dem Netz geladen –
-          auch nicht bei manuellen Ladeterminen oder Sofort-Override. Schützt den Akku vor Überladung aus dem Netz.</li>
-        <li><b>Immer laden unter (ct/kWh)</b> – Gegenstück zum Ladelimit: fällt der Preis auf oder unter diesen Wert,
-          wird <b>sofort</b> geladen, unabhängig davon, ob gerade eine Strategie überhaupt Bedarf sieht – für Preise,
-          die an dem Tag mit hoher Sicherheit nicht mehr unterboten werden. Bleibt dabei weiterhin unter dem
-          Ladelimit oben. 0 = deaktiviert.</li>
+        <li><b>Nutzbare Akkukapazität</b> – real nutzbare Größe in kWh, nicht die Nominal-/
+          Nennkapazität aus dem Datenblatt (die ist immer etwas größer, ca. 95 % ansetzen).
+          Beispiel: 4× Pylontech US5000 (4,56 kWh nutzbar je Stück) = 18,24 kWh.</li>
+        <li><b>Tagesverbrauch</b> – durchschnittlicher Stromverbrauch pro Tag in kWh.</li>
+        <li><b>Ladeleistung</b> – Leistung beim Netzladen, die im Akku ankommt (W).</li>
+        <li><b>PV-Reserve</b> – Puffer in kWh, der beim Netzladen frei bleibt, damit mittags noch
+          Platz für Solarstrom ist. Nur bei dynamischem Tarif relevant. 0 = kein Puffer.</li>
+        <li><b>Ladelimit (max. SOC)</b> – Obergrenze in %, bis zu der aus dem Netz geladen wird.
+          Gilt auch für manuelle Ladetermine und Sofort-Override.</li>
       </ol>
     </div>
   </details>
   <div class="grid2">
-    <div><label>Nutzbare Akkukapazität (kWh)</label><input id="battery_usable_kwh" type="number" step="0.1"></div>
+    <div><label>Nutzbare Akkukapazität (kWh)
+        <span class="qhelp" role="button" tabindex="0" data-help="Nicht die „Nennkapazität“ aus dem Datenblatt, sondern die „Usable Capacity“. Nicht angegeben: ca. 95 % der Nennkapazität ansetzen.">?</span>
+      </label><input id="battery_usable_kwh" type="number" step="0.1"></div>
     <div><label>Tagesverbrauch (kWh)</label><input id="daily_usage_kwh" type="number" step="0.1"></div>
-    <div><label>Ladeleistung (W)</label><input id="charge_power_w" type="number" step="100"></div>
+    <div><label>Ladestrom beim Netzladen (A)
+        <span class="qhelp" role="button" tabindex="0" data-help="VictronConnect/VEConfigure → Ladegerät → Ladestrom. Direkt ablesen, keine Umrechnung nötig.">?</span>
+      </label><input id="charge_current_a" type="number" step="1"></div>
+    <div><label>Batterie-Systemspannung (V)
+        <span class="qhelp" role="button" tabindex="0" data-help="Typenschild des Multiplus/Quattro, z.B. „48/5000“ = 48 V.">?</span>
+      </label>
+      <select id="battery_voltage_v">
+        <option value="12">12 V</option>
+        <option value="24">24 V</option>
+        <option value="48" selected>48 V</option>
+      </select>
+      <small class="hint">Ladeleistung: <b id="charge_power_preview">–</b></small></div>
     <div><label>PV-Reserve (kWh)</label><input id="pv_reserve_kwh" type="number" step="0.5"></div>
-    <div><label>Ladelimit / max. SOC (%)</label><input id="max_charge_soc" type="number" min="1" max="100"></div>
-    <div><label>Immer laden unter (ct/kWh, 0 = aus)</label><input id="absolute_cheap_price" type="number" step="0.5" min="0"></div>
+    <div><label>Ladelimit / max. SOC (%)
+        <span class="qhelp" role="button" tabindex="0" data-help="Harte Obergrenze: ab diesem Ladestand wird nie aus dem Netz geladen - auch nicht bei manuellen Ladeterminen oder Sofort-Override.">?</span>
+      </label><input id="max_charge_soc" type="number" min="1" max="100"></div>
+    <div><label>Immer laden unter (ct/kWh)
+        <span class="qhelp" role="button" tabindex="0" data-help="Gegenstück zum Ladelimit: faellt der Preis auf oder unter diesen Wert, wird sofort geladen, unabhaengig davon, ob gerade eine Strategie ueberhaupt Bedarf sieht - fuer Preise, die an dem Tag mit hoher Sicherheit nicht mehr unterboten werden. Bleibt weiterhin unter dem Ladelimit oben. 0 = deaktiviert.">?</span>
+      </label><input id="absolute_cheap_price" type="number" step="0.5" min="0"></div>
   </div>
 </div>
 
+<div id="dynamic-pricing-cards">
 <div class="card">
   <h2><svg class="h2i" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.5 8 8 11 4.5-3 8-6 8-11V5l-8-3z"/></svg>Peak-Schutz &amp; Preislimit</h2>
   <details class="help">
     <summary>Was regelt der Peak-Schutz?</summary>
     <div class="help-body">
-      Der Peak-Schutz sorgt dafür, dass der Akku die teuren Verbrauchsspitzen (morgens/abends) übersteht,
-      ohne dann teuer aus dem Netz zu ziehen.
+      Sorgt dafür, dass der Akku teure Verbrauchsspitzen übersteht, statt dann aus dem Netz zu ziehen.
       <ol>
-        <li><b>Morgen-/Abend-Peak (Start/Ende)</b> – die Stunden deiner typischen Lastspitzen (24 h-Format).</li>
-        <li><b>Mindest-SOC vor Peak</b> – so voll soll der Akku vor einer Spitze mindestens sein (%).</li>
-        <li><b>Notbrems-Preislimit</b> – bis zu diesem Preis (ct/kWh) wird notfalls geladen, um einen Peak
-          aus dem Netz zu vermeiden. Darüber wird gewartet.</li>
+        <li><b>Morgen-/Abend-Peak</b> – Stunden deiner typischen Lastspitzen (24h-Format).</li>
+        <li><b>Mindest-SOC vor Peak</b> – Ladestand, den der Akku vorher mindestens haben soll (%).</li>
+        <li><b>Notbrems-Preislimit</b> – bis zu diesem Preis (ct/kWh) wird notfalls geladen,
+          um den Peak zu vermeiden. Darüber wird gewartet.</li>
       </ol>
     </div>
   </details>
@@ -251,9 +295,10 @@
     <summary>Was bedeuten Nacht-/Ziel-SOC und Hysterese?</summary>
     <div class="help-body">
       <ol>
-        <li><b>Nacht-Sicherheits-SOC</b> – Mindestladestand, den der Akku über Nacht halten soll (%).</li>
-        <li><b>Ziel-SOC Morgen-Brücke</b> – bis zu diesem Stand wird morgens vorgeladen, um über den Vormittag zu kommen (%).</li>
-        <li><b>Hysterese</b> – kleiner Puffer (%), damit die Steuerung nicht ständig an der Schwelle hin- und herschaltet.</li>
+        <li><b>Nacht-Sicherheits-SOC</b> – Mindestladestand über Nacht (%).</li>
+        <li><b>Ziel-SOC Morgen-Brücke</b> – Ladestand, auf den morgens vorgeladen wird, um über
+          den Vormittag zu kommen (%).</li>
+        <li><b>Hysterese</b> – Puffer (%), damit nicht ständig an der Schwelle umgeschaltet wird.</li>
       </ol>
     </div>
   </details>
@@ -263,20 +308,16 @@
     <div><label>Hysterese (%)</label><input id="hysterese_soc" type="number" step="0.5"></div>
   </div>
 </div>
+</div>
 
 <div class="card">
   <h2><svg class="h2i" viewBox="0 0 24 24"><polyline points="3 12 7 12 10 5 14 19 17 12 21 12"/></svg>Netz-Zähler heute korrigieren</h2>
   <details class="help">
     <summary>Wann brauche ich das?</summary>
     <div class="help-body">
-      „Zum Netz / Aus dem Netz" im Dashboard wird aus dem Gesamtzähler des Cerbo berechnet
-      (Stand jetzt minus Stand um Mitternacht). Der Cerbo zählt immer weiter – auch wenn die App aus ist.
-      <ol>
-        <li>Normalerweise musst du hier <b>nichts</b> tun: ab Mitternacht stimmen die Werte automatisch mit Victron überein.</li>
-        <li>War die App aber <b>über Mitternacht</b> aus (Serverausfall), fehlt die Tagesbasis.
-          Dann trägst du hier einfach die aktuellen Tageswerte aus der <b>Victron-App</b> ein –
-          die App rechnet die Basis um und zählt korrekt weiter.</li>
-      </ol>
+      Normalerweise nichts zu tun – die Werte stimmen ab Mitternacht automatisch. War die App
+      <b>über Mitternacht aus</b>, fehlt die Tagesbasis: hier die aktuellen Tageswerte aus der
+      Victron-App eintragen, der Rest wird automatisch nachgerechnet.
     </div>
   </details>
   <div class="grid2">
@@ -287,6 +328,14 @@
     <span id="grid-msg" class="muted" style="margin-left:12px"></span></div>
 </div>
 
+<div class="card">
+  <button id="btn-save">Speichern</button>
+  <span id="saved" class="muted" style="margin-left:12px"></span>
+</div>
+
+</div>
+
+<div id="tab-account">
 <div class="card" id="weather-admin">
   <h2><svg class="h2i" viewBox="0 0 24 24"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>Wettervorhersage – Standort</h2>
   <div class="muted" style="margin-bottom:10px">Zeigt auf dem Dashboard das Wetter für den Standort der Anlage (Kachel „Wetter“, nur Anzeige – die Steuerung nutzt das nicht).
@@ -466,46 +515,63 @@
 <div class="card">
   <h2><svg class="h2i" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Konto &amp; Zugang</h2>
   <div class="grid2">
+    <div><label>Benutzername</label><input id="acc-username" autocomplete="username"></div>
     <div><label>Aktuelles Passwort</label><input id="pw-current" type="password" autocomplete="current-password"></div>
-    <div></div>
-    <div><label>Neues Passwort</label><input id="pw-new" type="password" autocomplete="new-password"></div>
+    <div><label>Neues Passwort <span class="muted" style="font-weight:normal">(optional)</span></label><input id="pw-new" type="password" autocomplete="new-password"></div>
     <div><label>Neues Passwort wiederholen</label><input id="pw-new2" type="password" autocomplete="new-password"></div>
   </div>
+  <small class="hint">Aktuelles Passwort wird immer gebraucht, auch um nur den Benutzernamen zu ändern.</small>
   <div style="margin-top:12px">
-    <button id="btn-pw">Passwort ändern</button>
+    <button id="btn-pw">Speichern</button>
     <span id="pw-msg" class="muted" style="margin-left:12px"></span>
   </div>
 </div>
-
-<div class="card">
-  <button id="btn-save">Speichern</button>
-  <span id="saved" class="muted" style="margin-left:12px"></span>
 </div>
 
 {% endblock %}
 {% block scripts %}
 <script>
 let cfg = {};
-const PARAM_KEYS = ['battery_usable_kwh','daily_usage_kwh','charge_power_w','pv_reserve_kwh',
+function pvInverterRow(p = {}) {
+  const d = document.createElement('div'); d.className = 'plane-row';
+  d.style.gridTemplateColumns = '1.4fr 1fr auto';
+  d.innerHTML = `
+    <div><label>Name</label><input class="pvi-name" value="${p.name||''}" placeholder="z.B. PV-1100"></div>
+    <div><label>Geräte-Instanz</label><input class="pvi-unit" value="${p.unit??''}" placeholder="z.B. 80"></div>
+    <button class="danger" type="button" onclick="this.parentElement.remove()">✕</button>`;
+  return d;
+}
+function addPvInverter(p) { document.getElementById('pv-inverter-rows').appendChild(pvInverterRow(p)); }
+function collectPvInverters() {
+  return [...document.querySelectorAll('#pv-inverter-rows .plane-row')].map(r => ({
+    name: r.querySelector('.pvi-name').value.trim(),
+    unit: parseInt(r.querySelector('.pvi-unit').value),
+  })).filter(p => p.name && !isNaN(p.unit));
+}
+
+const PARAM_KEYS = ['battery_usable_kwh','daily_usage_kwh','pv_reserve_kwh',
   'max_charge_soc','absolute_cheap_price','pv_tom_morning_factor',
   'morning_peak_start','morning_peak_end',
   'evening_peak_start','evening_peak_end','min_peak_soc','peak_avoid_price',
   'night_safety_soc','target_safe_soc','hysterese_soc'];
 
 // Muss exakt zu TILE_IDS in index.html passen (Schluessel = Config-Feld/Checkbox-ID).
+// show_tibber_card bekommt zusaetzlich eine Sperre bei festem Tarif (siehe
+// updateTariffFields) - ohne dynamischen Tarif ist die Kachel ohnehin nur eine
+// leere "Status"-Huelle, das Freischalten erst nach Tarifwahl macht das sichtbar.
 const TILE_DEFS = [
   { key: 'show_live_values', label: 'Live-Werte (Victron)', hint: 'Momentanwerte von Netz/Verbrauch/Solar/Batterie.' },
   { key: 'show_energy_chart', label: 'Energie (Verlauf)', hint: 'Balken-Diagramm Verbrauch/Solar/Batterie-SOC.' },
   { key: 'show_flow_chart', label: 'Energieflüsse', hint: 'Woher der Strom kam und wohin er ging.' },
   { key: 'show_week_overview', label: 'Wochenrückblick', hint: 'Solar/Verbrauch/Netz/Autarkie/Kosten der letzten 7 Tage.' },
   { key: 'show_month_overview', label: 'Monatsüberblick', hint: 'Gleiche Werte je Kalendermonat, dauerhaft archiviert.' },
-  { key: 'show_tibber_card', label: 'Tibber-Kachel', hint: 'Preis jetzt, ESS-Modus, Bilanz.' },
+  { key: 'show_tibber_card', label: 'Tibber-Kachel', hint: 'Preis jetzt, ESS-Modus, Bilanz. Nur bei dynamischem Tarif verfügbar.' },
   { key: 'show_override_card', label: 'Sofort laden (Override)', hint: 'Erzwingt Netzladen unabhängig vom Preis.' },
   { key: 'show_price_plan', label: 'Strompreis & Ladeplan', hint: 'Preiskurve mit Ladeplan, manuelle Termine markieren.' },
   { key: 'show_charge_log', label: 'Ladevorgänge (heute)', hint: 'Protokoll geplanter/durchgeführter Ladungen.' },
   { key: 'show_ev_card', label: 'Manuelle Ladetermine', hint: 'Formular zum Anlegen eines Ladetermins.' },
   { key: 'show_shelly_card', label: 'Geräte (Shelly/Tasmota/Tuya)', hint: 'Schalter für smarte Steckdosen auf dem Dashboard.' },
-  { key: 'show_plansim_card', label: 'Ladeplan-Simulation (Test)', hint: 'Vorschlag des EMS-Planers im Vergleich zur bisherigen Steuerung – steuert nichts.' },
+  { key: 'show_plansim_card', label: 'Ladeplan-Simulation (Test)', hint: 'Vorschlag des EMS-Planers im Vergleich zur bisherigen Steuerung – steuert nichts. Nur bei dynamischem Tarif.' },
   { key: 'show_weather_card', label: 'Wetter', hint: 'Wettervorhersage für den Standort (Standort im Reiter „Wetter“).' },
 ];
 let tileOrder = TILE_DEFS.map(t => t.key);   // Reihenfolge auf dem Dashboard (▲▼ unten)
@@ -547,9 +613,53 @@ async function init() {
   TILE_DEFS.forEach(t => { document.getElementById(t.key).checked = cfg[t.key] !== false; });
   document.getElementById('cerbo_host').value = cfg.cerbo_host || '';
   document.getElementById('cerbo_port').value = cfg.cerbo_port || 502;
+  document.getElementById('has_pv_inverter').checked = cfg.has_pv_inverter !== false;
+  document.getElementById('has_mppt').checked = cfg.has_mppt !== false;
+  document.getElementById(cfg.tariff_mode === 'fixed' ? 'tariff_fixed' : 'tariff_tibber').checked = true;
   document.getElementById('tibber_token').value = cfg.tibber_token || '';
+  document.getElementById('fixed_price_ct').value = cfg.fixed_price_ct ?? '';
+  updateTariffFields();
   PARAM_KEYS.forEach(k => { const el = document.getElementById(k); if (el) el.value = cfg[k] ?? ''; });
+  (cfg.pv_inverters || []).forEach(addPvInverter);
+  // Ladestrom war bisher nur als W gespeichert - grob mit der gewaehlten
+  // Systemspannung zurueckrechnen, exakter Wert kommt beim naechsten Speichern
+  // aus dem Ladestrom-Feld selbst.
+  const voltSel = document.getElementById('battery_voltage_v');
+  if (cfg.charge_power_w) {
+    document.getElementById('charge_current_a').value = Math.round(cfg.charge_power_w / parseInt(voltSel.value));
+  }
+  updateChargePowerPreview();
 }
+
+function updateChargePowerPreview() {
+  const a = numDE(document.getElementById('charge_current_a').value);
+  const v = parseInt(document.getElementById('battery_voltage_v').value);
+  const el = document.getElementById('charge_power_preview');
+  el.textContent = (!isNaN(a) && a > 0) ? `${Math.round(a * v)} W (${a} A × ${v} V)` : '–';
+}
+document.getElementById('charge_current_a').addEventListener('input', updateChargePowerPreview);
+document.getElementById('battery_voltage_v').addEventListener('change', updateChargePowerPreview);
+
+function updateTariffFields() {
+  const fixed = document.getElementById('tariff_fixed').checked;
+  document.getElementById('tariff-tibber-fields').hidden = fixed;
+  document.getElementById('tariff-fixed-fields').hidden = !fixed;
+  // Peak-Schutz/SOC-Strategie sind reine Preis-Timing-Strategien fuer einen
+  // ECHTEN dynamischen Tarif - ohne Tibber-Token kann die App gar keine
+  // stundenscharfen Preise abrufen, die Felder waeren wirkungslos/irrefuehrend.
+  // Also erst zeigen, wenn "Tibber" gewaehlt UND ein Token eingetragen ist.
+  const dynamicActive = !fixed && document.getElementById('tibber_token').value.trim().length > 0;
+  document.getElementById('dynamic-pricing-cards').hidden = !dynamicActive;
+  // Tibber-Kachel ohne dynamischen Tarif nur eine leere "Status"-Huelle (siehe
+  // index.html isFixedTariff) - Schalter dafuer gesperrt/ausgegraut und erzwungen
+  // aus, bis "Tibber" als Tarif gewaehlt ist (Token-Pflicht wie oben reicht hier
+  // nicht als Bedingung, schon die reine Tarifwahl schaltet frei).
+  const tibberToggle = document.getElementById('show_tibber_card');
+  tibberToggle.disabled = fixed;
+  if (fixed) tibberToggle.checked = false;
+}
+document.querySelectorAll('input[name="tariff_mode"]').forEach(r => r.addEventListener('change', updateTariffFields));
+document.getElementById('tibber_token').addEventListener('input', updateTariffFields);
 
 // Komma ODER Punkt als Dezimaltrenner akzeptieren (parseFloat("0,6") wäre sonst 0)
 const numDE = v => parseFloat(String(v).replace(',', '.'));
@@ -566,7 +676,13 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     tile_order: tileOrder,
     cerbo_host: document.getElementById('cerbo_host').value.trim(),
     cerbo_port: parseInt(document.getElementById('cerbo_port').value) || 502,
+    has_pv_inverter: document.getElementById('has_pv_inverter').checked,
+    has_mppt: document.getElementById('has_mppt').checked,
+    tariff_mode: document.getElementById('tariff_fixed').checked ? 'fixed' : 'tibber',
     tibber_token: document.getElementById('tibber_token').value.trim(),
+    fixed_price_ct: numDE(document.getElementById('fixed_price_ct').value),
+    pv_inverters: collectPvInverters(),
+    charge_power_w: Math.round(numDE(document.getElementById('charge_current_a').value) * parseInt(document.getElementById('battery_voltage_v').value)),
   };
   PARAM_KEYS.forEach(k => { const v = numDE(document.getElementById(k).value); if (!isNaN(v)) body[k] = v; });
   await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'},
@@ -647,23 +763,26 @@ document.getElementById('btn-pw').addEventListener('click', async () => {
   const msg = document.getElementById('pw-msg');
   const body = {
     current: document.getElementById('pw-current').value,
+    username: document.getElementById('acc-username').value.trim(),
     new: document.getElementById('pw-new').value,
     new2: document.getElementById('pw-new2').value,
   };
-  if (!body.new || body.new.length < 8) { msg.textContent = 'Neues Passwort: mind. 8 Zeichen.'; return; }
-  msg.textContent = 'Ändere …';
+  if (!body.current) { msg.textContent = 'Aktuelles Passwort eingeben.'; return; }
+  if (body.new && body.new.length < 8) { msg.textContent = 'Neues Passwort: mind. 8 Zeichen.'; return; }
+  msg.textContent = 'Speichere …';
   try {
-    const r = await fetch('/api/password', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const r = await fetch('/api/account', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const d = await r.json();
     if (r.ok) {
-      msg.textContent = 'Geändert ✓';
+      msg.textContent = 'Gespeichert ✓';
       ['pw-current','pw-new','pw-new2'].forEach(id => document.getElementById(id).value = '');
     } else {
       msg.textContent = d.error || 'Fehler';
     }
-  } catch (e) { msg.textContent = 'Fehler beim Ändern.'; }
+  } catch (e) { msg.textContent = 'Fehler beim Speichern.'; }
   setTimeout(() => msg.textContent = '', 4000);
 });
+document.getElementById('acc-username').value = {{ (session_user_display or '') | tojson }};
 
 /* Eigener Dialog im App-Design (statt Browser-prompt/confirm) */
 function uiDialog({ title, message, label, value = '', type = 'text', okText = 'OK' }) {

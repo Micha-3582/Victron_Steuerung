@@ -11,7 +11,6 @@ Start:
   pip install -r requirements.txt
   python webapp.py            # http://<host>:5005
 """
-import json
 import logging
 import threading
 import time
@@ -21,6 +20,7 @@ from functools import wraps
 from flask import (Flask, g, jsonify, redirect, render_template, request,
                    session, url_for)
 
+import json
 import os
 
 import shelly
@@ -37,7 +37,7 @@ import vrm
 import vrm_import
 import weather
 from auth import UserError, UserStore, new_secret_key
-from datasources import fetch_tibber_prices
+from datasources import build_fixed_price_entries, fetch_tibber_prices
 from logic import ESS_CHARGE, ESS_IDLE, Params, Slot, decide
 from logic import _parse_iso as logic_parse_iso
 from victron import Cerbo
@@ -49,7 +49,6 @@ log = logging.getLogger("webapp")
 surplus_ctrl = surplus.SurplusController()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_USERNAME = "Micha3582"
 
 app = Flask(__name__)
 app.secret_key = new_secret_key(os.path.join(BASE_DIR, "secret.key"))
@@ -61,24 +60,16 @@ app.config.update(
 )
 
 users = UserStore(os.path.join(BASE_DIR, "users.json"))
-_initial_pw = users.ensure_initial_user(DEFAULT_USERNAME, BASE_DIR)
-if _initial_pw:
-    print("=" * 68, flush=True)
-    print("  ERSTSTART: Zugang wurde angelegt", flush=True)
-    print(f"    Benutzer: {DEFAULT_USERNAME}", flush=True)
-    print(f"    Passwort: {_initial_pw}", flush=True)
-    print("  Steht auch in initial-password.txt", flush=True)
-    print("  Bitte nach der ersten Anmeldung unter Einstellungen aendern!", flush=True)
-    print("=" * 68, flush=True)
+
 
 @app.context_processor
 def inject_app_display_name():
     """Personalisierbarer Anzeigename (Kopfzeile/Titel) - fuer alle Templates
-    verfuegbar, auch die Login-Seite (kein DB-Zugriff, nur die lokale Datei)."""
+    verfuegbar, auch Login/Konto-Anlage (kein DB-Zugriff, nur die lokale Datei)."""
     return {"app_display_name": store.load_config().get("app_display_name") or "Victron Steuerung"}
 
 
-PUBLIC_ENDPOINTS = {"login", "static", "service_worker", "manifest"}
+PUBLIC_ENDPOINTS = {"login", "create_account", "static", "service_worker", "manifest"}
 
 _attempts: dict[str, list] = {}
 _attempts_lock = threading.Lock()
@@ -113,6 +104,10 @@ def note_failed_attempt(ip: str) -> None:
 def _require_login():
     if request.endpoint in PUBLIC_ENDPOINTS:
         return None
+    if users.is_empty():
+        if request.path.startswith("/api/"):
+            return jsonify(error="Kein Konto eingerichtet.", setup_required=True), 401
+        return redirect(url_for("create_account"))
     username = session.get("user")
     user = users.get(username) if username else None
     if not user:
@@ -125,8 +120,37 @@ def _require_login():
     return None
 
 
+@app.route("/create-account", methods=["GET", "POST"])
+def create_account():
+    """Einmaliger erster Schritt: legt den einzigen Admin-Zugang an, bevor
+    irgendetwas anderes (auch /setup) erreichbar ist. Existiert bereits ein
+    Konto, ist diese Route gesperrt - Aendern laeuft danach nur noch ueber
+    die Einstellungen (mit aktuellem Passwort)."""
+    if not users.is_empty():
+        return redirect(url_for("login"))
+    if request.method == "GET":
+        return render_template("create_account.html", error=None)
+
+    username = (request.form.get("username") or "").strip()
+    password = request.form.get("password") or ""
+    password2 = request.form.get("password2") or ""
+    if password != password2:
+        return render_template("create_account.html", error="Die Passwörter stimmen nicht überein."), 400
+    try:
+        users.create(username, password)
+    except UserError as e:
+        return render_template("create_account.html", error=str(e)), 400
+
+    session.clear()
+    session["user"] = username.strip().lower()
+    session.permanent = True
+    return redirect(url_for("setup"))
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    if users.is_empty():
+        return redirect(url_for("create_account"))
     if request.method == "GET":
         if session.get("user") and users.get(session["user"]):
             return redirect(url_for("index"))
@@ -173,13 +197,17 @@ def service_worker():
 
 @app.get("/manifest.webmanifest")
 def manifest():
-    """PWA-Manifest mit personalisiertem Namen - nuetzlich, wenn mehrere
-    installierte Instanzen unterscheidbar sein sollen."""
+    """PWA-Manifest mit personalisiertem Namen, damit mehrere installierte
+    Instanzen (eigene Anlage, Anlage der Mutter, ...) auf dem Homescreen
+    unterscheidbar sind - statt bei allen "Victron Steuerung" zu zeigen."""
     path = os.path.join(app.static_folder, "manifest.webmanifest")
     with open(path, encoding="utf-8") as f:
         m = json.load(f)
     name = store.load_config().get("app_display_name") or "Victron Steuerung"
     m["name"] = name
+    # Voller Name auch als Kurzname - eigenmaechtiges Abschneiden (z.B. auf
+    # 12 Zeichen) reisst bei "Mamas Victron Steuerung" nur "Mamas" heraus.
+    # Das Betriebssystem bricht/kuerzt lange Homescreen-Labels selbst sinnvoll.
     m["short_name"] = name
     resp = jsonify(m)
     resp.headers["Content-Type"] = "application/manifest+json"
@@ -187,18 +215,30 @@ def manifest():
     return resp
 
 
-@app.post("/api/password")
-def api_change_own_password():
-    """Eigenes Passwort aendern."""
+@app.post("/api/account")
+def api_update_own_account():
+    """Eigenen Benutzernamen und/oder Passwort aendern. Beides optional, aber
+    mindestens eines von beiden muss angegeben sein; das aktuelle Passwort
+    wird immer verlangt."""
     body = request.json or {}
     if not users.verify(g.user, body.get("current") or ""):
         return jsonify(error="Aktuelles Passwort ist falsch."), 400
-    if body.get("new") != body.get("new2"):
+    new_username = (body.get("username") or "").strip()
+    new_password = body.get("new") or ""
+    if new_password and new_password != body.get("new2"):
         return jsonify(error="Die Passwörter stimmen nicht überein."), 400
+    if not new_username and not new_password:
+        return jsonify(error="Nichts zu ändern."), 400
     try:
-        users.update_password(g.user, body.get("new") or "")
+        active = g.user
+        if new_username and new_username.strip().lower() != active:
+            users.rename(active, new_username)
+            active = new_username.strip().lower()
+        if new_password:
+            users.update_password(active, new_password)
     except UserError as exc:
         return jsonify(error=str(exc)), 400
+    session["user"] = active
     return jsonify(ok=True)
 
 
@@ -239,11 +279,16 @@ class Controller:
                      f"🪫 Akku niedrig: {soc:.0f} % (Schwelle {thr} %).", f"🔋 Akku wieder bei {soc:.0f} %.", cfg=cfg)
         notify.daily_summary(cfg, datetime.now(), extra=self._report_line)
         try:
-            system = cerbo.read_system()
+            system = cerbo.read_system(has_pv_inverter=cfg.get("has_pv_inverter", True),
+                                        has_mppt=cfg.get("has_mppt", True))
         except Exception as e:                           # noqa: BLE001
             system = None
             log.warning("System-Werte nicht lesbar: %s", e)
-        prices, price_note = self._tibber_prices(cfg, cerbo, current_ess)
+        price_note = None
+        if cfg.get("tariff_mode") == "fixed":
+            prices = build_fixed_price_entries(cfg.get("fixed_price_ct", 32.0))
+        else:
+            prices, price_note = self._tibber_prices(cfg, cerbo, current_ess)
         pv_note = None
 
         now = datetime.now()
@@ -296,7 +341,10 @@ class Controller:
         store.save_state(state)
         store.log_charge_state(d.ess_mode == ESS_CHARGE, d.strategy, now)
         try:                                            # Simulation laeuft nur mit - sie steuert nichts und darf nie stoeren
-            self.plansim = self._run_plansim(now, soc, prices, d, vrm_data, params)
+            if cfg.get("tariff_mode") == "fixed":
+                self.plansim = {"available": False, "reason": "Nur bei dynamischem Tarif."}
+            else:
+                self.plansim = self._run_plansim(now, soc, prices, d, vrm_data, params)
         except Exception as e:                          # noqa: BLE001
             log.warning("Ladeplan-Simulation fehlgeschlagen: %s", e)
             self.plansim = {"available": False, "reason": f"Simulation fehlgeschlagen: {e}"}
@@ -343,6 +391,7 @@ class Controller:
                 "pv_note": " · ".join(x for x in (price_note, pv_note) if x) or None,
                 "system": system,
                 "override": bool(cfg.get("manual_override")),
+                "tariff_mode": cfg.get("tariff_mode", "tibber"),
             }
         # Hinweis: Das Energie-Logging läuft in einem eigenen, feineren Takt
         # (run_energy / energy_sample_seconds), NICHT hier - sonst würde die
@@ -567,7 +616,8 @@ class Controller:
                 cfg = store.load_config()
                 if store.is_configured(cfg):
                     cerbo = Cerbo(cfg["cerbo_host"], cfg.get("cerbo_port", 502))
-                    system = cerbo.read_system()
+                    system = cerbo.read_system(has_pv_inverter=cfg.get("has_pv_inverter", True),
+                                                has_mppt=cfg.get("has_mppt", True))
                     now = datetime.now()
                     with self.lock:
                         price_ct = self.status.get("now_price") if self.status.get("ok") else None
@@ -670,7 +720,7 @@ def setup():
 
 @app.route("/admin")
 def admin():
-    return render_template("admin.html", cfg=store.load_config())
+    return render_template("admin.html", cfg=store.load_config(), session_user_display=g.user_display)
 
 
 @app.route("/solar-log")
@@ -809,6 +859,8 @@ def api_status():
                "chart_flow_hourly": bool(cfg.get("chart_flow_hourly", False)),
                # Alle Dashboard-Kacheln einzeln ein-/ausblendbar (Einstellungen ->
                # Kacheln), Default ueberall an - siehe TILE_IDS in index.html.
+               # show_tibber_card wird bei festem Tarif zusaetzlich im Admin-UI
+               # gesperrt (updateTariffFields), hier nur normal ausgelesen.
                "show_live_values": bool(cfg.get("show_live_values", True)),
                "show_energy_chart": bool(cfg.get("show_energy_chart", True)),
                "show_flow_chart": bool(cfg.get("show_flow_chart", True)),
@@ -821,7 +873,7 @@ def api_status():
                "show_ev_card": bool(cfg.get("show_ev_card", True)),
                "show_shelly_card": bool(cfg.get("show_shelly_card", True)),
                "show_weather_card": bool(cfg.get("show_weather_card", True)),
-               "show_plansim_card": bool(cfg.get("show_plansim_card", True)),
+               "show_plansim_card": bool(cfg.get("show_plansim_card", True)) and cfg.get("tariff_mode") != "fixed",
                "tile_order": [k for k in (cfg.get("tile_order") or []) if isinstance(k, str)]},
         "prices": prices,
         "ev_schedules": store.list_ev(),
@@ -857,7 +909,11 @@ def api_week():
         offset = max(0, int(request.args.get("offset", 0)))
     except (TypeError, ValueError):
         offset = 0
-    return jsonify(store.energy_week_summary(offset_weeks=offset))
+    cfg = store.load_config()
+    return jsonify({
+        **store.energy_week_summary(offset_weeks=offset),
+        "tariff_mode": cfg.get("tariff_mode", "tibber"),
+    })
 
 
 @app.route("/api/month")
@@ -865,7 +921,11 @@ def api_month():
     """Monatsuebersicht: eine Zeile je Kalendermonat (Solar/Verbrauch/Netz/
     Autarkie/Kosten), aus dem dauerhaften Monats-Archiv (nicht auf die 35-Tage-
     Historie beschraenkt - siehe store.monthly_overview)."""
-    return jsonify(store.monthly_overview())
+    cfg = store.load_config()
+    return jsonify({
+        **store.monthly_overview(),
+        "tariff_mode": cfg.get("tariff_mode", "tibber"),
+    })
 
 
 _live_cache = {"ts": 0.0, "data": None}
@@ -885,10 +945,24 @@ def api_live():
             return jsonify({"ok": False, "reason": "nicht eingerichtet"})
         try:
             cerbo = Cerbo(cfg["cerbo_host"], cfg.get("cerbo_port", 502))
-            system = cerbo.read_system()
+            system = cerbo.read_system(has_pv_inverter=cfg.get("has_pv_inverter", True),
+                                        has_mppt=cfg.get("has_mppt", True))
+            pv_sources = []
+            for src in cfg.get("pv_inverters") or []:
+                try:
+                    power = cerbo.read_pvinverter_power(int(src["unit"]))
+                except Exception as e:                       # noqa: BLE001
+                    power = None
+                    log.warning("PV-Wechselrichter '%s' (Unit %s) nicht lesbar: %s",
+                                src.get("name"), src.get("unit"), e)
+                pv_sources.append({"name": src.get("name") or f"Unit {src.get('unit')}",
+                                    "unit": src.get("unit"), "power": power})
             data = {"ok": True, "soc": round(cerbo.read_soc(), 1),
                     "ess_mode": cerbo.read_ess_mode(),
                     "system": system,
+                    "pv_sources": pv_sources,
+                    "has_pv_inverter": cfg.get("has_pv_inverter", True),
+                    "has_mppt": cfg.get("has_mppt", True),
                     "battery_usable_kwh": cfg.get("battery_usable_kwh"),
                     "grid_today": store.energy_grid_today(),
                     "now": datetime.now().isoformat(timespec="seconds")}
@@ -907,6 +981,11 @@ def api_config():
         defaults = Params().__dict__
         for k, v in defaults.items():
             cfg.setdefault(k, v)
+        cfg.setdefault("has_pv_inverter", True)
+        cfg.setdefault("has_mppt", True)
+        cfg.setdefault("tariff_mode", "tibber")
+        cfg.setdefault("fixed_price_ct", 32.0)
+        cfg.setdefault("pv_inverters", [])
         cfg.setdefault("app_display_name", "Victron Steuerung")
         return jsonify(cfg)
     body = request.get_json(silent=True) or {}
@@ -918,7 +997,9 @@ def api_config():
                "show_week_overview", "show_month_overview", "show_tibber_card",
                "show_override_card", "show_price_plan", "show_charge_log",
                "show_ev_card", "show_shelly_card", "show_weather_card", "show_plansim_card", "surplus_enabled", "surplus_dry_run",
-               "surplus_min_soc", "tile_order", "scan_networks"] + list(Params().__dict__.keys())
+               "surplus_min_soc", "tile_order", "scan_networks",
+               "has_pv_inverter", "has_mppt", "tariff_mode",
+               "fixed_price_ct", "pv_inverters"] + list(Params().__dict__.keys())
     allowed = allowed + ["surplus_" + k for k in surplus.DEFAULTS]     # einstellbare Automatik-Werte
     if "scan_networks" in body:
         try:
@@ -1085,25 +1166,6 @@ def api_shelly_auto_order():
     return jsonify(ok=True)
 
 
-@app.route("/api/prices/history", methods=["GET"])
-def api_price_history():
-    """Gespeicherte Tibber-Preise je Viertelstunde (?days=N, Standard 90) + Kurzinfo."""
-    try:
-        n = max(1, min(800, int(request.args.get("days", 90))))
-    except ValueError:
-        n = 90
-    return jsonify({"info": store.price_history_info(), "days": store.price_history(n)})
-
-
-@app.route("/api/plan-sim", methods=["GET"])
-def api_plan_sim():
-    """Ladeplan-Simulation (nur Anzeige): letzter Lauf + Tages-Vergleich der letzten Tage."""
-    with ctrl.lock:
-        data = dict(ctrl.plansim)
-    data["history"] = store.plansim_log()
-    return jsonify(data)
-
-
 @app.route("/api/notify", methods=["GET"])
 def api_notify_info():
     return jsonify({**notify.credentials_public(), **notify.settings_public(store.load_config())})
@@ -1154,6 +1216,25 @@ def api_notify_test():
     except notify.NotifyError as e:
         return jsonify(error=str(e)), 400
     return jsonify(ok=True)
+
+
+@app.route("/api/plan-sim", methods=["GET"])
+def api_plan_sim():
+    """Ladeplan-Simulation (nur Anzeige): letzter Lauf + Tages-Vergleich der letzten Tage."""
+    with ctrl.lock:
+        data = dict(ctrl.plansim)
+    data["history"] = store.plansim_log()
+    return jsonify(data)
+
+
+@app.route("/api/prices/history", methods=["GET"])
+def api_price_history():
+    """Gespeicherte Tibber-Preise je Viertelstunde (?days=N, Standard 90) + Kurzinfo."""
+    try:
+        n = max(1, min(800, int(request.args.get("days", 90))))
+    except ValueError:
+        n = 90
+    return jsonify({"info": store.price_history_info(), "days": store.price_history(n)})
 
 
 def _ctrl_info():
@@ -1362,6 +1443,13 @@ def api_test():
                            "ess_mode": c.read_ess_mode()}
     except Exception as e:                               # noqa: BLE001
         result["cerbo"] = {"ok": False, "error": str(e)}
+    if body.get("tariff_mode") == "fixed":
+        price = body.get("fixed_price_ct", 0)
+        if price and float(price) > 0:
+            result["tibber"] = {"ok": True, "slots": len(build_fixed_price_entries(price))}
+        else:
+            result["tibber"] = {"ok": False, "error": "Bitte einen Preis > 0 ct/kWh eintragen"}
+        return jsonify(result)
     try:
         p = fetch_tibber_prices(body.get("tibber_token", ""))
         result["tibber"] = {"ok": True, "slots": len(p)}
