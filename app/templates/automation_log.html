@@ -31,7 +31,7 @@ async function load() {
   $('summary').textContent = rows.length ? `${rows.length} Einträge · davon ${real} echt geschaltet, ${rows.length - real} im Trockenlauf${fail ? ` · ${fail} Fehler` : ''}` : '';
   $('tbl').innerHTML = `<tr class="thead"><td>Zeit</td><td>Gerät</td><td>Aktion</td><td>Meldung</td></tr>` + (rows.length ? rows.map(r => {
     const [t, c] = BADGE[r.action] || [r.action || '–', 'var(--muted)'];
-    return `<tr><td style="white-space:nowrap">${fmt(r.ts)}</td><td>${escH(r.dev || '–')}</td><td><b style="color:${c}">${t}</b>${r.dry ? ' <span class="muted">🧪</span>' : ''}</td><td>${escH(r.text)}</td></tr>`;
+    return `<tr><td style="white-space:nowrap">${fmt(r.ts)}</td><td>${escH(r.dev || '–')}</td><td><b style="color:${c}">${t}</b></td><td>${escH(r.text)}</td></tr>`;
   }).join('') : '<tr><td colspan="4" class="muted">Keine Einträge.</td></tr>');
 }
 window.LOG_OPEN = MODULE;                                   // dieses Logbuch ist offen: sein Zaehler bleibt aus
