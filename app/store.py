@@ -830,8 +830,8 @@ def _finalize_solar_days(days: dict, now: datetime):
 
 
 def record_vrm_forecast(vrm_kwh: float | None, now: datetime | None = None):
-    """Friert die VRM-Tagesprognose EINMAL pro Tag ein (erster Durchlauf des Tages) und schließt
-    vergangene Tage mit dem realen Ertrag ab."""
+    """Friert die VRM-Tagesprognose EINMAL pro Tag ein (erster Durchlauf des Tages; Grundlage der Abweichungs-
+    Statistik), merkt sich daneben den laufenden Stand ("vrm_latest") und schließt vergangene Tage ab."""
     now = now or datetime.now()
     today = now.date().isoformat()
     data = _load_solar_log()
@@ -843,6 +843,8 @@ def record_vrm_forecast(vrm_kwh: float | None, now: datetime | None = None):
             days[today] = {"vrm_forecast": v, "vrm_deviation_pct": None, "actual": None}
     elif v is not None and days[today].get("vrm_forecast") is None:
         days[today]["vrm_forecast"] = v
+    if v is not None and today in days:
+        days[today]["vrm_latest"] = v            # laufender Stand (das VRM justiert nach) - nur fuer die Anzeige des heutigen Tages
     _dump_json(SOLAR_LOG_PATH, data, indent=2)
 
 

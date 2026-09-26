@@ -5,7 +5,7 @@
 <div class="card">
   <h2>Solarlogbuch – VRM-Prognose vs. reale Erzeugung</h2>
   <div class="muted" style="margin-bottom:12px">
-    Jeder Tag hält die morgens eingefrorene Tagesprognose des <b>Victron VRM</b> (sie steuert die Anlage) gegen den realen Ertrag.
+    Jeder Tag hält die morgens eingefrorene Tagesprognose des <b>Victron VRM</b> gegen den realen Ertrag (so bleibt der Vergleich fair). Justiert das VRM tagsüber nach, steht der aktuelle Wert beim laufenden Tag zusätzlich darunter – die Steuerung rechnet ohnehin mit dem aktuellen Stand.
     „Ertrag“ ist unsere eigene Messung; darunter steht, was das VRM selbst gemessen hat. Die Prognose füllt sich ab dem Tag,
     an dem das VRM eingerichtet wurde – für frühere Tage gibt es nur den Ertrag.
   </div>
@@ -37,8 +37,10 @@ async function load() {
     const curt = r.curtailed
       ? '<br><span style="color:var(--timer)">⚠ Akku voll – Ertrag evtl. gedeckelt</span>'
       : '';
+    const upd = (r.provisional && r.vrm_latest != null && r.vrm_forecast != null && Math.abs(r.vrm_latest - r.vrm_forecast) >= 0.05)
+      ? `<br><span class="muted">aktuell nachjustiert: </span><b>${r.vrm_latest.toFixed(1)} kWh</b>` : '';
     const fc = r.vrm_forecast != null
-      ? `${r.vrm_forecast.toFixed(1)} kWh<br><span class="muted">Abw. </span>${devSpan(r.vrm_deviation_pct)}`
+      ? `${r.vrm_forecast.toFixed(1)} kWh <span class="muted">(morgens)</span>${upd}<br><span class="muted">Abw. </span>${devSpan(r.vrm_deviation_pct)}`
       : '<span class="muted">–</span>';
     const vm = (r.vrm_measured != null && r.actual != null && r.vrm_measured > 0.5)
       ? `<br><span class="muted">VRM misst ${r.vrm_measured.toFixed(1)} kWh · Abw. </span>${devSpan((r.actual - r.vrm_measured) / r.vrm_measured * 100)}`
