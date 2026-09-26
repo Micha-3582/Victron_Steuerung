@@ -515,7 +515,7 @@ class RuleEngine:
             if pure_off:                                        # schaltet nie ein; schaltet jedes laufende Geraet aus, wenn eine Ausschalt-Bedingung zutrifft
                 dvc = by_dev.get(r["device_id"])
                 if dvc and dvc.get("switchable", True) and dvc.get("online") and dvc.get("on") and off_hit and hold.get(dvc["id"], now) <= now:
-                    pure_off_acts.append(("off", dvc, "Ausschalt-Regel: " + ", ".join(off_hit), r["id"]))
+                    pure_off_acts.append(("off", dvc, "Ausschalt-Bedingung: " + ", ".join(off_hit), r["id"]))
                 status[r["id"]] = {"state": "off", "text": ("schaltet aus: " + ", ".join(off_hit)) if off_hit else "schaltet nur aus (nie automatisch ein) – wartet auf: " + ", ".join(t for _, _, t in off_res),
                                    "conds": [{"ok": ok, "text": txt} for _, ok, txt in off_res]}
                 continue
@@ -546,7 +546,7 @@ class RuleEngine:
                         self.fired[r["id"] + ":on"] = today
                     status[r["id"]] = {"state": "on", "text": "läuft – von der Regel übernommen", "conds": conds}
                 else:
-                    wants.setdefault(dev["id"], (r["id"], r["name"] or "Regel"))
+                    wants.setdefault(dev["id"], (r["id"], ", ".join(t for _, _, t in on_res)))
                     status[r["id"]] = {"state": "on", "text": "Bedingungen erfüllt", "conds": conds}
             elif base_on:
                 by_hand = self.block_reason.get(r["id"]) == "manual"
@@ -560,7 +560,7 @@ class RuleEngine:
         for dev_id, (rid, name) in wants.items():
             d = by_dev[dev_id]
             if d.get("online") and not d.get("on"):
-                actions.append(("on", d, "Regel: " + name, rid))
+                actions.append(("on", d, "Einschalt-Bedingung: " + name, rid))
                 if any(c["type"] == "at" for c in rule_by_id[rid]["on"]):
                     self.fired[rid + ":on"] = today                  # 'Um HH:MM' hat ausgeloest (einmal pro Tag)
         # ---- 2. Ausschalten (nur, was die Engine selbst eingeschaltet hat)
