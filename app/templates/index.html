@@ -980,6 +980,7 @@ function initTileDragging() {
     g.addEventListener(ev, () => { cancelPending(); endDrag(); }));
   // Waehrend des laengeren Drucks nicht gleichzeitig die Seite scrollen lassen.
   g.addEventListener('contextmenu', (e) => { if (pending || dragEl) e.preventDefault(); });
+  g.addEventListener('touchmove', e => { if (dragEl && e.cancelable) e.preventDefault(); }, { passive: false });   // Verschieben aktiv: Seite nicht mitscrollen
 }
 
 /* Tages-Bilanz-Kacheln (Netz/Solar) – an den im Energieverlauf gewählten Tag
@@ -1082,6 +1083,7 @@ function initEnergyTileDragging() {
   }, { passive: false });
   ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => g.addEventListener(ev, () => { cancelPending(); endDrag(); }));
   g.addEventListener('contextmenu', e => { if (pending || dragEl) e.preventDefault(); });
+  g.addEventListener('touchmove', e => { if (dragEl && e.cancelable) e.preventDefault(); }, { passive: false });   // Verschieben aktiv: Seite nicht mitscrollen
 }
 initEnergyTileDragging();
 
@@ -1457,6 +1459,7 @@ function initShellyDragging() {
   }, { passive: false });
   ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => g.addEventListener(ev, () => { cancelPending(); endDrag(); }));
   g.addEventListener('contextmenu', e => { if (pending || dragEl) e.preventDefault(); });
+  g.addEventListener('touchmove', e => { if (dragEl && e.cancelable) e.preventDefault(); }, { passive: false });   // Verschieben aktiv: Seite nicht mitscrollen
 }
 initShellyDragging();
 setInterval(loadShelly, 15000);

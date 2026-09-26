@@ -146,7 +146,7 @@
     /* Handy: Kurve doppelt so breit -> ~12 h sichtbar, Rest seitlich scrollen.
        Feste CSS-Breite statt JS verhindert das Aufschaukeln von Chart.js. */
     @media (max-width: 720px) { .chart-inner { height: 250px; width: 200%; } }
-    .chart-scroll canvas { cursor: crosshair; touch-action: pan-x; }
+    .chart-scroll canvas { cursor: crosshair; touch-action: pan-x pan-y; }
     body.selecting .chart-scroll canvas { touch-action: none; }
     .sel-btn[aria-pressed="true"] { background: var(--timer); color: #14171c; border-color: var(--timer); }
     .daytab { font-size: 13px; padding: 6px 14px; }
@@ -159,11 +159,9 @@
     .systile { background: var(--card2); border: 1px solid var(--border); border-radius: 12px;
       padding: 12px 14px; min-width: 0; transition: transform .15s, box-shadow .15s, opacity .15s;
       -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
-      /* Muss von Anfang an stehen, nicht erst bei .dragging: das Handy entscheidet
-         schon beim ersten Beruehren, ob es die Geste selbst zum Scrollen nutzt -
-         wird das erst nach dem Long-Press per Klasse gesetzt, ist es zu spaet und
-         die Kachel laesst sich trotz Vibrations-Feedback nicht mehr verschieben. */
-      touch-action: none; }
+      /* pan-y: senkrechtes Wischen scrollt die Seite normal (vorher 'none' -> auf den Kacheln liess sich am Handy nicht scrollen).
+         Der Verschiebe-Modus nach langem Druck sperrt das Scrollen erst dann per touchmove-preventDefault (siehe index.html). */
+      touch-action: pan-y; }
     /* Kachel-Umsortieren: langes Klicken/Tippen aktiviert den Verschiebe-Modus */
     .sysgrid.reordering .systile { cursor: grab; }
     .systile.drag-armed { box-shadow: 0 0 0 2px var(--accent); }
