@@ -10,6 +10,7 @@
   <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Regeln</h2>
   <div class="muted" style="margin-bottom:12px">Sag der Steuerung in einfachen Sätzen, wann ein Gerät ein- und ausgeschaltet werden soll – zum Beispiel
     „Heizung einschalten, wenn der Strom unter 25 ct kostet und der Akku über 50 % hat; ausschalten, sobald der Akku unter 30 % fällt“.
+    Beim Einschalten müssen <b>alle</b> Bedingungen stimmen (WENN … UND …), beim Ausschalten genügt <b>eine</b> (WENN … ODER …).
     Ohne eigene Ausschalt-Bedingung schaltet das Gerät aus, sobald die Einschalt-Bedingungen nicht mehr stimmen. Ein <b>Ausschalt-Timer</b> (ohne Einschalt-Bedingung)
     schaltet ein Gerät nur aus, zum Beispiel jeden Abend um 23:30, und nie von selbst ein. Läuft ein Gerät schon, während die Einschalt-Bedingungen stimmen, übernimmt die Regel es
     und schaltet es später auch wieder aus (wie ein Timer). Schaltest du ein Gerät von Hand aus, bleibt es aus, bis die Regel das nächste Mal neu beginnt.
@@ -138,7 +139,7 @@ const WD = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 let FIXED = false;
 const PEND = {};                                  // Regel-ID -> {mode}: Zeile, die gerade angelegt wird (erst Ein/Aus waehlen, dann WAS)
 const optHtml = (list, val) => list.map(([v, t]) => `<option value="${v}" ${val === v ? 'selected' : ''}>${t}</option>`).join('');
-function condRow(c, mode) {
+function condRow(c, mode, label) {
   const sel = (cls, val, list) => `<select class="${cls}" style="width:auto" onchange="ruleEdited(this)">${optHtml(list, val)}</select>`;
   const num = (cls, val, w) => `<input class="${cls}" type="number" step="any" value="${escH(val)}" style="width:${w}px" oninput="ruleEdited(this)">`;
   const tm = (cls, val, end) => {
@@ -157,9 +158,8 @@ function condRow(c, mode) {
   else if (c.type === 'budget') body = `${num('c-min', c.minutes, 70)} Min pro Tag, ${FIXED ? 'so früh wie möglich' : 'zu den günstigsten Zeiten'}, zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to, true)} Uhr`;
   else if (c.type === 'soc') body = `${cmp('c-op', c.op)} ${num('c-pct', c.pct, 70)} %`;
   else if (c.type === 'sun_tomorrow') body = `${cmp('c-op', c.op)} ${num('c-kwh', c.kwh, 70)} kWh`;
-  const modeColor = mode === 'on' ? 'var(--cheap)' : 'var(--exp)';
-  return `<div class="cond" data-type="${c.type}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border)">
-    <select class="c-mode" style="width:auto;font-weight:600;color:${modeColor}" onchange="condModeChanged(this)">${optHtml(MODES, mode)}</select>
+  return `<div class="cond" data-type="${c.type}" data-mode="${mode}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border)">
+    <span style="width:46px;font-weight:700;letter-spacing:.05em;color:var(--muted)">${label}</span>
     <select class="c-type" style="width:auto" onchange="condTypeChanged(this)">${optHtml(allowed(mode, FIXED), c.type)}</select>
     <span style="flex:1;min-width:160px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${body}</span>
     <button class="ghost" style="padding:2px 9px" title="Bedingung entfernen" onclick="ruleCondDel(this)">✕</button></div>`;
@@ -183,7 +183,7 @@ function syncRule(box) {                          // Entwurf der Regel aus den s
   const r = R.find(x => x.id === box.dataset.rule);
   r.device_id = box.querySelector('.r-dev').value; r.enabled = box.querySelector('.r-en').checked;
   r.on = []; r.off = [];
-  box.querySelectorAll('.cond:not(.pend)').forEach(row => (row.querySelector('.c-mode').value === 'on' ? r.on : r.off).push(collectCond(row)));
+  box.querySelectorAll('.cond:not(.pend)').forEach(row => (row.dataset.mode === 'on' ? r.on : r.off).push(collectCond(row)));
   r.min_on_min = box.querySelector('.r-minon').value; r.min_off_min = box.querySelector('.r-minoff').value;
   return r;
 }
@@ -192,22 +192,12 @@ function ruleEdited(el) {                         // Feld geaendert: nur den Ent
   touch();
   box.querySelector('.r-status').innerHTML = statusBlock(r);
 }
-function condModeChanged(sel) {                   // Ein <-> Aus: Bedingung wandert in die andere Liste (Typ, der dort nicht erlaubt ist, wird zu 'Uhrzeit')
-  const row = sel.closest('.cond'), box = row.closest('[data-rule]'), mode = sel.value;
-  if (!allowed(mode, FIXED).some(([t]) => t === row.dataset.type)) { row.dataset.type = 'time'; row.dataset.reset = '1'; }
-  const r = R.find(x => x.id === box.dataset.rule);
-  const rows = [...box.querySelectorAll('.cond:not(.pend)')];
-  r.on = []; r.off = [];
-  rows.forEach(rw => { const m = rw.querySelector('.c-mode').value, c = rw.dataset.reset ? clone(COND_DEFAULT.time) : collectCond(rw); (m === 'on' ? r.on : r.off).push(c); });
-  r.device_id = box.querySelector('.r-dev').value; r.enabled = box.querySelector('.r-en').checked;
-  touch(); renderRules();
-}
 function condTypeChanged(sel) {                   // Typ gewechselt: Bedingung bekommt die Standardwerte des neuen Typs
   const row = sel.closest('.cond'), box = row.closest('[data-rule]');
   const r = R.find(x => x.id === box.dataset.rule);
   const rows = [...box.querySelectorAll('.cond:not(.pend)')];
   r.on = []; r.off = [];
-  rows.forEach(rw => { const m = rw.querySelector('.c-mode').value, c = rw === row ? clone(COND_DEFAULT[sel.value]) : collectCond(rw); (m === 'on' ? r.on : r.off).push(c); });
+  rows.forEach(rw => { const c = rw === row ? clone(COND_DEFAULT[sel.value]) : collectCond(rw); (rw.dataset.mode === 'on' ? r.on : r.off).push(c); });
   r.device_id = box.querySelector('.r-dev').value; r.enabled = box.querySelector('.r-en').checked;
   touch(); renderRules();
 }
@@ -241,6 +231,12 @@ function statusHtml(r) {                          // Status gibt es nur fuer die
   return `<span>${icon} ${escH(st.text)}</span>`;
 }
 const statusBlock = r => { const h = statusHtml(r); return h ? `<div style="margin-top:10px">${h}</div>` : ''; };
+function grpHtml(list, mode) {                    // WENN a UND b DANN einschalten  /  WENN c ODER d DANN ausschalten
+  if (!list.length) return '';
+  const on = mode === 'on', color = on ? 'var(--cheap)' : 'var(--exp)';
+  return `<div style="margin-top:12px;border-left:3px solid ${color};padding-left:10px">${list.map((c, i) => condRow(c, mode, i === 0 ? 'WENN' : (on ? 'UND' : 'ODER'))).join('')}
+    <div style="padding:8px 0 2px;border-top:1px solid var(--border)"><span style="display:inline-block;width:46px;font-weight:700;letter-spacing:.05em;color:var(--muted)">DANN</span><b style="color:${color}">${on ? 'Gerät einschalten' : 'Gerät ausschalten'}</b></div></div>`;
+}
 function pendHtml(r) {                            // Zeile in Arbeit: erst Ein/Aus, danach erscheint die Auswahl WAS
   const p = PEND[r.id]; if (!p) return '';
   return `<div class="cond pend" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border)">
@@ -266,7 +262,7 @@ function renderRules() {
           <button class="ghost" onclick="ruleDelete('${escH(r.id)}')" title="Regel löschen">✕</button>
         </div>
       </div>
-      <div class="conds" style="margin-top:10px">${r.on.map(c => condRow(c, 'on')).join('')}${(r.off || []).map(c => condRow(c, 'off')).join('')}${pendHtml(r)}</div>
+      <div class="conds">${grpHtml(r.on, 'on')}${grpHtml(r.off || [], 'off')}${pendHtml(r)}</div>
       ${PEND[r.id] ? '' : `<button type="button" class="ghost" style="margin-top:10px" onclick="addStart('${escH(r.id)}')">+ Bedingung hinzufügen</button>`}
       <div class="r-status">${statusBlock(r)}</div>
       <details style="margin-top:8px"><summary class="muted">Einstellungen für diese Regel</summary>
