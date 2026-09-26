@@ -1217,6 +1217,76 @@ def api_shelly_auto():
                     "events": surplus_ctrl.recent()})
 
 
+@app.route("/api/automation", methods=["POST"])
+def api_automation_save():
+    """Speichern der Automatik-Seite: Regeln, Ueberschuss-Geraete und Einstellungen auf einmal. Erst wird ALLES geprueft, dann geschrieben."""
+    body = request.get_json(silent=True) or {}
+    try:
+        items = body.get("rules")
+        if items is not None:
+            if not isinstance(items, list) or not all(isinstance(x, dict) for x in items):
+                raise rules.RuleError("Regeln: Liste erwartet")
+            for x in items:
+                rules.normalize_rule(x)                                   # nur pruefen
+        dev_updates = []
+        for x in body.get("devices") or []:
+            if not isinstance(x, dict) or not x.get("id"):
+                raise rules.RuleError("Geräteangabe ungültig")
+            fields = {}
+            for k, hi, what in (("power_w", 20000, "Leistung (W)"), ("min_on_min", 1440, "Mindest-Einschaltdauer"), ("min_off_min", 1440, "Mindest-Ausschaltdauer")):
+                if x.get(k) not in (None, ""):
+                    try:
+                        v = float(str(x[k]).replace(",", "."))
+                    except ValueError:
+                        raise rules.RuleError(f"{what}: Zahl erwartet")
+                    if not 0 <= v <= hi:
+                        raise rules.RuleError(f"{what}: zwischen 0 und {hi}")
+                    fields[k] = v
+            dev_updates.append((str(x["id"]), bool(x.get("auto")), fields))
+        order = body.get("auto_order")
+        if order is not None and not (isinstance(order, list) and all(isinstance(i, str) for i in order)):
+            raise rules.RuleError("Reihenfolge ungültig")
+        cfg_in = body.get("config") or {}
+        upd = {}
+        for k in ("rules_enabled", "rules_dry_run"):
+            if k in cfg_in:
+                upd[k] = bool(cfg_in[k])
+        if "surplus_min_soc" in cfg_in:
+            try:
+                v = int(float(cfg_in["surplus_min_soc"]))
+            except (TypeError, ValueError):
+                raise rules.RuleError("Akku mindestens: Zahl erwartet")
+            if not 50 <= v <= 100:
+                raise rules.RuleError("Akku mindestens: zwischen 50 und 100 %")
+            upd["surplus_min_soc"] = v
+        for k in surplus.DEFAULTS:
+            if "surplus_" + k in cfg_in:
+                try:
+                    v = float(cfg_in["surplus_" + k])
+                except (TypeError, ValueError):
+                    raise rules.RuleError(f"{k}: Zahl erwartet")
+                lo, hi = surplus.BOUNDS[k]
+                if not lo <= v <= hi:
+                    raise rules.RuleError(f"{k}: zwischen {lo} und {hi}")
+                upd["surplus_" + k] = v
+    except rules.RuleError as e:
+        return jsonify(error=str(e)), 400
+    try:
+        if items is not None:
+            rules.replace_all(items)
+        for dev_id, auto, fields in dev_updates:
+            shelly.update(dev_id, auto=auto, **fields)
+        if order is not None:
+            shelly.reorder_auto(order)
+    except (shelly.ShellyError, rules.RuleError) as e:
+        return jsonify(error=str(e)), 400
+    if upd:
+        cfg = store.load_config()
+        cfg.update(upd)
+        store.save_config(cfg)
+    return jsonify(ok=True)
+
+
 @app.route("/api/rules", methods=["POST"])
 def api_rules_add():
     try:

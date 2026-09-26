@@ -189,6 +189,17 @@ def update_rule(rule_id: str, body: dict) -> dict | None:
     return None
 
 
+def replace_all(items: list) -> list[dict]:
+    """Ersetzt die komplette Regelliste (Speichern-Knopf der Automatik-Seite). Alle Regeln werden vorab geprueft (RuleError -> nichts
+    geschrieben); Regeln mit bekannter ID behalten sie, neue bekommen eine."""
+    d = load()
+    known = {r["id"] for r in d["rules"]}
+    out = [normalize_rule(b, b.get("id") if b.get("id") in known else None) for b in items]
+    d["rules"] = out
+    _save(d)
+    return out
+
+
 def delete_rule(rule_id: str) -> bool:
     d = load()
     n = len(d["rules"])

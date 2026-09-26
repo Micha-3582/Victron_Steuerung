@@ -9,7 +9,8 @@
 <div class="card" id="auto-main">
   <h2><svg class="h2i" style="color:var(--timer)" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Automatik</h2>
   <div class="muted" style="margin-bottom:12px">Hier legst du fest, wann die Steuerung Geräte (Shelly, Tasmota, Tuya) von selbst schaltet – bei PV-Überschuss
-    oder nach eigenen Regeln. Die Geräte selbst richtest du unter <a href="/admin#geraete" style="color:var(--accent);font-weight:600">Einstellungen → Geräte</a> ein.</div>
+    oder nach eigenen Regeln. Die Geräte selbst richtest du unter <a href="/admin#geraete" style="color:var(--accent);font-weight:600">Einstellungen → Geräte</a> ein.
+    <b>Alle Änderungen auf dieser Seite werden erst mit „Speichern“ (Leiste unten) übernommen</b> – bis dahin arbeitet die Steuerung mit dem bisherigen Stand.</div>
   <div style="display:flex;align-items:center;gap:14px">
     <label class="switch" style="margin:0"><input type="checkbox" id="auto_enabled"><span class="slider"></span></label>
     <div><b>Automatik aktiv</b><div class="muted">Hauptschalter für Überschuss-Automatik und Regeln.</div></div>
@@ -33,7 +34,7 @@
       <div><label>Akku mindestens (%)</label><input id="surplus_min_soc" type="number" min="50" max="100">
         <div class="muted">Erst ab diesem Ladestand gilt Überschuss als vorhanden (bei Ladelimit 90 % z.B. 88 wählen).</div></div>
     </div>
-    <div class="muted" style="margin:8px 0">Die Standardwerte passen für die meisten Anlagen. Änderungen wirken sofort.</div>
+    <div class="muted" style="margin:8px 0">Die Standardwerte passen für die meisten Anlagen. Änderungen gelten erst nach „Speichern“.</div>
     <div id="surplus-fine" class="grid2"></div>
     <div style="margin-top:10px"><button id="surplus-fine-reset" class="ghost">Alle auf Standard</button></div>
   </details>
@@ -54,6 +55,11 @@
   <div class="muted" id="rules-msg" style="margin-top:8px"></div>
 </div>
 
+<div id="savebar" style="display:none;position:fixed;left:0;right:0;bottom:0;z-index:900;background:var(--card);border-top:1px solid var(--border);padding:10px 16px;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;box-shadow:0 -6px 20px rgba(0,0,0,.35)">
+  <span id="savebar-msg">● Ungespeicherte Änderungen – die Steuerung nutzt noch die bisherigen Einstellungen</span>
+  <button class="ghost" id="btn-discard" type="button">Verwerfen</button><button id="btn-save" type="button">Speichern</button>
+</div>
+
 {% endblock %}
 {% block scripts %}
 <script>
@@ -70,14 +76,12 @@ function savedToast(text = 'Gespeichert ✓') {
   let el = $('save-toast');
   if (!el) {
     el = document.createElement('div'); el.id = 'save-toast';
-    el.style.cssText = 'position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:1100;background:var(--green);color:#0b1f14;font-weight:600;padding:9px 18px;border-radius:999px;box-shadow:0 6px 22px rgba(0,0,0,.45);transition:opacity .3s;pointer-events:none';
+    el.style.cssText = 'position:fixed;left:50%;bottom:80px;transform:translateX(-50%);z-index:1100;background:var(--green);color:#0b1f14;font-weight:600;padding:9px 18px;border-radius:999px;box-shadow:0 6px 22px rgba(0,0,0,.45);transition:opacity .3s;pointer-events:none';
     document.body.appendChild(el);
   }
   el.textContent = text; el.style.opacity = '1';
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 1800);
 }
-function msg(id, t, err) { const m = $(id); m.textContent = t || ''; m.style.color = err ? '#e5544a' : ''; }
-/* Eigener Dialog im App-Design (statt Browser-confirm) */
 function uiConfirm(title, message, okText) {
   return new Promise(resolve => {
     const ov = document.createElement('div');
@@ -94,60 +98,96 @@ function uiConfirm(title, message, okText) {
   });
 }
 
-let devs = [], A = { rules: [], status: {}, tariff_mode: 'tibber', events: [] };
+/* ================================================================================================
+   Entwurf: Alle Aenderungen dieser Seite bleiben lokal, bis "Speichern" gedrueckt wird.
+   S = Serverstand (Geraete + Automatik), R/DV/AUTO/CFG = Entwurf.
+   ================================================================================================ */
+let S = { devs: [], A: { rules: [], status: {}, tariff_mode: 'tibber', events: [], settings: {}, defaults: {}, bounds: {} } };
+let R = [], DV = {}, AUTO = [], CFG = { enabled: false, dry: true, min_soc: 95, fine: {} };
+let dirty = false, newId = 0;
+const clone = o => JSON.parse(JSON.stringify(o));
+const dev = id => S.devs.find(d => d.id === id);
 const statText = d => !d.online ? 'nicht erreichbar' : (d.on ? 'an' : 'aus') + (d.power != null ? ` · ${Math.round(d.power)} W` : '');
-const focusInside = box => { const a = document.activeElement; return a && box.contains(a) && ['INPUT', 'SELECT'].includes(a.tagName); };
+
+function resetDraft() {
+  const A = S.A;
+  R = clone(A.rules || []);
+  DV = Object.fromEntries(S.devs.map(d => [d.id, { power_w: d.power_w || '', min_on_min: d.min_on_min ?? 5, min_off_min: d.min_off_min ?? 5 }]));
+  AUTO = S.devs.filter(d => d.auto).sort((a, b) => (a.prio || 1e6) - (b.prio || 1e6)).map(d => d.id);
+  CFG = { enabled: !!A.enabled, dry: !!A.dry_run, min_soc: A.min_soc, fine: { ...A.settings } };
+  setDirty(false);
+}
+function setDirty(v) {
+  dirty = v;
+  $('savebar').style.display = v ? 'flex' : 'none';
+  document.body.style.paddingBottom = v ? '76px' : '';
+  if (!v) $('savebar-msg').textContent = '● Ungespeicherte Änderungen – die Steuerung nutzt noch die bisherigen Einstellungen';
+}
+const touch = () => { setDirty(true); };
+window.addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+async function saveAll() {
+  const btn = $('btn-save'); btn.disabled = true;
+  const cfg = { rules_enabled: CFG.enabled, rules_dry_run: CFG.dry, surplus_min_soc: CFG.min_soc };
+  for (const [k, v] of Object.entries(CFG.fine)) cfg['surplus_' + k] = v;
+  const body = {
+    config: cfg,
+    rules: R.map(r => ({ id: String(r.id).startsWith('new-') ? undefined : r.id, name: r.name || '', device_id: r.device_id, enabled: r.enabled !== false, on: r.on, off: r.off })),
+    devices: S.devs.map(d => ({ id: d.id, auto: AUTO.includes(d.id), ...DV[d.id] })),
+    auto_order: AUTO,
+  };
+  try { await api('/api/automation', 'POST', body); savedToast('Gespeichert ✓'); await loadServer(); resetDraft(); renderAll(); }
+  catch (e) { $('savebar-msg').textContent = '⚠ ' + e.message; $('savebar-msg').style.color = '#e5544a'; setTimeout(() => { $('savebar-msg').style.color = ''; }, 6000); }
+  btn.disabled = false;
+}
+$('btn-save').addEventListener('click', saveAll);
+$('btn-discard').addEventListener('click', async () => {
+  if (!await uiConfirm('Änderungen verwerfen?', 'Alle noch nicht gespeicherten Änderungen dieser Seite gehen verloren.', 'Verwerfen')) return;
+  resetDraft(); renderAll();
+});
 
 /* ---------------------------------------------------------------- Hauptschalter */
-async function saveMain() {
-  try { await api('/api/config', 'POST', { rules_enabled: $('auto_enabled').checked, rules_dry_run: $('auto_dry').checked }); savedToast(); }
-  catch (e) { msg('rules-msg', 'Speichern fehlgeschlagen', true); }
-  load(false);
+$('auto_enabled').addEventListener('change', () => { CFG.enabled = $('auto_enabled').checked; touch(); });
+$('auto_dry').addEventListener('change', () => { CFG.dry = $('auto_dry').checked; touch(); });
+function renderMain() {
+  $('auto_enabled').checked = CFG.enabled; $('auto_dry').checked = CFG.dry;
+  const ev = S.A.events || [];
+  $('auto-events').innerHTML = ev.length ? ev.slice(0, 8).map(e => `${escH(e.ts.slice(11, 16))} · ${escH(e.text)}`).join('<br>') : 'Noch keine.';
 }
-$('auto_enabled').addEventListener('change', saveMain);
-$('auto_dry').addEventListener('change', saveMain);
 
 /* ---------------------------------------------------------------- Ueberschuss-Automatik */
-async function deviceField(id, field, value) {
-  try { await api('/api/shelly/' + encodeURIComponent(id), 'PATCH', { [field]: value }); msg('surplus-msg', ''); savedToast(); }
-  catch (e) { msg('surplus-msg', e.message, true); }
-  rerenderNow();
-}
-function rerenderNow() { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); load(false); }
-async function moveDev(id, dir) {
-  const ids = [...document.querySelectorAll('#surplus-devs [data-dev]')].map(el => el.dataset.dev);
-  const i = ids.indexOf(id), j = i + dir; if (i < 0 || j < 0 || j >= ids.length) return;
-  [ids[i], ids[j]] = [ids[j], ids[i]];
-  try { await api('/api/shelly/auto-order', 'POST', { ids }); savedToast(); } catch (e) { msg('surplus-msg', e.message, true); }
-  rerenderNow();
+function devField(id, field, value) { DV[id][field] = value; touch(); }
+function autoRemove(id) { AUTO = AUTO.filter(x => x !== id); touch(); renderSurplus(); renderRules(); }
+function autoMove(id, dir) {
+  const i = AUTO.indexOf(id), j = i + dir; if (i < 0 || j < 0 || j >= AUTO.length) return;
+  [AUTO[i], AUTO[j]] = [AUTO[j], AUTO[i]]; touch(); renderSurplus();
 }
 function renderSurplus() {
   const box = $('surplus-devs');
-  const autos = devs.filter(d => d.auto).sort((a, b) => (a.prio || 1e6) - (b.prio || 1e6));
-  const addable = devs.filter(d => !d.auto && d.switchable !== false);
+  const addable = S.devs.filter(d => !AUTO.includes(d.id) && d.switchable !== false);
   const sel = $('surplus-add');
   sel.innerHTML = `<option value="">+ Gerät zur Überschuss-Automatik hinzufügen …</option>` + addable.map(d => `<option value="${escH(d.id)}">${escH(d.icon)} ${escH(d.name)}</option>`).join('');
-  sel.onchange = () => { if (sel.value) deviceField(sel.value, 'auto', true); };
-  if (focusInside(box)) { box.querySelectorAll('[data-dev]').forEach(el => { const d = devs.find(x => x.id === el.dataset.dev); if (d) el.querySelector('.dev-stat').textContent = statText(d); }); return; }
-  box.innerHTML = autos.length ? autos.map((d, n) => {
-    const id = escH(d.id);
-    return `<div data-dev="${id}" style="border:1px solid var(--border);border-radius:10px;padding:10px">
+  sel.onchange = () => { if (sel.value) { AUTO.push(sel.value); touch(); renderSurplus(); } };
+  box.innerHTML = AUTO.length ? AUTO.map((id, n) => {
+    const d = dev(id); if (!d) return '';
+    const v = DV[id], eid = escH(id);
+    return `<div data-dev="${eid}" style="border:1px solid var(--border);border-radius:10px;padding:10px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <b style="min-width:22px;text-align:center;color:var(--timer)" title="Priorität">${n + 1}.</b>
         <span style="font-size:22px">${escH(d.icon)}</span>
         <div style="flex:1;min-width:150px"><b>${escH(d.name)}</b><div class="muted">${escH(d.ip)} · <span class="dev-stat">${statText(d)}</span></div></div>
         <div style="display:flex;gap:8px;margin-left:auto">
-          <button class="ghost" onclick="moveDev('${id}', -1)" title="Höhere Priorität (früher zuschalten)">▲</button>
-          <button class="ghost" onclick="moveDev('${id}', 1)" title="Niedrigere Priorität (später zuschalten)">▼</button>
-          <button class="ghost" onclick="deviceField('${id}', 'auto', false)" title="Aus der Automatik nehmen">✕</button>
+          <button class="ghost" onclick="autoMove('${eid}', -1)" title="Höhere Priorität (früher zuschalten)">▲</button>
+          <button class="ghost" onclick="autoMove('${eid}', 1)" title="Niedrigere Priorität (später zuschalten)">▼</button>
+          <button class="ghost" onclick="autoRemove('${eid}')" title="Aus der Automatik nehmen">✕</button>
         </div>
       </div>
       <div class="grid2" style="margin-top:8px;grid-template-columns:repeat(3,1fr)">
-        <div><label>Leistung des Geräts (W)</label><input type="number" min="0" value="${d.power_w || ''}" placeholder="z.B. 2000" onchange="deviceField('${id}', 'power_w', this.value)"></div>
-        <div><label>Mind. an (min)</label><input type="number" min="0" value="${d.min_on_min}" onchange="deviceField('${id}', 'min_on_min', this.value)"></div>
-        <div><label>Mind. aus (min)</label><input type="number" min="0" value="${d.min_off_min}" onchange="deviceField('${id}', 'min_off_min', this.value)"></div>
+        <div><label>Leistung des Geräts (W)</label><input type="number" min="0" value="${escH(v.power_w)}" placeholder="z.B. 2000" oninput="devField('${eid}', 'power_w', this.value)"></div>
+        <div><label>Mind. an (min)</label><input type="number" min="0" value="${escH(v.min_on_min)}" oninput="devField('${eid}', 'min_on_min', this.value)"></div>
+        <div><label>Mind. aus (min)</label><input type="number" min="0" value="${escH(v.min_off_min)}" oninput="devField('${eid}', 'min_off_min', this.value)"></div>
       </div>
-      ${d.power_w > 0 ? '' : '<div class="muted" style="color:#e5544a;margin-top:6px">Leistung eintragen – ohne sie wird dieses Gerät nicht geschaltet.</div>'}
+      ${Number(v.power_w) > 0 ? '' : '<div class="muted" style="color:#e5544a;margin-top:6px">Leistung eintragen – ohne sie wird dieses Gerät nicht geschaltet.</div>'}
     </div>`;
   }).join('') : '<div class="muted">Noch kein Gerät in der Überschuss-Automatik.</div>';
 }
@@ -161,20 +201,17 @@ const SURPLUS_FINE = [
   { k: 'failsafe_min', label: 'Sicherheits-Timer (Shelly)', unit: 'min', hint: 'Eingebauter Rückschalt-Timer im Shelly: stürzt die App ab, geht das Gerät nach dieser Zeit von selbst aus. 0 = aus (Tuya-Geräte nicht unterstützt).' },
 ];
 function renderFine() {
-  const box = $('surplus-fine');
+  const A = S.A, box = $('surplus-fine');
   box.innerHTML = SURPLUS_FINE.map(f => {
     const [lo, hi] = A.bounds[f.k];
-    return `<div><label>${f.label} (${f.unit})</label><input type="number" min="${lo}" max="${hi}" step="any" data-k="${f.k}" value="${A.settings[f.k]}" placeholder="${A.defaults[f.k]}">
+    return `<div><label>${f.label} (${f.unit})</label><input type="number" min="${lo}" max="${hi}" step="any" data-k="${f.k}" value="${escH(CFG.fine[f.k])}" placeholder="${A.defaults[f.k]}">
       <div class="muted">${f.hint} Standard: ${A.defaults[f.k]}</div></div>`;
   }).join('');
-  box.onchange = e => { const inp = e.target.closest('input[data-k]'); if (inp) saveConfig({ ['surplus_' + inp.dataset.k]: inp.value === '' ? A.defaults[inp.dataset.k] : Number(inp.value) }); };
-  $('surplus-fine-reset').onclick = () => saveConfig(Object.fromEntries(SURPLUS_FINE.map(f => ['surplus_' + f.k, A.defaults[f.k]])));
-  $('surplus_min_soc').value = A.min_soc;
+  box.oninput = e => { const inp = e.target.closest('input[data-k]'); if (inp) { CFG.fine[inp.dataset.k] = inp.value === '' ? A.defaults[inp.dataset.k] : Number(inp.value); touch(); } };
+  $('surplus-fine-reset').onclick = () => { CFG.fine = { ...A.defaults }; touch(); renderFine(); };
+  $('surplus_min_soc').value = CFG.min_soc;
 }
-async function saveConfig(body) {
-  try { await api('/api/config', 'POST', body); savedToast(); load(true); } catch (e) { msg('surplus-msg', 'Speichern fehlgeschlagen', true); }
-}
-$('surplus_min_soc').addEventListener('change', () => { const v = parseInt($('surplus_min_soc').value); if (v >= 50 && v <= 100) saveConfig({ surplus_min_soc: v }); });
+$('surplus_min_soc').addEventListener('input', () => { const v = parseInt($('surplus_min_soc').value); if (v >= 50 && v <= 100) { CFG.min_soc = v; touch(); } });
 
 /* ---------------------------------------------------------------- Regeln */
 const ADD_ON = [['time', 'Uhrzeit / Wochentage'], ['price', 'Strompreis unter/über …'], ['cheapest', 'In den günstigsten Stunden'], ['budget', 'Tagesziel: Laufzeit pro Tag'], ['soc', 'Akkustand'], ['sun_tomorrow', 'Sonne morgen (Prognose)']];
@@ -186,7 +223,7 @@ const COND_DEFAULT = {
 const WD = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 function condHtml(c, fixed) {
   const sel = (cls, val, opts) => `<select class="${cls}" style="width:auto" onchange="ruleEdited(this)">${opts.map(([v, t]) => `<option value="${v}" ${val === v ? 'selected' : ''}>${t}</option>`).join('')}</select>`;
-  const num = (cls, val, w) => `<input class="${cls}" type="number" step="any" value="${escH(val)}" style="width:${w}px" onchange="ruleEdited(this)">`;
+  const num = (cls, val, w) => `<input class="${cls}" type="number" step="any" value="${escH(val)}" style="width:${w}px" oninput="ruleEdited(this)">`;
   const tm = (cls, val, end) => {        // Uhrzeit als zwei Auswahlfelder (Stunde : Minute) im App-Stil statt Browser-Zeitwaehler
     const [h, m] = String(val).split(':').map(Number), pad2 = n => String(n).padStart(2, '0');
     const hours = Array.from({ length: end ? 25 : 24 }, (_, i) => i), mins = [...new Set([0, 15, 30, 45, m])].sort((a, b) => a - b);
@@ -194,14 +231,11 @@ function condHtml(c, fixed) {
       + `<select class="t-m" style="width:auto" onchange="ruleEdited(this)">${mins.map(i => `<option value="${pad2(i)}" ${i === m ? 'selected' : ''}>${pad2(i)}</option>`).join('')}</select></span>`;
   };
   const cmp = (cls, v) => sel(cls, v, [['below', 'unter'], ['above', 'über']]);
+  const chips = days => `<span style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-left:6px" title="Keine Auswahl = jeden Tag">${WD.map((n, i) => `<label class="chip"><input type="checkbox" class="c-day" value="${i}" ${(days || []).includes(i) ? 'checked' : ''} onchange="ruleEdited(this)"><span>${n}</span></label>`).join('')}</span>`;
   let body = '';
-  if (c.type === 'time') {
-    body = `Zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to, true)} Uhr
-      <span style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-left:6px" title="Keine Auswahl = jeden Tag">${WD.map((n, i) => `<label class="chip"><input type="checkbox" class="c-day" value="${i}" ${(c.days || []).includes(i) ? 'checked' : ''} onchange="ruleEdited(this)"><span>${n}</span></label>`).join('')}</span>`;
-  } else if (c.type === 'at') {
-    body = `Um ${tm('c-at', c.time)} Uhr <span class="muted">(einmal pro Tag)</span>
-      <span style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-left:6px" title="Keine Auswahl = jeden Tag">${WD.map((n, i) => `<label class="chip"><input type="checkbox" class="c-day" value="${i}" ${(c.days || []).includes(i) ? 'checked' : ''} onchange="ruleEdited(this)"><span>${n}</span></label>`).join('')}</span>`;
-  } else if (c.type === 'price') body = `Strompreis ${cmp('c-op', c.op)} ${num('c-ct', c.ct, 70)} ct/kWh`;
+  if (c.type === 'time') body = `Zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to, true)} Uhr ${chips(c.days)}`;
+  else if (c.type === 'at') body = `Um ${tm('c-at', c.time)} Uhr <span class="muted">(einmal pro Tag)</span> ${chips(c.days)}`;
+  else if (c.type === 'price') body = `Strompreis ${cmp('c-op', c.op)} ${num('c-ct', c.ct, 70)} ct/kWh`;
   else if (c.type === 'cheapest') body = `In den ${num('c-hours', c.hours, 60)} günstigsten Stunden des Tages`;
   else if (c.type === 'budget') body = `Tagesziel: ${num('c-min', c.minutes, 70)} Minuten pro Tag, ${fixed ? 'so früh wie möglich' : 'zu den günstigsten Zeiten'}, zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to, true)} Uhr`;
   else if (c.type === 'soc') body = `Akku ${cmp('c-op', c.op)} ${num('c-pct', c.pct, 70)} %`;
@@ -216,8 +250,9 @@ function collectConds(list) {
       const e = row.querySelector('.' + c); if (e) return e.value;
       const ts = row.querySelector('.tsel[data-t="' + c + '"]'); return ts ? ts.querySelector('.t-h').value + ':' + (ts.querySelector('.t-h').value === '24' ? '00' : ts.querySelector('.t-m').value) : '';
     };
-    if (t === 'time') return { type: t, from: v('c-from'), to: v('c-to'), days: [...row.querySelectorAll('.c-day:checked')].map(x => +x.value) };
-    if (t === 'at') return { type: t, time: v('c-at'), days: [...row.querySelectorAll('.c-day:checked')].map(x => +x.value) };
+    const days = () => [...row.querySelectorAll('.c-day:checked')].map(x => +x.value);
+    if (t === 'time') return { type: t, from: v('c-from'), to: v('c-to'), days: days() };
+    if (t === 'at') return { type: t, time: v('c-at'), days: days() };
     if (t === 'price') return { type: t, op: v('c-op'), ct: v('c-ct') };
     if (t === 'cheapest') return { type: t, hours: v('c-hours') };
     if (t === 'budget') return { type: t, minutes: v('c-min'), from: v('c-from'), to: v('c-to') };
@@ -225,51 +260,47 @@ function collectConds(list) {
     return { type: 'sun_tomorrow', op: v('c-op'), kwh: v('c-kwh') };
   });
 }
-const collectRule = box => ({ device_id: box.querySelector('.r-dev').value, enabled: box.querySelector('.r-en').checked, on: collectConds(box.querySelector('.list-on')), off: collectConds(box.querySelector('.list-off')) });
-async function ruleSave(box, extra, structural) {
-  try { await api('/api/rules/' + encodeURIComponent(box.dataset.rule), 'PATCH', { ...collectRule(box), ...(extra || {}) }); msg('rules-msg', ''); savedToast(); }
-  catch (e) { msg('rules-msg', e.message, true); structural = true; }
-  structural ? rerenderNow() : load(false);
+const ruleOf = el => R.find(r => r.id === el.closest('[data-rule]').dataset.rule);
+function ruleEdited(el) {                       // Feld geaendert: nur den Entwurf aktualisieren (kein Speichern, kein Neuzeichnen)
+  const box = el.closest('[data-rule]'), r = ruleOf(el);
+  r.device_id = box.querySelector('.r-dev').value; r.enabled = box.querySelector('.r-en').checked;
+  r.on = collectConds(box.querySelector('.list-on')); r.off = collectConds(box.querySelector('.list-off'));
+  touch();
 }
-const ruleEdited = el => ruleSave(el.closest('[data-rule]'));
-function ruleCondDel(btn) { const box = btn.closest('[data-rule]'); btn.closest('.cond').remove(); ruleSave(box, null, true); }
-async function ruleAddCond(sel, which) {
+function ruleCondDel(btn) { const box = btn.closest('[data-rule]'); btn.closest('.cond').remove(); ruleEdited(box.querySelector('.r-dev')); renderRules(); }
+function ruleAddCond(sel, which) {
   const t = sel.value; if (!t) return;
-  const box = sel.closest('[data-rule]'), cur = collectRule(box);
-  await ruleSave(box, { [which]: [...cur[which], COND_DEFAULT[t]] }, true);
+  const r = ruleOf(sel); r[which] = [...r[which], clone(COND_DEFAULT[t])]; touch(); renderRules();
 }
 async function ruleDelete(id) {
-  if (!await uiConfirm('Regel löschen?', 'Das Gerät bleibt in der Liste, nur diese Regel fällt weg.', 'Löschen')) return;
-  try { await api('/api/rules/' + encodeURIComponent(id), 'DELETE'); savedToast('Gelöscht ✓'); } catch (e) { msg('rules-msg', e.message, true); }
-  rerenderNow();
+  if (!await uiConfirm('Regel löschen?', 'Die Regel wird entfernt, sobald du „Speichern“ drückst. Das Gerät bleibt in der Liste.', 'Löschen')) return;
+  R = R.filter(r => r.id !== id); touch(); renderRules();
 }
-async function ruleNew(sel, timer) {
-  const dev = sel.value; if (!dev) return;
-  try { await api('/api/rules', 'POST', timer ? { device_id: dev, on: [], off: [COND_DEFAULT.at] } : { device_id: dev, on: [COND_DEFAULT.time] }); savedToast('Regel angelegt ✓'); } catch (e) { msg('rules-msg', e.message, true); }
-  sel.value = ''; rerenderNow();
+function ruleNew(sel, timer) {
+  const d = sel.value; if (!d) return;
+  R.push({ id: 'new-' + (++newId), name: '', device_id: d, enabled: true, on: timer ? [] : [clone(COND_DEFAULT.time)], off: timer ? [clone(COND_DEFAULT.at)] : [] });
+  sel.value = ''; touch(); renderRules();
 }
 function statusHtml(r) {
-  const st = (A.status || {})[r.id];
+  if (String(r.id).startsWith('new-')) return '<span class="muted">Noch nicht gespeichert – die Regel wirkt erst nach „Speichern“.</span>';
+  const st = (S.A.status || {})[r.id];
   if (!st) return '<span class="muted">Noch nicht ausgewertet.</span>';
   const icon = { on: '🟢', wait: '🟡', off: '⚪', paused: '⏸', disabled: '⚪' }[st.state] || '⚪';
-  return `<span>${icon} ${escH(st.text)}</span>`;
+  return `<span>${icon} ${escH(st.text)}</span> ${dirty ? '<span class="muted">(Stand der gespeicherten Regel)</span>' : ''}`;
 }
 function renderRules() {
-  const box = $('rules-list'), fixed = A.tariff_mode === 'fixed';
-  const sw = devs.filter(d => d.switchable !== false);
-  const nd = $('rule-new-dev');
+  const box = $('rules-list'), fixed = S.A.tariff_mode === 'fixed';
+  const sw = S.devs.filter(d => d.switchable !== false);
+  const nd = $('rule-new-dev'), nt = $('rule-new-timer');
   nd.innerHTML = `<option value="">+ Neue Regel für …</option>` + sw.map(d => `<option value="${escH(d.id)}">${escH(d.icon)} ${escH(d.name)}</option>`).join('');
-  nd.onchange = () => ruleNew(nd);
-  const nt = $('rule-new-timer');
   nt.innerHTML = `<option value="">+ Ausschalt-Timer für …</option>` + sw.map(d => `<option value="${escH(d.id)}">${escH(d.icon)} ${escH(d.name)}</option>`).join('');
-  nt.onchange = () => ruleNew(nt, true);
-  if (focusInside(box)) { box.querySelectorAll('[data-rule]').forEach(el => { const r = A.rules.find(x => x.id === el.dataset.rule), s = el.querySelector('.r-status'); if (r && s) s.innerHTML = statusHtml(r); }); return; }
+  nd.onchange = () => ruleNew(nd); nt.onchange = () => ruleNew(nt, true);
   const addSel = (opts, which) => `<select style="width:auto;margin-top:4px" onchange="ruleAddCond(this, '${which}')"><option value="">+ Bedingung hinzufügen …</option>${opts.filter(([t]) => !(fixed && (t === 'price' || t === 'cheapest'))).map(([t, l]) => `<option value="${t}">${l}</option>`).join('')}</select>`;
-  box.innerHTML = A.rules.length ? A.rules.map(r => {
-    const dev = devs.find(d => d.id === r.device_id);
+  box.innerHTML = R.length ? R.map(r => {
+    const d = dev(r.device_id), v = DV[r.device_id];
     return `<div data-rule="${escH(r.id)}" style="border:1px solid var(--border);border-radius:10px;padding:10px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <select class="r-dev" style="width:auto;min-width:180px;font-weight:600" onchange="ruleEdited(this)">${sw.map(d => `<option value="${escH(d.id)}" ${d.id === r.device_id ? 'selected' : ''}>${escH(d.icon)} ${escH(d.name)}</option>`).join('')}${dev ? '' : `<option value="${escH(r.device_id)}" selected>(Gerät fehlt)</option>`}</select>
+        <select class="r-dev" style="width:auto;min-width:180px;font-weight:600" onchange="ruleEdited(this)">${sw.map(x => `<option value="${escH(x.id)}" ${x.id === r.device_id ? 'selected' : ''}>${escH(x.icon)} ${escH(x.name)}</option>`).join('')}${d ? '' : `<option value="${escH(r.device_id)}" selected>(Gerät fehlt)</option>`}</select>
         <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
           <label class="switch" style="margin:0" title="Regel an/aus"><input type="checkbox" class="r-en" ${r.enabled !== false ? 'checked' : ''} onchange="ruleEdited(this)"><span class="slider"></span></label>
           <button class="ghost" onclick="ruleDelete('${escH(r.id)}')" title="Regel löschen">✕</button>
@@ -282,25 +313,30 @@ function renderRules() {
         <div class="list-off">${(r.off || []).map(c => condHtml(c, fixed)).join('')}</div>
         ${(r.off || []).length ? '' : '<div class="muted" style="margin:2px 0 4px">Keine – das Gerät wird ausgeschaltet, sobald die Einschalt-Bedingungen nicht mehr stimmen.</div>'}${addSel(ADD_OFF, 'off')}</div>
       <div class="r-status" style="margin-top:10px">${statusHtml(r)}</div>
-      ${dev ? `<details style="margin-top:8px"><summary class="muted">Einstellungen für dieses Gerät</summary>
+      ${d && v ? `<details style="margin-top:8px"><summary class="muted">Einstellungen für dieses Gerät</summary>
         <div class="grid2" style="margin-top:8px;grid-template-columns:repeat(2,1fr)">
-          <div><label>Mind. an (min)</label><input type="number" min="0" value="${dev.min_on_min}" onchange="deviceField('${escH(dev.id)}', 'min_on_min', this.value)"></div>
-          <div><label>Mind. aus (min)</label><input type="number" min="0" value="${dev.min_off_min}" onchange="deviceField('${escH(dev.id)}', 'min_off_min', this.value)"></div>
+          <div><label>Mind. an (min)</label><input type="number" min="0" value="${escH(v.min_on_min)}" oninput="devField('${escH(d.id)}', 'min_on_min', this.value)"></div>
+          <div><label>Mind. aus (min)</label><input type="number" min="0" value="${escH(v.min_off_min)}" oninput="devField('${escH(d.id)}', 'min_off_min', this.value)"></div>
         </div><div class="muted" style="margin-top:6px">Verhindert ständiges Ein-/Ausschalten. Gilt auch für die Überschuss-Automatik.</div></details>` : ''}
     </div>`;
   }).join('') : '<div class="muted">Noch keine Regel. Wähle unten ein Gerät, um eine anzulegen.</div>';
 }
 
 /* ---------------------------------------------------------------- Laden */
-async function load(fillInputs) {
-  try { devs = await (await fetch('/api/shelly')).json(); A = await (await fetch('/api/shelly/auto')).json(); } catch (e) { return; }
-  if (!Array.isArray(devs)) devs = [];
-  if (fillInputs !== false) { $('auto_enabled').checked = A.enabled; $('auto_dry').checked = A.dry_run; renderFine(); }
-  else { $('auto_enabled').checked = A.enabled; $('auto_dry').checked = A.dry_run; }
-  $('auto-events').innerHTML = A.events.length ? A.events.slice(0, 8).map(e => `${escH(e.ts.slice(11, 16))} · ${escH(e.text)}`).join('<br>') : 'Noch keine.';
-  renderSurplus(); renderRules();
+function renderAll() { renderMain(); renderFine(); renderSurplus(); renderRules(); }
+async function loadServer() {
+  const devs = await (await fetch('/api/shelly')).json();
+  const A = await (await fetch('/api/shelly/auto')).json();
+  S = { devs: Array.isArray(devs) ? devs : [], A };
 }
-load(true);
-setInterval(() => load(false), 10000);
+async function refresh() {                        // alle 10 s: Live-Zustand und Status auffrischen, den Entwurf nie anfassen
+  try { await loadServer(); } catch (e) { return; }
+  const ev = S.A.events || [];
+  $('auto-events').innerHTML = ev.length ? ev.slice(0, 8).map(e => `${escH(e.ts.slice(11, 16))} · ${escH(e.text)}`).join('<br>') : 'Noch keine.';
+  document.querySelectorAll('[data-dev]').forEach(el => { const d = dev(el.dataset.dev), s = el.querySelector('.dev-stat'); if (d && s) s.textContent = statText(d); });
+  document.querySelectorAll('[data-rule]').forEach(el => { const r = R.find(x => x.id === el.dataset.rule), s = el.querySelector('.r-status'); if (r && s) s.innerHTML = statusHtml(r); });
+  if (!dirty) { const a = document.activeElement; if (!(a && ['INPUT', 'SELECT'].includes(a.tagName))) { resetDraft(); renderAll(); } }
+}
+(async () => { await loadServer(); resetDraft(); renderAll(); setInterval(refresh, 10000); })();
 </script>
 {% endblock %}
