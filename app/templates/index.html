@@ -24,9 +24,9 @@
   </div>
   <div class="legend" id="energy-legend" title="Klick auf einen Eintrag blendet ihn im Diagramm ein/aus">
     <span data-k="verbrauch"><i class="sw" style="background:#e5544a"></i>Verbrauch</span>
+    <span data-k="cprognose" style="display:none"><i class="sw sw-hatch-red"></i>Verbrauchsprognose (VRM)</span>
     <span data-k="solar"><i class="sw" style="background:#f0a63c"></i>Solar</span>
     <span data-k="prognose" style="display:none"><i class="sw sw-hatch"></i>Solarprognose (VRM)</span>
-    <span data-k="cprognose" style="display:none"><i class="sw sw-hatch-red"></i>Verbrauchsprognose (VRM)</span>
     <span data-k="soc"><i class="sw" style="background:#4da3ff"></i>Batterie-SOC</span>
     <span data-k="band"><i class="sw" style="background:rgba(77,163,255,.25);border:1px solid #4da3ff"></i>SOC Min/Max</span>
   </div>
@@ -382,7 +382,7 @@ function buildEnergyChart() {
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: {
+        tooltip: { itemSort: (x, y) => TIP_RANK[x.dataset.label] - TIP_RANK[y.dataset.label], callbacks: {
           labelColor(item) {
             const c = item.dataset.borderColor;
             if (item.dataset.label === 'Solarprognose' || item.dataset.label === 'Verbrauchsprognose') return { borderColor: c, backgroundColor: hatchPattern(c, '#252a33') };
@@ -466,6 +466,7 @@ function fcForDay(day, src) {
   const m = {}; src.hours.filter(h => h.day === key).forEach(h => { m[h.hour] = h.wh; });
   return Object.keys(m).length ? m : null;
 }
+const TIP_RANK = { 'Batterie-SOC': 0, 'Verbrauch': 1, 'Verbrauchsprognose': 2, 'Solar': 3, 'Solarprognose': 4, 'SOC Max': 5, 'SOC Min': 6 };   // Reihenfolge im Tooltip
 // Legenden-Eintrag -> Datensaetze des Energie-Diagramms
 const LEGEND_DS = { verbrauch: [0], solar: [1], soc: [4], band: [2, 3], prognose: [5], cprognose: [6] };
 function renderEnergyChart(hist) {
