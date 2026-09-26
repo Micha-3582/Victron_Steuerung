@@ -846,9 +846,15 @@ function initTileDragging() {
 /* Tages-Bilanz-Kacheln (Netz/Solar) – an den im Energieverlauf gewählten Tag
    gekoppelt. Rechnet aus den 15-Min-Verlaufsdaten des Tages (gleiche Quelle
    wie die Charts), nicht aus den Live-Werten. */
+let energyTileDrag = false;   // waehrend Verschieben: Neuaufbau pausieren
+const ENERGY_TILE_DEFAULT = ['export', 'import', 'load', 'solar', 'forecast', 'autarky'];   // Autarkie ganz rechts, Prognose daneben
+function energyTileOrder() {
+  let o = []; try { o = JSON.parse(localStorage.getItem('energyTileOrder')) || []; } catch (e) { /* egal */ }
+  return [...o.filter(k => ENERGY_TILE_DEFAULT.includes(k)), ...ENERGY_TILE_DEFAULT.filter(k => !o.includes(k))];
+}
 function renderEnergyTiles(history, day) {
   const el = $('energy-tiles');
-  if (!el) return;
+  if (!el || energyTileDrag) return;
   let solar = 0, imp = 0, exp = 0, verbrauch = 0;
   (history || []).forEach(r => {
     solar += r.solar || 0;
@@ -858,31 +864,75 @@ function renderEnergyTiles(history, day) {
   });
   const tag = (day && day === todayStr()) ? 'heute' : 'an diesem Tag';
   const sun = '<span class="sun-ico">☀︎</span>';
-  const tile = (title, big, sub, color) => `
-    <div class="systile">
+  const tiles = {};
+  const tile = (id, title, big, sub, color) => { tiles[id] = `
+    <div class="systile" data-tile-id="${id}">
       <div class="systile-t">${title}</div>
       <div class="systile-v" ${color ? `style="color:${color}"` : ''}>${big}</div>
       <div class="systile-s">${sub || ''}</div>
-    </div>`;
-  // Autarkiegrad: Anteil des Verbrauchs, der aus eigener PV/Batterie gedeckt
-  // wurde statt aus dem Netz bezogen zu werden. 100 % = komplett autark.
+    </div>`; };
   const fcm = fcForDay(day);
   const fcSum = fcm ? Object.values(fcm).reduce((a, b) => a + b, 0) / 1000 : null;
-  const fcTile = fcSum != null ? tile(sun + ' Solar-Prognose', fcSum.toFixed(1) + ' kWh',
-    day === todayStr() ? `noch ${fcData.remaining_today_kwh.toFixed(1)} kWh bis Tagesende (VRM)` : 'erwartet (VRM)', 'var(--timer)') : '';
-  if (day > todayStr()) { el.innerHTML = fcTile; return; }        // Zukunft: nur die Prognose
-  const autarky = verbrauch > 0 ? Math.max(0, Math.min(100, (1 - imp / verbrauch) * 100)) : null;
-  const autarkyColor = autarky === null ? 'var(--muted)'
-    : autarky >= 70 ? 'var(--cheap)' : autarky >= 40 ? 'var(--accent)' : 'var(--exp)';
-  el.innerHTML =
-    tile('← Zum Netz', exp.toFixed(1) + ' kWh', kv([[tag + ' eingespeist', '']]), 'var(--cheap)') +
-    tile('→ Aus dem Netz', imp.toFixed(1) + ' kWh', kv([[tag + ' bezogen', '']]), 'var(--vexp)') +
-    tile('🏠 Gesamtverbrauch', verbrauch.toFixed(1) + ' kWh', kv([[tag + ' verbraucht', '']]), '#e0761f') +
-    tile(sun + ' Solar', solar.toFixed(1) + ' kWh', kv([[tag + ' erzeugt', '']]), 'var(--timer)') +
-    tile('🧭 Autarkiegrad',
-      autarky === null ? '–' : Math.round(autarky) + ' %',
-      kv([[tag + (autarky === null ? ' noch keine Daten' : ' aus eigener Erzeugung'), '']]), autarkyColor) + fcTile;
+  if (fcSum != null) tile('forecast', sun + ' Solar-Prognose', fcSum.toFixed(1) + ' kWh',
+    day === todayStr() ? `noch ${fcData.remaining_today_kwh.toFixed(1)} kWh bis Tagesende (VRM)` : 'erwartet (VRM)', 'var(--timer)');
+  if (day <= todayStr()) {                         // Zukunft: nur die Prognose
+    // Autarkiegrad: Anteil des Verbrauchs, der aus eigener PV/Batterie gedeckt
+    // wurde statt aus dem Netz bezogen zu werden. 100 % = komplett autark.
+    const autarky = verbrauch > 0 ? Math.max(0, Math.min(100, (1 - imp / verbrauch) * 100)) : null;
+    const autarkyColor = autarky === null ? 'var(--muted)'
+      : autarky >= 70 ? 'var(--cheap)' : autarky >= 40 ? 'var(--accent)' : 'var(--exp)';
+    tile('export', '← Zum Netz', exp.toFixed(1) + ' kWh', kv([[tag + ' eingespeist', '']]), 'var(--cheap)');
+    tile('import', '→ Aus dem Netz', imp.toFixed(1) + ' kWh', kv([[tag + ' bezogen', '']]), 'var(--vexp)');
+    tile('load', '🏠 Gesamtverbrauch', verbrauch.toFixed(1) + ' kWh', kv([[tag + ' verbraucht', '']]), '#e0761f');
+    tile('solar', sun + ' Solar', solar.toFixed(1) + ' kWh', kv([[tag + ' erzeugt', '']]), 'var(--timer)');
+    tile('autarky', '🧭 Autarkiegrad', autarky === null ? '–' : Math.round(autarky) + ' %',
+      kv([[tag + (autarky === null ? ' noch keine Daten' : ' aus eigener Erzeugung'), '']]), autarkyColor);
+  }
+  el.innerHTML = energyTileOrder().filter(k => tiles[k]).map(k => tiles[k]).join('');
 }
+/* Tages-Kacheln wie die Live-Werte per langem Druck verschiebbar (Reihenfolge merkt sich der Browser). */
+function initEnergyTileDragging() {
+  const g = $('energy-tiles');
+  const LONG_PRESS_MS = 500, MOVE_TOLERANCE = 10;
+  let pending = null, dragEl = null;
+  const cancelPending = () => { if (pending) { clearTimeout(pending.timer); pending = null; if (!dragEl) energyTileDrag = false; } };
+  const endDrag = () => {
+    if (!dragEl) return;
+    dragEl.classList.remove('dragging'); g.classList.remove('reordering');
+    const shown = [...g.querySelectorAll('.systile')].map(el => el.dataset.tileId);
+    const rest = energyTileOrder().filter(k => !shown.includes(k));      // gerade nicht angezeigte behalten ihren Platz hinten
+    try { localStorage.setItem('energyTileOrder', JSON.stringify([...shown, ...rest])); } catch (e) { /* nur Komfort */ }
+    dragEl = null; energyTileDrag = false;
+  };
+  g.addEventListener('pointerdown', e => {
+    const el = e.target.closest('.systile'); if (!el) return;
+    cancelPending(); energyTileDrag = true;
+    pending = { el, x: e.clientX, y: e.clientY, timer: setTimeout(() => {
+      pending = null; dragEl = el; g.classList.add('reordering'); el.classList.add('dragging');
+      if (navigator.vibrate) navigator.vibrate(15);
+    }, LONG_PRESS_MS) };
+  });
+  g.addEventListener('pointermove', e => {
+    if (pending) {
+      if (Math.abs(e.clientX - pending.x) > MOVE_TOLERANCE || Math.abs(e.clientY - pending.y) > MOVE_TOLERANCE) cancelPending();
+      return;
+    }
+    if (!dragEl) return;
+    e.preventDefault();
+    const els = [...g.querySelectorAll('.systile')];
+    const target = els.find(el => {
+      if (el === dragEl) return false;
+      const r = el.getBoundingClientRect();
+      return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    });
+    if (!target) return;
+    if (els.indexOf(dragEl) < els.indexOf(target)) g.insertBefore(dragEl, target.nextSibling);
+    else g.insertBefore(dragEl, target);
+  }, { passive: false });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => g.addEventListener(ev, () => { cancelPending(); endDrag(); }));
+  g.addEventListener('contextmenu', e => { if (pending || dragEl) e.preventDefault(); });
+}
+initEnergyTileDragging();
 
 /* Schnelle Live-Aktualisierung (unabhängig vom 5-Min-Regelzyklus) */
 async function loadLive() {
