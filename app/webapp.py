@@ -344,7 +344,7 @@ class Controller:
             if cfg.get("tariff_mode") == "fixed":
                 self.plansim = {"available": False, "reason": "Nur bei dynamischem Tarif."}
             else:
-                self.plansim = self._run_plansim(now, soc, prices, d, vrm_data, params)
+                self.plansim = self._run_plansim(now, soc, prices, d, vrm_data, params, forced)
         except Exception as e:                          # noqa: BLE001
             log.warning("Ladeplan-Simulation fehlgeschlagen: %s", e)
             self.plansim = {"available": False, "reason": f"Simulation fehlgeschlagen: {e}"}
@@ -447,7 +447,7 @@ class Controller:
             out[(day.isoformat(), int(h["hour"]))] = float(h["wh"])
         return out
 
-    def _run_plansim(self, now, soc, prices, d, vrm_data, params):
+    def _run_plansim(self, now, soc, prices, d, vrm_data, params, manual=False):
         if not vrm_data or not vrm_data.get("hours"):
             return {"available": False, "reason": "Die Simulation braucht die VRM-Prognose (Einstellungen → VRM)."}
         solar = self._hour_map(vrm_data["hours"], now)
@@ -465,12 +465,13 @@ class Controller:
         if not res:
             return {"available": False, "reason": "Zu wenig Preis- oder Prognosedaten für eine Simulation."}
         try:
-            store.record_plansim(now, res)
+            if not manual:                                  # bei manuellem Laden/Ladetermin ist der Vergleich mit der Regel-Steuerung verfaelscht
+                store.record_plansim(now, res)
         except Exception as e:                              # noqa: BLE001
             log.warning("Simulations-Protokoll nicht schreibbar: %s", e)
         return {"available": True, "computed": now.isoformat(timespec="seconds"), "result": res,
                 "cons_source": "VRM-Verbrauchsprognose" if cons else "Tagesverbrauch (Einstellung) / 24 h",
-                "current_strategy": d.strategy}
+                "current_strategy": d.strategy, "manual": bool(manual)}
 
     # ------------------------------------------------------------ Tibber-Preise mit Ausfallsicherung
     _price_fail_since = None

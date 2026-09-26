@@ -1523,7 +1523,8 @@ function renderPlansim() {
   const r = d.result, fmtE = c => (c / 100).toFixed(2) + ' €';
   $('ps-msg').textContent = '';
   $('ps-body').hidden = false;
-  $('ps-hint').textContent = `Horizont bis ${r.horizon_end.slice(5, 10).split('-').reverse().join('.')}. ${r.horizon_end.slice(11, 16)} Uhr · Stand ${d.computed.slice(11, 16)}`;
+  $('ps-hint').textContent = `Horizont bis ${r.horizon_end.slice(5, 10).split('-').reverse().join('.')}. ${r.horizon_end.slice(11, 16)} Uhr · Stand ${d.computed.slice(11, 16)}`
+    + (d.manual ? ' · ⚠ manuelles Laden aktiv – Vergleich nicht aussagekräftig' : '');
   const tile = (t, big, sub, color) => `<div class="systile"><div class="systile-t">${t}</div><div class="systile-v" style="color:${color}">${big}</div><div class="systile-s">${sub}</div></div>`;
   const diff = r.current.net_ct - r.sim.net_ct;
   $('ps-tiles').innerHTML =
