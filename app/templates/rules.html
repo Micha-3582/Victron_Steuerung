@@ -129,7 +129,8 @@ function renderSettings() {
 }
 
 const TYPES = [['time', 'Uhrzeit von–bis'], ['at', 'Uhrzeit (einmal pro Tag)'], ['price', 'Strompreis'], ['cheapest', 'Günstigste Stunden des Tages'], ['budget', 'Tagesziel (Minuten pro Tag)'], ['soc', 'Akkustand'], ['sun_tomorrow', 'Sonne morgen (Prognose)']];
-const MODES = [['on', 'Einschalten, wenn'], ['off', 'Ausschalten, sobald']];
+const MODES = [['on', '🟢 I  Einschalten, wenn'], ['off', '🔴 O  Ausschalten, sobald']];        // I/O wie am Netzschalter: grün = ein, rot = aus
+const badge = on => `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;margin-right:8px;font-size:12px;font-weight:800;color:#0b1f14;background:${on ? 'var(--cheap)' : 'var(--exp)'}">${on ? 'I' : 'O'}</span>`;
 const allowed = (mode, fixed) => TYPES.filter(([t]) => !(fixed && (t === 'price' || t === 'cheapest')) && !(mode === 'on' && t === 'at') && !(mode === 'off' && t === 'budget'));
 const COND_DEFAULT = {
   at: { type: 'at', time: '23:30', days: [] }, time: { type: 'time', from: '09:00', to: '16:00', days: [] }, price: { type: 'price', op: 'below', ct: 25 }, cheapest: { type: 'cheapest', hours: 3 },
@@ -138,7 +139,7 @@ const COND_DEFAULT = {
 const WD = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 let FIXED = false;
 const PEND = {};                                  // Regel-ID -> {mode}: Zeile, die gerade angelegt wird (erst Ein/Aus waehlen, dann WAS)
-const optHtml = (list, val) => list.map(([v, t]) => `<option value="${v}" ${val === v ? 'selected' : ''}>${t}</option>`).join('');
+const optHtml = (list, val) => list.map(([v, t]) => `<option value="${v}" ${val === v ? 'selected' : ''}${v === 'on' ? ' style="color:#35c07a"' : v === 'off' ? ' style="color:#e5544a"' : ''}>${t}</option>`).join('');
 function condRow(c, mode, label) {
   const sel = (cls, val, list) => `<select class="${cls}" style="width:auto" onchange="ruleEdited(this)">${optHtml(list, val)}</select>`;
   const num = (cls, val, w) => `<input class="${cls}" type="number" step="any" value="${escH(val)}" style="width:${w}px" oninput="ruleEdited(this)">`;
@@ -235,7 +236,7 @@ function grpHtml(list, mode) {                    // WENN a UND b DANN einschalt
   if (!list.length) return '';
   const on = mode === 'on', color = on ? 'var(--cheap)' : 'var(--exp)';
   return `<div style="margin-top:12px;border-left:3px solid ${color};padding-left:10px">${list.map((c, i) => condRow(c, mode, i === 0 ? 'WENN' : (on ? 'UND' : 'ODER'))).join('')}
-    <div style="padding:8px 0 2px;border-top:1px solid var(--border)"><span style="display:inline-block;width:46px;font-weight:700;letter-spacing:.05em;color:var(--muted)">DANN</span><b style="color:${color}">${on ? 'Gerät einschalten' : 'Gerät ausschalten'}</b></div></div>`;
+    <div style="padding:8px 0 2px;border-top:1px solid var(--border)"><span style="display:inline-block;width:46px;font-weight:700;letter-spacing:.05em;color:var(--muted)">DANN</span>${badge(on)}<b style="color:${color}">${on ? 'Gerät einschalten' : 'Gerät ausschalten'}</b></div></div>`;
 }
 function pendHtml(r) {                            // Zeile in Arbeit: erst Ein/Aus, danach erscheint die Auswahl WAS
   const p = PEND[r.id]; if (!p) return '';
