@@ -13,7 +13,6 @@ import uuid
 from dataclasses import asdict
 from datetime import datetime, timedelta
 
-from datasources import DEFAULT_BUCKET_FACTORS, PV_BUCKETS, bucket_sums
 from logic import PersistentState
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
@@ -111,21 +110,17 @@ def _load_json_recovering(path: str, default):
     return default()
 
 # Pflichtfelder, damit der Wizard weiß, ob die App eingerichtet ist.
-REQUIRED_KEYS = ("cerbo_host", "tibber_token", "pv_latitude", "pv_longitude", "pv_planes")
+REQUIRED_KEYS = ("cerbo_host", "tibber_token")
 
 CONFIG_DEFAULTS = {
     "cerbo_host": "",
     "cerbo_port": 502,
     "tibber_token": "",
-    "pv_latitude": None,
-    "pv_longitude": None,
-    "pv_planes": [],
     "dry_run": True,
     "poll_seconds": 300,
     "energy_sample_seconds": 10,   # eigener, feiner Takt für die Energie-Messung
     "manual_override": False,
     "web_port": 5005,
-    "openmeteo_pr": 0.68,          # Performance Ratio der Open-Meteo-Steuerprognose
 }
 
 
@@ -143,8 +138,8 @@ def save_config(cfg: dict):
 
 
 def is_configured(cfg=None) -> bool:
-    """Minimal nötig: Cerbo + Tibber. PV-Anlage (Standort/Flächen) ist optional –
-    ohne PV rechnet die Steuerung einfach mit 0 kWh Prognose."""
+    """Minimal nötig: Cerbo + Tibber. Die PV-Prognose kommt aus dem VRM (optional einzurichten) -
+    ohne VRM rechnet die Steuerung mit dem Durchschnitt der letzten Tageserträge."""
     cfg = cfg or load_config()
     return bool(cfg.get("cerbo_host") and cfg.get("tibber_token"))
 
@@ -776,14 +771,6 @@ def solar_measured_today(now: datetime | None = None) -> float:
     return _solar_actual_for_day(now.date().isoformat())
 
 
-def _bucket_actual_for_day(day: str) -> dict[str, float]:
-    """Realer Ertrag (kWh) eines Tages, aufgeteilt in Tageszeit-Buckets - fuer
-    die Bucket-Kalibrierung (siehe auto_adjust_bucket_factors)."""
-    hours = _load_history().get("hours", {})
-    hourly = {k: b.get("solar", 0.0) for k, b in hours.items() if k[:10] == day}
-    return bucket_sums(hourly)
-
-
 # Akku gilt als "voll" (MPPT drosselt evtl. → Ertrag gedeckelt) ab diesem SOC.
 _SOC_FULL_THRESHOLD = 99.0
 
@@ -796,48 +783,11 @@ def _solar_socmax_for_day(day: str):
     return max(vals) if vals else None
 
 
-# PR alter Tage (vor der PR-Kalibrierung lief Open-Meteo mit 0,85).
-_OLD_OM_PR = 0.85
-
-
-def _finalize_om_pr(e: dict):
-    """Vorschlags-PR (Open-Meteo, Steuerquelle) = genutzte PR · real/Prognose."""
-    om = e.get("om_forecast")
-    actual = e.get("actual")
-    pr_used = e.get("pr", _OLD_OM_PR)
-    if om and actual is not None:
-        e["om_deviation_pct"] = round((actual - om) / om * 100, 1)
-        e["om_suggested_pr"] = round(pr_used * actual / om, 2)
-
-
 def _finalize_vrm(e: dict):
-    """Abweichung der VRM-Prognose (nur Vergleich, steuert nichts): (real - Prognose) / Prognose."""
+    """Abweichung der VRM-Prognose vom realen Ertrag: (real - Prognose) / Prognose."""
     vrm_kwh, actual = e.get("vrm_forecast"), e.get("actual")
     if vrm_kwh and actual is not None:
         e["vrm_deviation_pct"] = round((actual - vrm_kwh) / vrm_kwh * 100, 1)
-
-
-def _finalize_bucket_ratios(e: dict, day: str):
-    """Tageszeit-Bucket-Abweichung eines abgeschlossenen Tages: wie stark weicht
-    JEDER Bucket vom Tages-DURCHSCHNITT ab (nicht vom Rohwert) - die globale
-    PR-Kalibrierung (auto_adjust_pr) faengt das Tages-Gesamtniveau schon ab,
-    hier geht es nur um die INNERTAG-Form (z.B. eine Flaeche, die nur morgens
-    beschattet ist). bucket_forecast wird einmalig beim ersten Tick des Tages
-    eingefroren (siehe record_solar_forecast), daher hier nur lesen."""
-    bf = e.get("bucket_forecast")
-    om = e.get("om_forecast")
-    dev_pct = e.get("om_deviation_pct")
-    if not bf or not om or dev_pct is None:
-        return
-    ba = _bucket_actual_for_day(day)
-    day_factor = 1 + dev_pct / 100          # Tages-Gesamtabweichung, zum Rausrechnen
-    ratios = {}
-    for name, forecast_kwh in bf.items():
-        actual_kwh = ba.get(name, 0.0)
-        if forecast_kwh and forecast_kwh >= 0.3 and day_factor > 0:
-            ratios[name] = round((actual_kwh / forecast_kwh) / day_factor, 3)
-    e["bucket_actual"] = ba
-    e["bucket_ratio_norm"] = ratios or None
 
 
 def _restored_days() -> set:
@@ -846,28 +796,19 @@ def _restored_days() -> set:
 
 
 def _finalize_solar_days(days: dict, now: datetime):
-    """Schließt vergangene Tage ab: realer Ertrag, Abweichung und Vorschlagswerte
-    für beide Quellen. Markiert Tage mit vollem Akku (PV evtl. gedeckelt)."""
+    """Schließt vergangene Tage ab: realer Ertrag, Abweichung der VRM-Prognose, Akku-voll-Markierung
+    (PV evtl. gedeckelt)."""
     today = now.date().isoformat()
     # Tage, deren Verlauf nachtraeglich aus dem VRM ergaenzt wurde (Datenverlust), EINMAL neu abschliessen -
-    # sonst bleibt ein damals falsch (z. B. 0 kWh) festgehaltener Ertrag stehen und verzerrt die PR-Empfehlung.
+    # sonst bleibt ein damals falsch (z. B. 0 kWh) festgehaltener Ertrag stehen.
     restored = _restored_days()
     for day, e in days.items():
         if day < today and day in restored and not e.get("vrm_refixed"):
             e["actual"] = None
             e["vrm_refixed"] = True
         if day < today and e.get("actual") is None:
-            actual = _solar_actual_for_day(day)
-            e["actual"] = actual
-            # forecast.solar (nur Vergleich)
-            raw = e.get("forecast_raw") or 0.0
-            corr = e.get("forecast_corr") or 0.0
-            e["deviation_pct"] = round((actual - corr) / corr * 100, 1) if corr else None
-            e["suggested_factor"] = round(actual / raw, 2) if raw else None
-            # Open-Meteo (Steuerquelle): Abweichung + Vorschlags-PR
-            _finalize_om_pr(e)
+            e["actual"] = _solar_actual_for_day(day)
             _finalize_vrm(e)
-            _finalize_bucket_ratios(e, day)
             smax = _solar_socmax_for_day(day)
             e["soc_max"] = round(smax, 1) if smax is not None else None
             e["curtailed"] = bool(smax is not None and smax >= _SOC_FULL_THRESHOLD)
@@ -878,72 +819,30 @@ def _finalize_solar_days(days: dict, now: datetime):
                 if smax is not None:
                     e["soc_max"] = round(smax, 1)
                     e["curtailed"] = bool(smax >= _SOC_FULL_THRESHOLD)
-            if e.get("om_suggested_pr") is None:
-                _finalize_om_pr(e)
             if e.get("vrm_deviation_pct") is None:
                 _finalize_vrm(e)
-            if e.get("bucket_ratio_norm") is None and e.get("bucket_forecast"):
-                _finalize_bucket_ratios(e, day)
 
 
-def record_solar_forecast(om_kwh: float | None, pr: float,
-                          now: datetime | None = None,
-                          fs_raw: float | None = None, fs_corr: float | None = None,
-                          fs_factor: float | None = None,
-                          hourly_today: dict | None = None,
-                          vrm_kwh: float | None = None):
-    """Friert die Tages-Prognose EINMAL pro Tag ein und finalisiert vergangene Tage.
-    Primärquelle = Open-Meteo (om_kwh mit Performance Ratio pr, steuert die Anlage);
-    forecast.solar (fs_*) läuft nur als Vergleich mit. Überschreibt einen bereits
-    eingefrorenen Tag nicht, trägt aber eine anfangs fehlende Quelle einmal nach.
-
-    hourly_today (optional): die Open-Meteo-Stundenkurve vom ERSTEN Tick des Tages -
-    wird als 'bucket_forecast' eingefroren (Tageszeit-Buckets, siehe datasources.
-    bucket_sums), Grundlage fuer auto_adjust_bucket_factors().
-
-    vrm_kwh (optional): Tagesprognose aus dem Victron-VRM-Portal - wird ebenfalls
-    einmal pro Tag eingefroren, nur als Vergleich im Logbuch (steuert nichts)."""
+def record_vrm_forecast(vrm_kwh: float | None, now: datetime | None = None):
+    """Friert die VRM-Tagesprognose EINMAL pro Tag ein (erster Durchlauf des Tages) und schließt
+    vergangene Tage mit dem realen Ertrag ab."""
     now = now or datetime.now()
     today = now.date().isoformat()
     data = _load_solar_log()
     days = data["days"]
     _finalize_solar_days(days, now)
-    om = round(om_kwh, 2) if om_kwh and om_kwh > 0 else None
-    vrm_v = round(vrm_kwh, 2) if vrm_kwh and vrm_kwh > 0 else None
+    v = round(vrm_kwh, 2) if vrm_kwh and vrm_kwh > 0 else None
     if today not in days:
-        if om is None and not fs_raw and vrm_v is None:
-            return                      # noch keine einzige Quelle -> nicht einfrieren
-        days[today] = {
-            "om_forecast": om, "pr": round(pr, 3),
-            "om_deviation_pct": None, "om_suggested_pr": None,
-            "forecast_raw": round(fs_raw, 2) if fs_raw else None,
-            "forecast_corr": round(fs_corr, 2) if fs_corr else None,
-            "factor": round(fs_factor, 2) if fs_factor else None,
-            "actual": None, "deviation_pct": None, "suggested_factor": None,
-            "bucket_forecast": bucket_sums(hourly_today) if hourly_today else None,
-            "bucket_actual": None, "bucket_ratio_norm": None,
-            "vrm_forecast": vrm_v, "vrm_deviation_pct": None,
-        }
-    else:
-        e = days[today]
-        if om is not None and e.get("om_forecast") is None:
-            e["om_forecast"] = om
-            e["pr"] = round(pr, 3)
-        if fs_raw and e.get("forecast_raw") is None:
-            e["forecast_raw"] = round(fs_raw, 2)
-            e["forecast_corr"] = round(fs_corr, 2) if fs_corr else None
-            e["factor"] = round(fs_factor, 2) if fs_factor else None
-        if hourly_today and e.get("bucket_forecast") is None:
-            e["bucket_forecast"] = bucket_sums(hourly_today)
-        if vrm_v is not None and e.get("vrm_forecast") is None:
-            e["vrm_forecast"] = vrm_v
+        if v is not None:
+            days[today] = {"vrm_forecast": v, "vrm_deviation_pct": None, "actual": None}
+    elif v is not None and days[today].get("vrm_forecast") is None:
+        days[today]["vrm_forecast"] = v
     _dump_json(SOLAR_LOG_PATH, data, indent=2)
 
 
 def solar_log(now: datetime | None = None) -> dict:
-    """Logbuch-Einträge (neueste zuerst) + eine gerollte Faktor-Empfehlung aus
-    den letzten abgeschlossenen Tagen. Der heutige Tag erscheint mit dem
-    bisherigen Ertrag als vorläufig."""
+    """Logbuch-Einträge (neueste zuerst). Der heutige Tag erscheint mit dem bisherigen Ertrag
+    als vorläufig."""
     now = now or datetime.now()
     today = now.date().isoformat()
     data = _load_solar_log()
@@ -953,190 +852,30 @@ def solar_log(now: datetime | None = None) -> dict:
     for day in sorted(days.keys(), reverse=True):
         e = dict(days[day])
         e["date"] = day
-        # Heute ist vorläufig, SOLANGE kein Ist-Wert manuell gesetzt wurde. Ein
-        # eingetragener actual (z.B. Handeintrag am Tagesende) bleibt stehen.
         if day == today and e.get("actual") is None:
             e["actual"] = _solar_actual_for_day(day)
             e["provisional"] = True
         rows.append(e)
-    # Empfehlung: Median der Vorschlags-PR (Open-Meteo) der letzten 14 fertigen Tage.
-    # Tage mit vollem Akku (PV evtl. gedeckelt) fließen NICHT ein – ihr Ertrag liegt
-    # unter dem Potenzial und würde die Empfehlung verzerren.
-    recent = [days[d] for d in sorted(days.keys(), reverse=True)
-              if d < today and days[d].get("om_suggested_pr")][:14]
-    curtailed_days = sum(1 for e in recent if e.get("curtailed"))
-    finals = [e["om_suggested_pr"] for e in recent if not e.get("curtailed")]
-    suggestion = None
-    if finals:
-        s = sorted(finals)
-        n = len(s)
-        suggestion = round((s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2), 2)
-    return {"rows": rows, "suggestion": suggestion, "days_used": len(finals),
-            "curtailed_days": curtailed_days}
+    return {"rows": rows}
 
 
-def pv_forecast_range(forecast_kwh: float | None, day_iso: str,
-                       now: datetime | None = None,
-                       remaining_forecast_kwh: float | None = None) -> dict | None:
-    """Unsicherheits-Spanne (kWh) um eine Tagesprognose - aus der tatsaechlichen
-    Streuung der letzten Tage (25./75. Perzentil der Abweichung, Abregelungstage
-    ausgeschlossen), nicht geraten.
-
-    Fuer HEUTE wird der bereits real gemessene Ertrag (aus history.json) als
-    fester Sockel behandelt - der ist ja keine Prognose mehr, sondern schon
-    passiert. Die Unsicherheit wird nur noch auf den REST des Tages angewendet.
-
-    Dieser Rest kommt, wenn vorhanden, aus remaining_forecast_kwh - dem laut
-    Stundenkurve (Open-Meteo GTI) noch zu erwartenden Ertrag von JETZT bis
-    Tagesende. Das ist wichtig: "Tagesprognose minus bisher gemessen" allein
-    wird nachts nicht automatisch klein, wenn die urspruengliche Tagesprognose
-    zu hoch war - die Spanne blieb dadurch bis Mitternacht unrealistisch breit,
-    obwohl laengst klar ist, dass nichts mehr dazukommt (0 Einstrahlung nachts).
-    Ohne remaining_forecast_kwh (z.B. alter Aufrufer, kein Stundencache) faellt
-    es auf die alte "Prognose minus gemessen"-Rechnung zurueck.
-
-    Fuer "morgen" (noch nichts gemessen, remaining_forecast_kwh irrelevant)
-    bleibt es die volle Tagesspanne.
-
-    None, wenn keine Prognose oder zu wenig Datenbasis vorliegt."""
-    if not forecast_kwh or forecast_kwh <= 0:
-        return None
+def recent_solar_average(days: int = 7, now: datetime | None = None) -> float | None:
+    """Mittlerer realer Tagesertrag (kWh) der letzten `days` vollständig aufgezeichneten Tage aus history.json.
+    Rückfall der Steuerung, wenn das VRM keine Prognose liefert. None, wenn zu wenig Tage vorliegen."""
     now = now or datetime.now()
-    data = _load_solar_log()
-    days = data["days"]
-    _finalize_solar_days(days, now)
-    today = now.date().isoformat()
-    recent = [days[d] for d in sorted(days.keys(), reverse=True)
-              if d < today and days[d].get("om_deviation_pct") is not None
-              and not days[d].get("curtailed")][:14]
-    if len(recent) < _AUTO_PR_MIN_DAYS:
+    today = now.date()
+    want = {(today - timedelta(days=i)).isoformat() for i in range(1, days + 1)}
+    slots: dict[str, int] = {}
+    sums: dict[str, float] = {}
+    for k, b in _load_history().get("hours", {}).items():
+        d = k[:10]
+        if d in want:
+            slots[d] = slots.get(d, 0) + 1
+            sums[d] = sums.get(d, 0.0) + b.get("solar", 0.0)
+    vals = [sums[d] for d in want if slots.get(d, 0) >= 80]      # nur (fast) lückenlose Tage
+    if len(vals) < 3:
         return None
-    # Einzelne Tage kappen: bei sehr kleiner Prognose (kleiner Nenner) kann die
-    # Prozent-Abweichung durch einen einzigen Wetterdaten-Ausreisser auf absurde
-    # Werte schnellen (z.B. +700%, wenn die Prognose an dem Tag nur 3 kWh war).
-    # Ohne Kappung reisst so ein einzelner Tag die ganze Spanne unrealistisch weit.
-    devs = sorted(max(-60.0, min(60.0, e["om_deviation_pct"])) for e in recent)
-    n = len(devs)
-
-    def _pct(p):
-        idx = min(n - 1, max(0, round(p / 100 * (n - 1))))
-        return devs[idx]
-
-    actual_so_far = _solar_actual_for_day(day_iso) if day_iso == today else 0.0
-    if day_iso == today and remaining_forecast_kwh is not None:
-        remaining = max(0.0, remaining_forecast_kwh)
-    else:
-        remaining = max(0.0, forecast_kwh - actual_so_far)
-    low = round(actual_so_far + remaining * (1 + _pct(25) / 100), 1)
-    high = round(actual_so_far + remaining * (1 + _pct(75) / 100), 1)
-    if high < low:
-        low, high = high, low
-    return {"low": low, "high": high}
-
-
-_AUTO_PR_MIN_DAYS = 5      # erst ab dieser Anzahl robuster Tage der Empfehlung vertrauen
-_AUTO_PR_MAX_STEP = 0.03   # pro Tag hoechstens so viel aendern - kein Sprung, sanft angleichen
-_AUTO_PR_BOUNDS = (0.3, 1.2)
-
-
-def auto_adjust_pr(now: datetime | None = None) -> float | None:
-    """Passt die Performance Ratio (openmeteo_pr) einmal pro Tag leise Richtung
-    der Solarlogbuch-Empfehlung an - in kleinen Schritten, erst ab ausreichend
-    Datenbasis, Tage mit vollem Akku ausgeschlossen (siehe solar_log()). Laeuft
-    komplett automatisch im Hintergrund, wie bei Victron: nur der Standort wird
-    eingerichtet, die Kalibrierung passiert von selbst. Gibt den neuen Wert
-    zurueck, falls angepasst wurde, sonst None."""
-    now = now or datetime.now()
-    today = now.date().isoformat()
-    data = _load_solar_log()
-    if data.get("auto_pr_date") == today:
-        return None   # heute schon gelaufen
-    data["auto_pr_date"] = today
-    _dump_json(SOLAR_LOG_PATH, data, indent=2)
-
-    log = solar_log(now)
-    if log["days_used"] < _AUTO_PR_MIN_DAYS or log["suggestion"] is None:
-        return None
-
-    cfg = load_config()
-    current = float(cfg.get("openmeteo_pr", 0.68))
-    target = max(_AUTO_PR_BOUNDS[0], min(_AUTO_PR_BOUNDS[1], log["suggestion"]))
-    diff = target - current
-    if abs(diff) < 0.005:
-        return None
-    step = max(-_AUTO_PR_MAX_STEP, min(_AUTO_PR_MAX_STEP, diff))
-    new_pr = round(current + step, 3)
-    cfg["openmeteo_pr"] = new_pr
-    save_config(cfg)
-    return new_pr
-
-
-_AUTO_BUCKET_MIN_DAYS = 5        # dieselbe Mindest-Datenbasis wie bei auto_adjust_pr
-_AUTO_BUCKET_MAX_STEP = 0.05     # etwas groesserer Schritt als PR - wirkt nur auf die
-                                 # relative Form, nicht das Gesamtniveau (siehe unten)
-_AUTO_BUCKET_BOUNDS = (0.5, 1.5)
-
-
-def bucket_log(now: datetime | None = None) -> dict:
-    """Analog zu solar_log(), aber je Tageszeit-Bucket: Median der normierten
-    Bucket-Abweichung (bucket_ratio_norm) der letzten 14 abgeschlossenen, nicht
-    gedeckelten Tage - Empfehlung fuer auto_adjust_bucket_factors()."""
-    now = now or datetime.now()
-    today = now.date().isoformat()
-    data = _load_solar_log()
-    days = data["days"]
-    _finalize_solar_days(days, now)
-    recent = [days[d] for d in sorted(days.keys(), reverse=True)
-              if d < today and not days[d].get("curtailed")
-              and days[d].get("bucket_ratio_norm")][:14]
-    suggestions, days_used = {}, {}
-    for name, _, _ in PV_BUCKETS:
-        vals = sorted(e["bucket_ratio_norm"][name] for e in recent
-                      if name in e["bucket_ratio_norm"])
-        n = len(vals)
-        days_used[name] = n
-        if n:
-            suggestions[name] = round(
-                (vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2), 3)
-    return {"suggestions": suggestions, "days_used": days_used}
-
-
-def auto_adjust_bucket_factors(now: datetime | None = None) -> dict | None:
-    """Passt die Tageszeit-Bucket-Faktoren (pv_bucket_factors) einmal pro Tag
-    leise Richtung der bucket_log()-Empfehlung an - gleiches Prinzip wie
-    auto_adjust_pr(), nur je Tageszeit-Bucket statt fuer den ganzen Tag. Laeuft
-    NACH auto_adjust_pr in der gleichen Tick-Runde (siehe webapp.tick()); beide
-    schreiben in dieselbe config.json, das ist unproblematisch, da sie
-    unterschiedliche Felder setzen. Gibt die geaenderten Faktoren zurueck, falls
-    angepasst wurde, sonst None."""
-    now = now or datetime.now()
-    today = now.date().isoformat()
-    data = _load_solar_log()
-    if data.get("auto_bucket_date") == today:
-        return None
-    data["auto_bucket_date"] = today
-    _dump_json(SOLAR_LOG_PATH, data, indent=2)
-
-    log = bucket_log(now)
-    cfg = load_config()
-    current = dict(DEFAULT_BUCKET_FACTORS)
-    current.update(cfg.get("pv_bucket_factors", {}))
-    changed = {}
-    for name, target in log["suggestions"].items():
-        if log["days_used"].get(name, 0) < _AUTO_BUCKET_MIN_DAYS:
-            continue
-        target = max(_AUTO_BUCKET_BOUNDS[0], min(_AUTO_BUCKET_BOUNDS[1], target))
-        diff = target - current[name]
-        if abs(diff) < 0.005:
-            continue
-        step = max(-_AUTO_BUCKET_MAX_STEP, min(_AUTO_BUCKET_MAX_STEP, diff))
-        current[name] = round(current[name] + step, 3)
-        changed[name] = current[name]
-    if not changed:
-        return None
-    cfg["pv_bucket_factors"] = current
-    save_config(cfg)
-    return current
+    return round(sum(vals) / len(vals), 2)
 
 
 def energy_grid_charge_buckets(day: str) -> dict:

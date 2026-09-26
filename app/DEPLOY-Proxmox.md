@@ -56,7 +56,7 @@ pm2 list
 ## 5. Einrichten
 
 Browser: **http://<container-ip>:5005** → der Einrichtungsassistent führt durch
-Cerbo-IP, Tibber-Token, Standort und Solarflächen. Danach steht die Config in
+Cerbo-IP, Tibber-Token und VRM-Zugang (Solar-Prognose). Danach steht die Config in
 `app/config.json` (bleibt bei Updates erhalten, ist nicht im Git).
 
 **Wichtig:** Zum Start bleibt **Dry-Run AN** (Einstellungen → Betrieb). Erst nach

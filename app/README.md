@@ -28,9 +28,11 @@ Die Unit-IDs (225 für BMS, 100 für VE.Bus) können je nach Anlage abweichen.
 Am Cerbo unter Modbus-TCP gibt es eine Geräteliste mit den echten Unit-IDs —
 die tragen wir dann ein.
 
-## Schritt 2: Runner im Dry-Run (Parallelvergleich)
+## Schritt 2: Runner im Dry-Run (Parallelvergleich) – historisch
 
-Der Runner holt SOC (Cerbo), Preise (Tibber) und PV (forecast.solar), rechnet
+> Der CLI-Runner (`runner.py`) wurde entfernt; den Regeltakt übernimmt die Web-App (siehe unten). Dieser Abschnitt bleibt als Hintergrund zur damaligen Inbetriebnahme stehen.
+
+Der Runner holt SOC (Cerbo), Preise (Tibber) und PV-Prognose (Victron VRM), rechnet
 mit der portierten V39.4-Logik und protokolliert die Entscheidung. Im
 **Dry-Run schreibt er NICHTS** an den Cerbo — dein ioBroker steuert weiter.
 
@@ -61,7 +63,7 @@ python webapp.py
 
 Dann im Browser `http://<host>:5005`:
 - Beim ersten Start führt der **Einrichtungsassistent** (`/setup`) durch Cerbo-IP,
-  Tibber-Token, Standort und Solarflächen — mit „Verbindung testen".
+  Tibber-Token und VRM-Zugang — mit „Verbindung testen".
 - **Dashboard**: SOC, Preis jetzt, ESS-Modus, Strategie, Preis-Kurve mit
   markierten Ladefenstern, Sofort-Override, E-Auto-Ladetermine.
 - **Einstellungen** (`/admin`): alle Werte ändern, Dry-Run an/aus, Intervall.
@@ -77,7 +79,8 @@ Der Regler läuft als Hintergrund-Thread und schreibt im Dry-Run nichts an den C
 - `config.json` – deine Zugangsdaten/Anlagenwerte (nicht im Git)
 - `logic.py` – portierte V39.4-Entscheidungslogik (rein, testbar)
 - `victron.py` – Cerbo Modbus (lesen/schreiben)
-- `datasources.py` – Tibber + forecast.solar
+- `datasources.py` – Tibber-Preise
+- `vrm.py` – Victron-VRM: PV-Prognose, Tagesertrag, Verlauf nachholen (`vrm_import.py`)
 - `store.py` – Config + State-Persistenz
-- `runner.py` – der Scheduler/Regler
+- `webapp.py` – Web-App inkl. Regeltakt (der frühere `runner.py` wurde entfernt)
 - `*_test.py` / `test_logic.py` – Einzeltests

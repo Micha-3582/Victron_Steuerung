@@ -689,7 +689,7 @@ async function load() {
     $('meta').innerHTML =
       `<div style="font-size:15px;font-weight:600;color:${ok ? 'var(--cheap)' : 'var(--exp)'}" title="${tip}">`
       + `${ok ? '✓' : '⚠'} ${balTxt} <span style="opacity:.55;font-weight:400;cursor:help">ⓘ</span></div>`
-      + `<div class="muted" style="margin-top:4px">Sonne (${s.pv_source || 'Open-Meteo'}) heute ${pvRangeTxt(s.pv_today, s.pv_today_range)} / `
+      + `<div class="muted" style="margin-top:4px">Sonne (${s.pv_source || '–'}) heute ${pvRangeTxt(s.pv_today, s.pv_today_range)} / `
       + `morgen ${pvRangeTxt(s.pv_tom, s.pv_tom_range)} kWh · Stand ${d.last_tick || '–'}`
       + (s.pv_note ? ` · ⚠ ${s.pv_note}` : '') + `</div>`;
     // planline wird tag-genau in applyDay() gesetzt

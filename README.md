@@ -37,7 +37,7 @@ Ein Hintergrund-Regler läuft in einer Schleife und macht bei jedem Takt (Standa
    PV-DC, Batterie).
 2. **Holt die Strompreise** von der Tibber-API – viertelstundengenau für heute und
    (sobald verfügbar) morgen.
-3. **Holt die PV-Prognose** von forecast.solar für die konfigurierten Solarflächen.
+3. **Holt die PV-Prognose** aus dem Victron-VRM-Portal (ohne VRM: Durchschnitt der echten Erträge der letzten Tage).
 4. **Entscheidet** anhand der Strategie unten, ob jetzt aus dem Netz geladen werden soll.
 5. **Schreibt den ESS-Mode** zurück auf den Cerbo (`9` = Netzladen erlaubt, `10` =
    nicht laden) – sofern kein Dry-Run aktiv ist und sich der Wert geändert hat.
@@ -124,8 +124,7 @@ Mobile-optimierte Oberfläche, die den kompletten Zustand zeigt und Eingriffe er
 - **Solarlogbuch**: hält die Tagesprognose gegen den realen Ertrag, zeigt Abweichung und
   den Korrekturfaktor, der den Tag exakt getroffen hätte – inklusive gerollter Empfehlung,
   um den Faktor datenbasiert einzustellen.
-- **Einrichtungsassistent** beim ersten Start (Cerbo-IP, Tibber-Token, Standort,
-  Solarflächen) mit Verbindungstest für Cerbo und Tibber.
+- **Einrichtungsassistent** beim ersten Start (Cerbo-IP, Tibber-Token, VRM-Zugang) mit Verbindungstest für Cerbo und Tibber.
 - **Admin-Bereich**: alle Anlagen- und Strategie-Parameter frei konfigurierbar, mit
   Hilfe-Boxen.
 - **In-App-Update** über GitHub (Versionsprüfung + Ein-Klick-Update, Daten bleiben
@@ -152,7 +151,7 @@ Mobile-optimierte Oberfläche, die den kompletten Zustand zeigt und Eingriffe er
 |---|---|---|
 | Cerbo GX | SOC, ESS-Mode, System-Leistungen, Netz-Energiezähler | Modbus TCP (Unit 100 System, Unit 225 BMS) |
 | Tibber | Strompreise heute/morgen (viertelstundengenau) | Tibber-API (Token) |
-| forecast.solar | PV-Prognose je Solarfläche | HTTP (mit Backoff + Cache gegen Rate-Limit) |
+| Victron VRM | PV-Prognose, Verlauf nachholen, Tagesertrag | HTTP (API-Token, 30-Min-Cache) |
 
 **Genutzte Cerbo-Register** (verifiziert gegen die Victron-App):
 SOC BMS `225/266` (×10), ESS-Mode `100/2900` (Holding, 9/10), System-Block ab `100/811`
@@ -194,8 +193,7 @@ Der Assistent (`/setup`) führt durch:
 
 1. **Cerbo-IP** (und Port, Standard 502)
 2. **Tibber-Token** (aus dem Tibber-Entwicklerportal)
-3. **Standort** (Breiten-/Längengrad für die PV-Prognose)
-4. **Solarflächen** (Ausrichtung, Neigung, kWp je Fläche)
+3. **Victron VRM** (Installations-ID + Zugriffstoken für die Solar-Prognose; auch später im Reiter „VRM“)
 
 Ein Verbindungstest prüft Cerbo und Tibber, bevor es losgeht. Danach zunächst im
 **Dry-Run** beobachten – erst wenn die Entscheidungen plausibel sind, in den
@@ -234,7 +232,7 @@ Peak-Zeitfenster (morgens 7–9, abends 19–21 Uhr) sind ebenfalls einstellbar.
 webapp.py       Flask-Web-App + zwei Hintergrund-Threads (Regler + Energie-Sampler)
 logic.py        reine, testbare Entscheidungslogik (decide()) – keine Hardware/IO
 victron.py      Cerbo-Anbindung über Modbus TCP (Lesen/Schreiben)
-datasources.py  Tibber-Preise + forecast.solar-Prognose
+datasources.py  Tibber-Preise (die PV-Prognose kommt aus vrm.py)
 store.py        Persistenz: Config, State, Ladeprotokoll, Energie-Historie, Netzbilanz
 updater.py      In-App-Update über GitHub
 templates/      index (Dashboard), setup (Wizard), admin, base
@@ -262,5 +260,5 @@ erhalten.
 
 Nutzung auf **eigene Verantwortung**. Die Software steuert die Netzladung einer
 Batterieanlage – vor dem Scharfschalten (Dry-Run aus) unbedingt im Parallelbetrieb prüfen.
-Keine Gewähr für Preis-, Prognose- oder Messdaten Dritter (Tibber, forecast.solar,
+Keine Gewähr für Preis-, Prognose- oder Messdaten Dritter (Tibber, Victron VRM,
 Victron-Register).

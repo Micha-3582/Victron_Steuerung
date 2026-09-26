@@ -50,50 +50,23 @@ später unter „Einstellungen" ändern.</div>
 </div>
 
 <div class="card">
-  <h2>3 · Standort</h2>
-  <label>Aus Google Maps einfügen</label>
-  <input id="pv_coords" placeholder="51.592657, 6.504778">
-  <small class="hint">Beide Zahlen zusammen einfügen – wird automatisch aufgeteilt.</small>
+  <h2>3 · Victron VRM <span class="muted" style="font-size:13px;text-transform:none;letter-spacing:0">(Solar-Prognose, empfohlen)</span></h2>
+  <small class="hint">Die Sonnenprognose kommt vom Victron-Portal – Standort und Dachflächen musst du nicht eintragen. Auch später im Reiter „VRM“ nachholbar.</small>
   <div class="grid2" style="margin-top:10px">
-    <div><label>Breitengrad</label><input id="pv_latitude" value="{{ cfg.pv_latitude or '' }}" placeholder="51.573"></div>
-    <div><label>Längengrad</label><input id="pv_longitude" value="{{ cfg.pv_longitude or '' }}" placeholder="6.510"></div>
+    <div><label>Installations-ID</label><input id="vrm_inst" inputmode="numeric" placeholder="z. B. 844297" autocomplete="off"></div>
+    <div><label>Zugriffstoken</label><input id="vrm_token" type="password" autocomplete="new-password"></div>
   </div>
   <details class="help">
-    <summary>Wie finde ich meine Koordinaten?</summary>
+    <summary>Wo finde ich die Zugangsdaten?</summary>
     <div class="help-body">
-      Standort deiner Anlage – damit holt die App die passende PV-Prognose. Auf ein paar Hundert Meter genau reicht völlig.
       <ol>
-        <li>Öffne <b>Google Maps</b>, suche deine Adresse.</li>
-        <li><b>Rechtsklick</b> auf dein Dach → oben erscheinen die Koordinaten als
-          <b>zwei Zahlen mit Komma</b>, z.B. <code>51.592657, 6.504778</code>.</li>
-        <li>Klicke darauf (kopiert sie) und füge sie oben in <b>„Aus Google Maps einfügen"</b> ein –
-          Breiten- und Längengrad werden automatisch getrennt.</li>
+        <li>Im <b>VRM-Portal</b> (vrm.victronenergy.com) anmelden → links <b>Präferenzen</b> → <b>Integrationen</b> → <b>Zugangs-Token</b> →
+          oben rechts <b>Hinzufügen</b>, einen Namen vergeben und den Token sofort kopieren.</li>
+        <li>Die <b>Installations-ID</b> findest du unter <b>Installationen</b> → deine Anlage → <b>Einstellungen</b> → <b>Allgemeines</b>
+          (Zeile „VRM-Installations-ID“, nicht die „Portal-ID“).</li>
       </ol>
-      <span class="muted">Erste Zahl = Breitengrad, zweite = Längengrad. Alternativ einfach nach „Koordinaten &lt;deine Stadt&gt;" suchen.</span>
     </div>
   </details>
-</div>
-
-<div class="card">
-  <h2>4 · Solarflächen <span class="muted" style="font-size:13px;text-transform:none;letter-spacing:0">(optional)</span></h2>
-  <small class="hint">Keine PV-Anlage? Einfach leer lassen. · Azimut: 0 = Süd, −90 = Ost, +90 = West · Neigung 0–90° · kWp = Modulleistung.</small>
-  <details class="help">
-    <summary>Was bedeuten Azimut, Neigung und kWp?</summary>
-    <div class="help-body">
-      Für jede Dachfläche mit Solarmodulen legst du eine Zeile an. Damit holt die App die PV-Prognose.
-      <ol>
-        <li><b>Name</b> – frei wählbar, nur zur Übersicht.</li>
-        <li><b>Azimut</b> – Himmelsrichtung der Module: <b>0 = Süd</b>, <b>−90 = Ost</b>,
-          <b>+90 = West</b>, <b>±180 = Nord</b>. Südost ≈ <code>−45</code>.</li>
-        <li><b>Neigung</b> – Modulwinkel: <b>0° = flach</b>, <b>90° = senkrecht</b>. Schrägdach meist 30–45°.</li>
-        <li><b>kWp</b> – installierte Modulleistung der Fläche. Anzahl Module × Wattpeak ÷ 1000.
-          8 × 400 W = <code>3,2</code> kWp.</li>
-      </ol>
-      <span class="muted">Mehrere Dächer? Pro Ausrichtung eine eigene Zeile – wird summiert.</span>
-    </div>
-  </details>
-  <div id="planes" style="margin-top:10px"></div>
-  <button class="ghost" onclick="addPlane()">+ Fläche</button>
 </div>
 
 <div class="card">
@@ -107,48 +80,13 @@ später unter „Einstellungen" ändern.</div>
 {% endblock %}
 {% block scripts %}
 <script>
-const initialPlanes = {{ cfg.pv_planes | tojson }};
-function planeRow(p = {}) {
-  const d = document.createElement('div'); d.className = 'plane-row';
-  d.innerHTML = `
-    <div><label>Name</label><input class="p-name" value="${p.name||''}"></div>
-    <div><label>Azimut</label><input class="p-az" value="${p.azimuth??''}"></div>
-    <div><label>Neigung</label><input class="p-dec" value="${p.declination??''}"></div>
-    <div><label>kWp</label><input class="p-kwp" value="${p.kwp??''}"></div>
-    <button class="danger" onclick="this.parentElement.remove()">✕</button>`;
-  return d;
-}
-function addPlane(p) { document.getElementById('planes').appendChild(planeRow(p)); }
-(initialPlanes.length ? initialPlanes : [{}]).forEach(addPlane);
-
-// Google-Maps-Koordinaten ("51.59, 6.50") automatisch aufteilen
-const coordsEl = document.getElementById('pv_coords');
-if (coordsEl) coordsEl.addEventListener('input', () => {
-  const m = coordsEl.value.split(',').map(x => parseFloat(x.trim()));
-  if (m.length === 2 && !isNaN(m[0]) && !isNaN(m[1])) {
-    document.getElementById('pv_latitude').value = m[0];
-    document.getElementById('pv_longitude').value = m[1];
-  }
-});
-
 // Komma ODER Punkt als Dezimaltrenner akzeptieren (parseFloat("0,6") wäre sonst 0)
 const numDE = v => parseFloat(String(v).replace(',', '.'));
-function collectPlanes() {
-  return [...document.querySelectorAll('.plane-row')].map(r => ({
-    name: r.querySelector('.p-name').value,
-    azimuth: numDE(r.querySelector('.p-az').value),
-    declination: numDE(r.querySelector('.p-dec').value),
-    kwp: numDE(r.querySelector('.p-kwp').value),
-  })).filter(p => p.kwp > 0);
-}
 function collect() {
   return {
     cerbo_host: document.getElementById('cerbo_host').value.trim(),
     cerbo_port: parseInt(document.getElementById('cerbo_port').value) || 502,
     tibber_token: document.getElementById('tibber_token').value.trim(),
-    pv_latitude: numDE(document.getElementById('pv_latitude').value),
-    pv_longitude: numDE(document.getElementById('pv_longitude').value),
-    pv_planes: collectPlanes(),
   };
 }
 
@@ -168,8 +106,15 @@ document.getElementById('btn-save').addEventListener('click', async () => {
   const r = await fetch('/api/config', {method:'POST',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify(collect())});
   const d = await r.json();
-  if (d.configured) location.href = '/';
-  else document.getElementById('test-result').innerHTML =
+  if (d.configured) {
+    const inst = document.getElementById('vrm_inst').value.trim(), tok = document.getElementById('vrm_token').value.trim();
+    if (inst && tok) {                                    // VRM optional gleich mit einrichten
+      const v = await fetch('/api/vrm/credentials', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({installation_id: inst, token: tok})});
+      if (!v.ok) { const e = await v.json().catch(() => ({})); alert('VRM-Zugang nicht gespeichert: ' + (e.error || 'Fehler') + '\nDu kannst ihn später im Reiter „VRM“ eintragen.'); }
+    }
+    location.href = '/';
+  } else document.getElementById('test-result').innerHTML =
     '<div class="banner err">Noch unvollständig – bitte alle Felder ausfüllen.</div>';
 });
 </script>

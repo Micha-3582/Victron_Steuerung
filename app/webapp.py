@@ -31,8 +31,7 @@ import updater
 import vrm
 import vrm_import
 from auth import UserError, UserStore, new_secret_key
-from datasources import (OPENMETEO_PR, PvForecast, PvForecastOpenMeteo,
-                         fetch_tibber_prices)
+from datasources import fetch_tibber_prices
 from logic import ESS_CHARGE, ESS_IDLE, Params, decide
 from logic import _parse_iso as logic_parse_iso
 from victron import Cerbo
@@ -210,32 +209,10 @@ class Controller:
         self.prices = []          # aufbereitete Slots für die Kurve
         self.last_tick = None
         self.last_error = None
-        self._pv = None
-        self._pv_key = None
-        self._om = None
-        self._om_key = None
         self._stop = threading.Event()
         self.last_system = None          # letzte Cerbo-Messung (vom Energie-Sampler)
         self.last_system_ts = 0.0
         self._surplus_dry_on: dict[str, bool] = {}   # Trockenlauf: gedachter Schaltzustand
-
-    def _pv_source(self, cfg):
-        key = (cfg["pv_latitude"], cfg["pv_longitude"], str(cfg["pv_planes"]))
-        if self._pv is None or self._pv_key != key:
-            self._pv = PvForecast(cfg["pv_latitude"], cfg["pv_longitude"], cfg["pv_planes"])
-            self._pv_key = key
-        return self._pv
-
-    def _om_source(self, cfg):
-        """Primärquelle Open-Meteo für die Regelung. Performance Ratio aus der
-        Config (Standard 0,68), wird bei Änderung neu aufgebaut."""
-        pr = float(cfg.get("openmeteo_pr", OPENMETEO_PR))
-        key = (cfg["pv_latitude"], cfg["pv_longitude"], str(cfg["pv_planes"]), pr)
-        if self._om is None or self._om_key != key:
-            self._om = PvForecastOpenMeteo(cfg["pv_latitude"], cfg["pv_longitude"],
-                                           cfg["pv_planes"], pr=pr)
-            self._om_key = key
-        return self._om
 
     def tick(self):
         cfg = store.load_config()
@@ -253,72 +230,40 @@ class Controller:
             log.warning("System-Werte nicht lesbar: %s", e)
         prices = fetch_tibber_prices(cfg["tibber_token"])
         pv_note = None
-        # Primärquelle für die Regelung: Open-Meteo (bringt die Performance Ratio
-        # schon mit -> kein zusätzlicher Korrekturfaktor in decide()).
-        try:
-            solar_today, solar_tom = self._om_source(cfg).get()
-        except Exception as e:                               # noqa: BLE001
-            solar_today = solar_tom = 0.0
-            pv_note = f"PV-Prognose (Open-Meteo) nicht verfügbar ({e}) - rechne mit 0 kWh"
-            log.warning(pv_note)
-        # forecast.solar nur noch als Vergleich fürs Logbuch (steuert nichts).
-        try:
-            fs_today, _fs_tom = self._pv_source(cfg).get()
-        except Exception as e:                               # noqa: BLE001
-            fs_today = 0.0
-            log.warning("forecast.solar (Vergleich) nicht verfügbar: %s", e)
 
         now = datetime.now()
         ev = store.active_ev(now)
         forced = bool(cfg.get("manual_override")) or ev is not None
         reason = "Manueller Ladetermin" if ev else "MANUELL"
 
-        # Fuer die REGELUNG den Tagesrest um das bereits real Gemessene ersetzen -
-        # sonst plant decide() nachmittags noch mit der ungenauen Morgen-Tagesprognose
-        # weiter, obwohl laengst klar ist, wie viel Sonne heute tatsaechlich kam.
-        # Gleiches Prinzip wie bei der Anzeige-Spanne (store.pv_forecast_range):
-        # gemessen + laut Stundenkurve noch zu erwartender Rest von JETZT bis
-        # Tagesende (nachts automatisch 0). Betrifft nur decide() - der WEITER
-        # UNTEN ans Solarlogbuch gemeldete Wert bleibt die reine, unkorrigierte
-        # Tagesprognose (sonst wuerde sich die Kalibrierungsbasis selbst verfaelschen,
-        # da record_solar_forecast() den Wert vom ERSTEN Tick des Tages einfriert).
-        # Zusaetzlich zur globalen Performance Ratio (die den ganzen Tag gleich
-        # behandelt) eine gelernte Tageszeit-Korrektur anwenden - faengt z.B. eine
-        # nur morgens verschattete Flaeche ab, die ein einzelner Tages-Faktor
-        # verschmieren wuerde (siehe store.auto_adjust_bucket_factors).
-        bucket_factors = cfg.get("pv_bucket_factors")
-        solar_today_for_control = solar_today
+        # Prognose fuer die Regelung: Victron VRM kennt die reale Anlage (lernt aus dem Ertragsverlauf) und ist
+        # die Quelle. Nur wenn es nicht eingerichtet/erreichbar/aktuell ist, rechnet die Regelung mit dem
+        # Durchschnitt der echten Tageserträge der letzten Tage.
+        measured_today = store.solar_measured_today(now)
+        vrm_data = vrm_ctl = vrm_why = None
         try:
-            om_remaining = self._om_source(cfg).get_remaining_today(
-                now, bucket_factors=bucket_factors)
-            solar_today_for_control = round(
-                store.solar_measured_today(now) + om_remaining, 2)
+            vrm_data = vrm.forecast()
+            vrm_ctl, vrm_why = vrm.control_forecast(vrm_data, now, measured_today)
         except Exception as e:                               # noqa: BLE001
-            log.warning("PV-Rest-Korrektur fuer die Regelung fehlgeschlagen (%s) - "
-                        "nutze die reine Tagesprognose", e)
-
-        # Steuerquelle: Victron VRM (kennt die reale Anlage) - ohne Zugang, bei Ausfall oder
-        # veralteten Werten faellt die Regelung automatisch auf Open-Meteo zurueck.
-        pv_source, vrm_ctl, solar_tom_ctl = "Open-Meteo", None, solar_tom
-        if cfg.get("solar_source", "auto") != "openmeteo":
-            try:
-                vrm_ctl, vrm_why = vrm.control_forecast(vrm.forecast(), now, store.solar_measured_today(now))
-                if vrm_why:
-                    pv_note = vrm_why
-                    log.warning(vrm_why)
-            except Exception as e:                           # noqa: BLE001
-                vrm_ctl = None
-                log.warning("VRM-Prognose fuer die Regelung fehlgeschlagen (%s) - nutze Open-Meteo", e)
+            vrm_why = "PV-Prognose (VRM) nicht verfügbar – Rückfall auf Durchschnitt der letzten Tage"
+            log.warning("VRM-Prognose fuer die Regelung fehlgeschlagen: %s", e)
         if vrm_ctl:
             pv_source = "VRM"
             solar_today_for_control = vrm_ctl["today_kwh"]
-            if vrm_ctl["tomorrow_kwh"] is not None:
-                solar_tom_ctl = vrm_ctl["tomorrow_kwh"]
-            else:
-                pv_note = "VRM liefert noch keine Prognose für morgen – für morgen Open-Meteo"
+            solar_tom_ctl = vrm_ctl["tomorrow_kwh"]
+            if solar_tom_ctl is None:                        # VRM hat (noch) nichts fuer morgen
+                solar_tom_ctl = store.recent_solar_average(7, now) or 0.0
+                pv_note = "VRM liefert noch keine Prognose für morgen – für morgen Ø der letzten Tage"
+        else:
+            avg = store.recent_solar_average(7, now)
+            pv_source = "Ø letzte Tage"
+            solar_today_for_control = round(max(measured_today, avg or 0.0), 2)
+            solar_tom_ctl = avg or 0.0
+            pv_note = vrm_why or "Kein VRM-Zugang eingerichtet (Einstellungen → VRM) – Prognose = Durchschnitt der letzten Tage"
+            if vrm_why:
+                log.warning(vrm_why)
 
-        # Open-Meteo bringt die Performance Ratio schon mit -> in decide() KEINEN
-        # weiteren Korrekturfaktor anwenden (sonst doppelte Skalierung). Das gilt auch fuer VRM.
+        # Die VRM-Prognose ist schon anlagenkalibriert -> in decide() KEIN weiterer Korrekturfaktor.
         params = Params.from_config(cfg)
         params.pv_korrektur_faktor = 1.0
         state = store.load_state()
@@ -328,38 +273,11 @@ class Controller:
                    params=params)
         store.save_state(state)
         store.log_charge_state(d.ess_mode == ESS_CHARGE, d.strategy, now)
-        # Solar-Logbuch: Open-Meteo (Steuerquelle) einfrieren, forecast.solar als
-        # Vergleich mitloggen, vergangene Tage mit dem realen Ertrag abschließen.
-        vrm_today = None
-        try:                                     # VRM-Prognose: nur Vergleich fuers Logbuch, Ausfall egal
-            vf = vrm.forecast()
-            if vf.get("hours"):
-                vrm_today = vf["today_kwh"]
+        # Solar-Logbuch: VRM-Tagesprognose einmal pro Tag einfrieren, vergangene Tage mit dem realen Ertrag abschließen.
+        try:
+            store.record_vrm_forecast(vrm_data["today_kwh"] if vrm_data and vrm_data.get("hours") else None, now)
         except Exception as e:                               # noqa: BLE001
-            log.warning("VRM-Prognose (Vergleich) nicht verfügbar: %s", e)
-        if solar_today > 0 or fs_today > 0 or vrm_today:
-            fs_factor = Params.from_config(cfg).pv_korrektur_faktor
-            fs_corr = round(fs_today * fs_factor, 2) if fs_today else None
-            store.record_solar_forecast(
-                om_kwh=solar_today, pr=float(cfg.get("openmeteo_pr", OPENMETEO_PR)),
-                now=now, fs_raw=(fs_today or None), fs_corr=fs_corr,
-                fs_factor=fs_factor,
-                hourly_today=self._om_source(cfg).get_hourly_today(), vrm_kwh=vrm_today)
-            # Einmal pro Tag die PR leise Richtung Logbuch-Empfehlung nachziehen -
-            # ab hier laeuft die Kalibrierung von selbst, kein manuelles Nachtragen
-            # mehr noetig (siehe store.auto_adjust_pr).
-            new_pr = store.auto_adjust_pr(now)
-            if new_pr is not None:
-                cfg["openmeteo_pr"] = new_pr
-                log.info("PV-Prognose: Performance Ratio automatisch auf %.3f angepasst", new_pr)
-            # Dieselbe taegliche Nachjustierung fuer die Tageszeit-Buckets (siehe
-            # store.auto_adjust_bucket_factors) - laeuft unabhaengig von der PR-
-            # Anpassung, beide schreiben nur unterschiedliche Config-Felder.
-            new_buckets = store.auto_adjust_bucket_factors(now)
-            if new_buckets is not None:
-                cfg["pv_bucket_factors"] = new_buckets
-                log.info("PV-Prognose: Tageszeit-Faktoren automatisch angepasst auf %s",
-                          new_buckets)
+            log.warning("Solar-Logbuch konnte nicht geschrieben werden: %s", e)
 
         dry = bool(cfg.get("dry_run", True))
         wrote = False
@@ -387,14 +305,7 @@ class Controller:
                 "charge_power_w": Params.from_config(cfg).charge_power_w,
                 "pv_today": d.solar_today_korr,
                 "pv_tom": d.solar_tom_korr,
-                # Unsicherheits-Spannen stammen aus den Open-Meteo-Abweichungen - fuer VRM nicht uebertragbar
                 "pv_source": pv_source,
-                "pv_today_range": None if vrm_ctl else store.pv_forecast_range(
-                    d.solar_today_korr, now.date().isoformat(), now,
-                    remaining_forecast_kwh=self._om_source(cfg).get_remaining_today(
-                        now, bucket_factors=bucket_factors)),
-                "pv_tom_range": None if vrm_ctl else store.pv_forecast_range(
-                    d.solar_tom_korr, (now.date() + timedelta(days=1)).isoformat(), now),
                 "dry_run": dry,
                 "wrote": wrote,
                 "ev_active": ev,
@@ -616,9 +527,7 @@ def solar_log_page():
 
 @app.route("/api/solar-log")
 def api_solar_log():
-    cfg = store.load_config()
     data = store.solar_log()
-    data["current_pr"] = float(cfg.get("openmeteo_pr", OPENMETEO_PR))
     try:                                          # vom VRM gemessener Tagesertrag zum Vergleich mit unserer Messung
         vm = vrm.daily_solar()
     except Exception as e:                        # noqa: BLE001
@@ -847,23 +756,20 @@ def api_config():
         return jsonify(cfg)
     body = request.get_json(silent=True) or {}
     cfg = store.load_config()
-    allowed = ["app_display_name", "cerbo_host", "cerbo_port", "tibber_token", "pv_latitude",
-               "pv_longitude", "pv_planes", "dry_run", "poll_seconds",
+    allowed = ["app_display_name", "cerbo_host", "cerbo_port", "tibber_token", "dry_run", "poll_seconds",
                "energy_sample_seconds", "manual_override", "web_port",
-               "chart_energy_hourly", "chart_flow_hourly", "openmeteo_pr",
+               "chart_energy_hourly", "chart_flow_hourly",
                "show_live_values", "show_energy_chart", "show_flow_chart",
                "show_week_overview", "show_month_overview", "show_tibber_card",
                "show_override_card", "show_price_plan", "show_charge_log",
                "show_ev_card", "show_shelly_card", "surplus_enabled", "surplus_dry_run",
-               "surplus_min_soc", "tile_order", "scan_networks", "solar_source"] + list(Params().__dict__.keys())
+               "surplus_min_soc", "tile_order", "scan_networks"] + list(Params().__dict__.keys())
     allowed = allowed + ["surplus_" + k for k in surplus.DEFAULTS]     # einstellbare Automatik-Werte
     if "scan_networks" in body:
         try:
             body["scan_networks"] = ", ".join(tuya.parse_networks(body["scan_networks"]))
         except tuya.TuyaError as e:
             return jsonify(error=str(e)), 400
-    if body.get("solar_source") not in (None, "auto", "openmeteo"):
-        return jsonify(error="Ungültige Prognose-Quelle"), 400
     if not (isinstance(body.get("tile_order", []), list)
             and all(isinstance(k, str) for k in body.get("tile_order", []))):
         body.pop("tile_order", None)          # Kachelreihenfolge: nur Liste von Textschluesseln

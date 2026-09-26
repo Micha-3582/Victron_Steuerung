@@ -160,95 +160,24 @@
   </details>
 </div>
 
-<div class="card">
-  <h2><svg class="h2i" viewBox="0 0 24 24"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>Standort</h2>
-  <label>Aus Google Maps einfügen</label>
-  <input id="pv_coords" placeholder="51.592657, 6.504778">
-  <small class="hint">Beide Zahlen zusammen einfügen – wird automatisch aufgeteilt.</small>
-  <div class="grid2" style="margin-top:10px">
-    <div><label>Breitengrad</label><input id="pv_latitude"></div>
-    <div><label>Längengrad</label><input id="pv_longitude"></div>
-  </div>
+<div class="card" id="pv-forecast-card">
+  <h2><svg class="h2i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/><line x1="19.1" y1="4.9" x2="17" y2="7"/><line x1="7" y1="17" x2="4.9" y2="19.1"/></svg>PV-Prognose (Steuerung)</h2>
+  <div class="muted" style="margin-bottom:10px">Wie viel Sonne heute und morgen kommt, holt die Steuerung vom <b>Victron VRM</b> (Reiter „VRM“).
+    Das VRM lernt aus dem Ertragsverlauf deiner Anlage – Standort, Dachflächen und Neigung musst du hier nicht mehr eintragen.
+    Ist das VRM nicht erreichbar oder nicht eingerichtet, rechnet die Steuerung vorsichtig mit dem Durchschnitt deiner echten Tageserträge der letzten Tage.</div>
+  <div class="muted" id="pv-source-msg" style="margin-bottom:10px"></div>
   <details class="help">
-    <summary>Wie finde ich meine Koordinaten?</summary>
-    <div class="help-body">
-      Standort deiner Anlage für die PV-Prognose – auf ein paar Hundert Meter genau reicht.
-      <ol>
-        <li><b>Google Maps</b> öffnen, Adresse suchen.</li>
-        <li><b>Rechtsklick</b> auf dein Dach → oben stehen die Koordinaten als <b>zwei Zahlen mit Komma</b>
-          (z.B. <code>51.592657, 6.504778</code>).</li>
-        <li>Draufklicken (kopiert) und oben in <b>„Aus Google Maps einfügen"</b> einfügen – wird automatisch getrennt.</li>
-      </ol>
-      <span class="muted">Erste Zahl = Breitengrad, zweite = Längengrad.</span>
-    </div>
-  </details>
-</div>
-
-<div class="card">
-  <h2><svg class="h2i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1"/><line x1="9" y1="4" x2="9" y2="16"/><line x1="15" y1="4" x2="15" y2="16"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="12" y1="16" x2="12" y2="21"/></svg>Solarflächen</h2>
-  <small class="hint">Azimut: 0 = Süd, −90 = Ost, +90 = West.</small>
-  <details class="help">
-    <summary>Was bedeuten Azimut, Neigung und kWp?</summary>
-    <div class="help-body">
-      Für jede Dachfläche mit Solarmodulen legst du eine Zeile an. Die App holt damit die PV-Prognose (von forecast.solar) und rechnet aus, wie viel Sonnenstrom zu erwarten ist.
-      <ol>
-        <li><b>Name</b> – frei wählbar, nur zur Übersicht (z.B. „Garagendach Süd").</li>
-        <li><b>Azimut</b> – die Himmelsrichtung, in die die Module zeigen:
-          <b>0 = Süden</b>, <b>−90 = Osten</b>, <b>+90 = Westen</b>, <b>±180 = Norden</b>.
-          Beispiel: leicht nach Südost = <code>−45</code>.</li>
-        <li><b>Neigung</b> – der Aufständerungswinkel der Module: <b>0° = flach</b> (waagerecht),
-          <b>90° = senkrecht</b> (z.B. an der Fassade). Ein typisches Schrägdach hat 30–45°.</li>
-        <li><b>kWp</b> – die installierte Modulleistung dieser Fläche in Kilowatt-Peak.
-          Steht auf dem Datenblatt/der Rechnung, oder: Anzahl Module × Wattpeak ÷ 1000.
-          Beispiel: 8 Module à 400 W = <code>3,2</code> kWp.</li>
-      </ol>
-      <span class="muted">Mehrere Dächer mit unterschiedlicher Ausrichtung? Lege einfach pro Fläche eine eigene Zeile an – die Prognosen werden summiert.</span>
-    </div>
-  </details>
-  <div id="planes" style="margin-top:10px"></div>
-  <button class="ghost" onclick="addPlane()">+ Fläche</button>
-</div>
-
-<div class="card">
-  <h2><svg class="h2i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/><line x1="19.1" y1="4.9" x2="17" y2="7"/><line x1="7" y1="17" x2="4.9" y2="19.1"/></svg>PV-Prognose</h2>
-  <details class="help">
-    <summary>Was bewirken die PV-Werte?</summary>
-    <div class="help-body">
-      <ol>
-        <li><b>Performance Ratio (Open-Meteo)</b> – <b>steuert die Anlage.</b> Open-Meteo liefert die
-          Einstrahlung auf die Module; die PR rechnet sie in realen Ertrag um (Wechselrichter-,
-          Leitungs-, Temperaturverluste, Verschattung). <code>0.68</code> ist der Startwert -
-          danach passt die App den Wert <b>automatisch, in kleinen Schritten pro Tag</b> an die
-          Empfehlung aus dem Solarlogbuch an, sobald genug Tage vorliegen. Kein manuelles
-          Nachtragen mehr nötig; von Hand geänderte Werte werden mit der Zeit wieder
-          Richtung Empfehlung gezogen.</li>
-        <li><b>Morgen-Faktor</b> – wie viel der morgigen Vormittags-PV schon eingeplant wird.
-          Saisonal: Winter niedrig (~0.05), Sommer höher (~0.25).</li>
-        <li><b>Korrekturfaktor (forecast.solar)</b> – wirkt nur noch auf die <b>Vergleichsspalte</b>
-          im Logbuch, steuert nichts. forecast.solar hat sich als unzuverlässig erwiesen.</li>
-      </ol>
-    </div>
+    <summary>Was bewirkt der Morgen-Faktor?</summary>
+    <div class="help-body">Wie viel der morgigen Vormittags-PV schon in die heutige Nachtplanung eingerechnet wird.
+      Saisonal: Winter niedrig (~0.05), Sommer höher (~0.25).</div>
   </details>
   <div class="grid2">
-    <div><label>Performance Ratio – Open-Meteo (steuert, automatisch kalibriert)</label>
-      <input id="openmeteo_pr" type="number" step="0.01" min="0" readonly style="opacity:.7;cursor:default">
-      <small class="hint">Passt sich täglich selbst an, siehe Solarlogbuch.</small></div>
     <div><label>Morgen-Faktor (0–1)</label><input id="pv_tom_morning_factor" type="number" step="0.01"></div>
-  </div>
-  <div class="grid2" style="margin-top:10px">
-    <div><label>Korrekturfaktor – forecast.solar (nur Vergleich)</label><input id="pv_korrektur_faktor" type="number" step="0.01" min="0"></div>
     <div></div>
-  </div>
-  <div style="margin-top:10px">
-    <label>Tageszeit-Feinkorrektur (automatisch gelernt, readonly)</label>
-    <div id="pv_bucket_factors" class="muted" style="margin-top:2px">–</div>
-    <small class="hint">Gleicht z.B. eine nur morgens verschattete Fläche aus, die ein
-      einzelner Tages-Faktor nicht abbilden kann – zieht sich zusätzlich zur PR aus dem
-      Solarlogbuch nach. 1,00 = keine Korrektur nötig.</small>
   </div>
   <div style="margin-top:12px">
     <a href="/solar-log"><button type="button" class="ghost">☀︎ Solarlogbuch öffnen</button></a>
-    <span class="muted" style="margin-left:8px">Prognose vs. realer Ertrag der letzten Tage – zum datenbasierten Einstellen der PR.</span>
+    <span class="muted" style="margin-left:8px">VRM-Prognose vs. realer Ertrag der letzten Tage.</span>
   </div>
 </div>
 
@@ -378,19 +307,6 @@
   </div>
 </div>
 
-<div class="card" id="vrm-source-card">
-  <h2>Victron VRM – Prognose für die Steuerung</h2>
-  <div class="muted" style="margin-bottom:10px">Die Ladeplanung braucht eine Vorhersage, wie viel Sonne heute und morgen kommt. Das VRM kennt deine echte Anlage
-    (Ertragsverlauf, Verschattung) und ist deutlich genauer als eine reine Wetter-Rechnung. Fällt das VRM aus oder liefert veraltete Werte,
-    schaltet die Steuerung automatisch auf Open-Meteo um und zeigt einen Hinweis.</div>
-  <label>Quelle</label>
-  <select id="solar-source">
-    <option value="auto">Automatisch: VRM, bei Ausfall Open-Meteo (empfohlen)</option>
-    <option value="openmeteo">Nur Open-Meteo (VRM steuert nichts)</option>
-  </select>
-  <div class="muted" id="solar-source-msg" style="margin-top:8px"></div>
-</div>
-
 <div class="card" id="vrm-restore-card">
   <h2>Victron VRM – Verlauf nachholen</h2>
   <div>
@@ -504,20 +420,8 @@
 {% block scripts %}
 <script>
 let cfg = {};
-function planeRow(p = {}) {
-  const d = document.createElement('div'); d.className = 'plane-row';
-  d.innerHTML = `
-    <div><label>Name</label><input class="p-name" value="${p.name||''}"></div>
-    <div><label>Azimut</label><input class="p-az" value="${p.azimuth??''}"></div>
-    <div><label>Neigung</label><input class="p-dec" value="${p.declination??''}"></div>
-    <div><label>kWp</label><input class="p-kwp" value="${p.kwp??''}"></div>
-    <button class="danger" onclick="this.parentElement.remove()">✕</button>`;
-  return d;
-}
-function addPlane(p) { document.getElementById('planes').appendChild(planeRow(p)); }
-
 const PARAM_KEYS = ['battery_usable_kwh','daily_usage_kwh','charge_power_w','pv_reserve_kwh',
-  'max_charge_soc','absolute_cheap_price','pv_korrektur_faktor','pv_tom_morning_factor',
+  'max_charge_soc','absolute_cheap_price','pv_tom_morning_factor',
   'morning_peak_start','morning_peak_end',
   'evening_peak_start','evening_peak_end','min_peak_soc','peak_avoid_price',
   'night_safety_soc','target_safe_soc','hysterese_soc'];
@@ -573,40 +477,14 @@ async function init() {
   document.getElementById('chart_flow_hourly').checked = !!cfg.chart_flow_hourly;
   tileOrder = mergeTileOrder(cfg.tile_order); renderTileToggles();
   TILE_DEFS.forEach(t => { document.getElementById(t.key).checked = cfg[t.key] !== false; });
-  document.getElementById('openmeteo_pr').value = cfg.openmeteo_pr ?? 0.68;
-  const bf = cfg.pv_bucket_factors;
-  document.getElementById('pv_bucket_factors').textContent = bf
-    ? `Morgen ${bf.morgen ?? 1.0} · Mittag ${bf.mittag ?? 1.0} · Nachmittag ${bf.nachmittag ?? 1.0}`
-    : 'Noch keine Daten – braucht mehrere Logbuch-Tage.';
   document.getElementById('cerbo_host').value = cfg.cerbo_host || '';
   document.getElementById('cerbo_port').value = cfg.cerbo_port || 502;
   document.getElementById('tibber_token').value = cfg.tibber_token || '';
-  document.getElementById('pv_latitude').value = cfg.pv_latitude ?? '';
-  document.getElementById('pv_longitude').value = cfg.pv_longitude ?? '';
   PARAM_KEYS.forEach(k => { const el = document.getElementById(k); if (el) el.value = cfg[k] ?? ''; });
-  (cfg.pv_planes || []).forEach(addPlane);
 }
-
-// Google-Maps-Koordinaten automatisch aufteilen
-const coordsEl = document.getElementById('pv_coords');
-if (coordsEl) coordsEl.addEventListener('input', () => {
-  const m = coordsEl.value.split(',').map(x => parseFloat(x.trim()));
-  if (m.length === 2 && !isNaN(m[0]) && !isNaN(m[1])) {
-    document.getElementById('pv_latitude').value = m[0];
-    document.getElementById('pv_longitude').value = m[1];
-  }
-});
 
 // Komma ODER Punkt als Dezimaltrenner akzeptieren (parseFloat("0,6") wäre sonst 0)
 const numDE = v => parseFloat(String(v).replace(',', '.'));
-function collectPlanes() {
-  return [...document.querySelectorAll('.plane-row')].map(r => ({
-    name: r.querySelector('.p-name').value,
-    azimuth: numDE(r.querySelector('.p-az').value),
-    declination: numDE(r.querySelector('.p-dec').value),
-    kwp: numDE(r.querySelector('.p-kwp').value),
-  })).filter(p => p.kwp > 0);
-}
 
 document.getElementById('btn-save').addEventListener('click', async () => {
   const body = {
@@ -618,13 +496,9 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     chart_flow_hourly: document.getElementById('chart_flow_hourly').checked,
     ...Object.fromEntries(TILE_DEFS.map(t => [t.key, document.getElementById(t.key).checked])),
     tile_order: tileOrder,
-    openmeteo_pr: numDE(document.getElementById('openmeteo_pr').value) || 0.68,
     cerbo_host: document.getElementById('cerbo_host').value.trim(),
     cerbo_port: parseInt(document.getElementById('cerbo_port').value) || 502,
     tibber_token: document.getElementById('tibber_token').value.trim(),
-    pv_latitude: numDE(document.getElementById('pv_latitude').value),
-    pv_longitude: numDE(document.getElementById('pv_longitude').value),
-    pv_planes: collectPlanes(),
   };
   PARAM_KEYS.forEach(k => { const v = numDE(document.getElementById(k).value); if (!isNaN(v)) body[k] = v; });
   await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'},
@@ -1064,21 +938,14 @@ document.getElementById('vrm-save').addEventListener('click', async e => {
   b.disabled = false;
 });
 loadVrmInfo();
-/* --- Prognose-Quelle fuer die Steuerung --- */
-async function loadSolarSource() {
+/* --- Woher kommt die Prognose der Steuerung gerade? --- */
+(async () => {
   try {
-    const cfg = await (await fetch('/api/config')).json();
-    document.getElementById('solar-source').value = cfg.solar_source === 'openmeteo' ? 'openmeteo' : 'auto';
     const st = (await (await fetch('/api/status')).json()).status || {};
-    document.getElementById('solar-source-msg').textContent = st.pv_source
-      ? `Aktuell steuert: ${st.pv_source}${st.pv_note ? ' – ⚠ ' + st.pv_note : ''}` : '';
+    if (st.pv_source) document.getElementById('pv-source-msg').textContent =
+      `Aktuell steuert: ${st.pv_source}${st.pv_note ? ' – ⚠ ' + st.pv_note : ''}`;
   } catch (e) { /* egal */ }
-}
-document.getElementById('solar-source').addEventListener('change', async e => {
-  try { await shellyApi('/api/config', 'POST', { solar_source: e.target.value }); savedToast(); setTimeout(loadSolarSource, 3000); }
-  catch (err) { document.getElementById('solar-source-msg').textContent = err.message; }
-});
-loadSolarSource();
+})();
 /* --- Fehlende Verlaufsdaten aus dem VRM nachholen (erst Vorschau, dann Übernehmen) --- */
 function restoreMsg(t, err) { const m = document.getElementById('vrm-restore-msg'); m.textContent = t; m.style.color = err ? '#e5544a' : ''; }
 function fmtDay(d) { const [Y, M, D] = d.split('-'); return `${D}.${M}.${Y}`; }
@@ -1117,8 +984,8 @@ setInterval(() => loadSurplus(false), 15000);
 /* --- Reiter: jede Karte gehoert zu genau einem Reiter (Zuordnung ueber die Ueberschrift) --- */
 const ADMIN_TABS = [
   { id: 'anlage', label: 'Anlage', match: ['Victron Cerbo', 'Anlage', 'Batterie-Watchdog', 'Netz-Zähler'] },
-  { id: 'tarif', label: 'Tarif & Laden', match: ['Tibber', 'Stromtarif', 'Peak-Schutz', 'SOC-Strategie'] },
-  { id: 'solar', label: 'Solar', match: ['Standort', 'Solarfläch', 'PV-Prognose', 'PV-Wechselrichter'] },
+  { id: 'tarif', label: 'Tarif & Laden', match: ['Tibber', 'Stromtarif', 'Peak-Schutz', 'SOC-Strategie', 'PV-Prognose'] },
+  { id: 'solar', label: 'Solar', match: ['PV-Wechselrichter'] },
   { id: 'vrm', label: 'VRM', match: ['Victron VRM'] },
   { id: 'geraete', label: 'Geräte & Überschuss', match: ['Geräte', 'Shelly', 'Überschuss'] },
   { id: 'anzeige', label: 'Dashboard', match: ['Kacheln', 'Diagramme'] },
@@ -1136,9 +1003,10 @@ const ADMIN_TABS = [
   const setHdr = () => document.documentElement.style.setProperty('--hdr-h', (document.querySelector('header')?.offsetHeight || 56) + 'px');
   setHdr(); window.addEventListener('resize', setHdr); window.addEventListener('load', setHdr);
   const bar = document.getElementById('tabbar');
-  bar.innerHTML = ADMIN_TABS.map(t => `<button type="button" data-tab="${t.id}">${t.label}</button>`).join('');
+  const TABS = ADMIN_TABS.filter(t => cards.some(c => c.dataset.tab === t.id));      // Reiter ohne Karten entfallen
+  bar.innerHTML = TABS.map(t => `<button type="button" data-tab="${t.id}">${t.label}</button>`).join('');
   function show(id) {
-    if (!ADMIN_TABS.some(t => t.id === id)) id = ADMIN_TABS[0].id;
+    if (!TABS.some(t => t.id === id)) id = TABS[0].id;
     // Speichern-Leiste ueberall ausser bei 'Geraete' und 'VRM' (dort speichert jede Aenderung sofort bzw. hat eigene Knoepfe)
     cards.forEach(c => { c.hidden = c.dataset.tab === '*' ? (id === 'geraete' || id === 'vrm') : c.dataset.tab !== id; });
     bar.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
