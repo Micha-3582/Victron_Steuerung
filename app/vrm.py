@@ -231,3 +231,37 @@ def fetch_soc_slots(c: dict, start: datetime, end: datetime) -> dict[str, float]
     except (VrmError, AttributeError, TypeError):
         pass
     return out
+
+
+# ---------------------------------------------------------------- Tages-Solarertrag laut VRM (Vergleich im Solarlogbuch)
+_daily_cache: dict = {"until": 0.0, "data": {}}
+DAILY_TTL_S = 6 * 3600
+
+
+def daily_solar() -> dict[str, float]:
+    """Vom VRM gemessener Solarertrag je Tag (kWh, ISO-Datum), letzte 35 Tage. 6 h zwischengespeichert,
+    leer ohne Zugang oder bei Fehlern (das Logbuch funktioniert dann einfach ohne diese Zeile)."""
+    c = load_credentials()
+    if not (c.get("token") and c.get("installation_id")):
+        return {}
+    with _lock:
+        if time.time() < _daily_cache["until"]:
+            return dict(_daily_cache["data"])
+    now = datetime.now()
+    start = (now - timedelta(days=34)).replace(hour=0, minute=0, second=0, microsecond=0)
+    try:
+        data = _request(c, {"type": "kwh", "interval": "days", "start": int(start.timestamp()),
+                            "end": int((now + timedelta(days=1)).timestamp())})
+        rec = data.get("records") if isinstance(data, dict) else None
+        out: dict[str, float] = {}
+        for code in ("Pc", "Pb", "Pg"):                      # Solar = zum Verbrauch + zur Batterie + ins Netz
+            for ts, v in _points(rec, code):
+                d = datetime.fromtimestamp(ts).date().isoformat()
+                out[d] = round(out.get(d, 0.0) + v, 2)
+        with _lock:
+            _daily_cache.update(until=time.time() + DAILY_TTL_S, data=out)
+        return dict(out)
+    except VrmError:
+        with _lock:
+            _daily_cache["until"] = time.time() + ERROR_TTL_S
+            return dict(_daily_cache["data"])

@@ -71,6 +71,10 @@ async function load() {
     const vr = r.vrm_forecast != null
       ? `${r.vrm_forecast.toFixed(1)} kWh<br><span class="muted">Abw. </span>${devSpan(r.vrm_deviation_pct)}`
       : '<span class="muted">–</span>';
+    // Vom VRM gemessener Ertrag zum Vergleich mit unserer Messung (Abweichung = unsere Messung gegenueber dem VRM)
+    const vm = (r.vrm_measured != null && r.actual != null && r.vrm_measured > 0.5)
+      ? `<br><span class="muted">VRM misst ${r.vrm_measured.toFixed(1)} kWh · Abw. </span>${devSpan((r.actual - r.vrm_measured) / r.vrm_measured * 100)}`
+      : '';
     // Vorschlags-PR (Open-Meteo); an gedeckelten Tagen nur in Klammern (ausgeklammert)
     const sug = r.om_suggested_pr != null
       ? (r.curtailed ? `<span class="muted">(${r.om_suggested_pr.toFixed(2)})</span>` : r.om_suggested_pr.toFixed(2))
@@ -80,7 +84,7 @@ async function load() {
       <td>${om}</td>
       <td>${fs}</td>
       <td>${vr}</td>
-      <td>${r.actual != null ? r.actual.toFixed(1) + ' kWh' : '–'}${curt}</td>
+      <td>${r.actual != null ? r.actual.toFixed(1) + ' kWh' : '–'}${vm}${curt}</td>
       <td>${sug}</td>
     </tr>`;
   }).join('');

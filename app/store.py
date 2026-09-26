@@ -840,11 +840,22 @@ def _finalize_bucket_ratios(e: dict, day: str):
     e["bucket_ratio_norm"] = ratios or None
 
 
+def _restored_days() -> set:
+    """Tage, fuer die history.json aus dem VRM nachgeholte Slots enthaelt."""
+    return {k[:10] for k, b in _load_history().get("hours", {}).items() if b.get("restored")}
+
+
 def _finalize_solar_days(days: dict, now: datetime):
     """Schließt vergangene Tage ab: realer Ertrag, Abweichung und Vorschlagswerte
     für beide Quellen. Markiert Tage mit vollem Akku (PV evtl. gedeckelt)."""
     today = now.date().isoformat()
+    # Tage, deren Verlauf nachtraeglich aus dem VRM ergaenzt wurde (Datenverlust), EINMAL neu abschliessen -
+    # sonst bleibt ein damals falsch (z. B. 0 kWh) festgehaltener Ertrag stehen und verzerrt die PR-Empfehlung.
+    restored = _restored_days()
     for day, e in days.items():
+        if day < today and day in restored and not e.get("vrm_refixed"):
+            e["actual"] = None
+            e["vrm_refixed"] = True
         if day < today and e.get("actual") is None:
             actual = _solar_actual_for_day(day)
             e["actual"] = actual

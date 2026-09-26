@@ -597,6 +597,14 @@ def api_solar_log():
     cfg = store.load_config()
     data = store.solar_log()
     data["current_pr"] = float(cfg.get("openmeteo_pr", OPENMETEO_PR))
+    try:                                          # vom VRM gemessener Tagesertrag zum Vergleich mit unserer Messung
+        vm = vrm.daily_solar()
+    except Exception as e:                        # noqa: BLE001
+        log.warning("VRM-Tagesertrag nicht verfügbar: %s", e)
+        vm = {}
+    for row in data.get("rows", []):
+        if row["date"] in vm:
+            row["vrm_measured"] = vm[row["date"]]
     return jsonify(data)
 
 
