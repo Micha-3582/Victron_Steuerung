@@ -850,7 +850,17 @@ let energyTileDrag = false;   // waehrend Verschieben: Neuaufbau pausieren
 const ENERGY_TILE_DEFAULT = ['export', 'import', 'load', 'solar', 'forecast', 'autarky'];   // Autarkie ganz rechts, Prognose daneben
 function energyTileOrder() {
   let o = []; try { o = JSON.parse(localStorage.getItem('energyTileOrder')) || []; } catch (e) { /* egal */ }
-  return [...o.filter(k => ENERGY_TILE_DEFAULT.includes(k)), ...ENERGY_TILE_DEFAULT.filter(k => !o.includes(k))];
+  return mergeEnergyTileOrder(o);
+}
+/* Fehlende Kacheln (z. B. die Prognose, die erst mit VRM-Zugang erscheint) kommen an ihren Standardplatz, nicht ans Ende. */
+function mergeEnergyTileOrder(saved) {
+  const res = saved.filter((k, i) => ENERGY_TILE_DEFAULT.includes(k) && saved.indexOf(k) === i);
+  ENERGY_TILE_DEFAULT.forEach((k, i) => {
+    if (res.includes(k)) return;
+    const prev = ENERGY_TILE_DEFAULT.slice(0, i).reverse().find(p => res.includes(p));
+    res.splice(prev ? res.indexOf(prev) + 1 : 0, 0, k);
+  });
+  return res;
 }
 function renderEnergyTiles(history, day) {
   const el = $('energy-tiles');
@@ -900,8 +910,7 @@ function initEnergyTileDragging() {
     if (!dragEl) return;
     dragEl.classList.remove('dragging'); g.classList.remove('reordering');
     const shown = [...g.querySelectorAll('.systile')].map(el => el.dataset.tileId);
-    const rest = energyTileOrder().filter(k => !shown.includes(k));      // gerade nicht angezeigte behalten ihren Platz hinten
-    try { localStorage.setItem('energyTileOrder', JSON.stringify([...shown, ...rest])); } catch (e) { /* nur Komfort */ }
+    try { localStorage.setItem('energyTileOrder', JSON.stringify(mergeEnergyTileOrder(shown))); } catch (e) { /* nur Komfort */ }
     dragEl = null; energyTileDrag = false;
   };
   g.addEventListener('pointerdown', e => {
