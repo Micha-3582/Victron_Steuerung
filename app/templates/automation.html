@@ -158,7 +158,7 @@ const SURPLUS_FINE = [
   { k: 'off_discharge_w', label: 'Batterie-Entladung-Schwelle', unit: 'W', hint: 'Ab dieser Entladung gilt der Überschuss als weg.' },
   { k: 'soc_hyst', label: 'Akku-Hysterese', unit: '%', hint: 'Abgeschaltet wird erst, wenn der Akku so viel unter „Akku mindestens" fällt.' },
   { k: 'manual_hold_min', label: 'Pause nach Handschaltung', unit: 'min', hint: 'So lange lässt die Überschuss-Automatik ein Gerät in Ruhe, das du in der App von Hand geschaltet hast.' },
-  { k: 'failsafe_min', label: 'Sicherheits-Timer (Shelly)', unit: 'min', hint: 'Eingebauter Rückschalt-Timer im Shelly: stürzt die App ab, geht das Gerät nach dieser Zeit von selbst aus. 0 = aus (Tuya-Geräte nicht unterstützt).' },
+  { k: 'failsafe_min', label: 'Sicherheits-Timer', unit: 'min', hint: 'Fällt die Steuerung aus, schaltet sich das Gerät nach dieser Zeit selbst wieder aus. 0 = kein Timer. Geht bei Shelly und Tasmota, nicht bei Tuya.' },
 ];
 function renderFine() {
   const A = S.A, box = $('surplus-fine');

@@ -114,7 +114,7 @@ $('rules_dry').addEventListener('change', () => { CFG.dry = $('rules_dry').check
 
 const SET_FIELDS = [
   { k: 'manual_hold_min', label: 'Pause nach Handschaltung', unit: 'min', hint: 'So lange lässt eine Regel ein Gerät in Ruhe, das du in der App von Hand geschaltet hast.' },
-  { k: 'failsafe_min', label: 'Sicherheits-Timer (Shelly)', unit: 'min', hint: 'Eingebauter Rückschalt-Timer im Shelly: stürzt die App ab, geht das Gerät nach dieser Zeit von selbst aus. 0 = aus (Tuya-Geräte nicht unterstützt).' },
+  { k: 'failsafe_min', label: 'Sicherheits-Timer', unit: 'min', hint: 'Fällt die Steuerung aus, schaltet sich das Gerät nach dieser Zeit selbst wieder aus. 0 = kein Timer. Geht bei Shelly und Tasmota, nicht bei Tuya.' },
 ];
 function renderSettings() {
   const A = S.A, box = $('rules-settings');
