@@ -183,6 +183,14 @@ function ruleEdited(el) {
   box.querySelector('.r-status').innerHTML = statusBlock(r);
 }
 function ruleCondDel(btn) { const box = btn.closest('[data-rule]'); btn.closest('.cond').remove(); ruleEdited(box.querySelector('.r-dev')); renderRules(); }
+let FIXED = false;
+function addModeChosen(sel) {
+  const what = sel.parentElement.querySelector('.add-what'), mode = sel.value;
+  if (!mode) { what.hidden = true; what.innerHTML = ''; return; }
+  const list = (mode === 'on' ? ADD_ON : ADD_OFF).filter(([t]) => !(FIXED && (t === 'price' || t === 'cheapest')));
+  what.innerHTML = `<option value="">${mode === 'on' ? 'Einschalten, wenn …' : 'Ausschalten, sobald …'}</option>` + list.map(([t, l]) => `<option value="${mode}:${t}">${l}</option>`).join('');
+  what.hidden = false; what.focus();
+}
 function ruleAddCond(sel) { if (!sel.value) return; const [which, t] = sel.value.split(':'); const r = ruleOf(sel); r[which] = [...r[which], clone(COND_DEFAULT[t])]; touch(); renderRules(); }
 async function ruleDelete(id) {
   if (!await uiConfirm('Regel löschen?', 'Die Regel wird entfernt, sobald du „Speichern“ drückst. Das Gerät bleibt in der Liste.', 'Löschen')) return;
@@ -212,8 +220,9 @@ function renderRules() {
   const opts = sw.map(d => `<option value="${escH(d.id)}">${escH(d.icon)} ${escH(d.name)}</option>`).join('');
   nd.innerHTML = `<option value="">+ Neue Regel für …</option>` + opts; nt.innerHTML = `<option value="">+ Ausschalt-Timer für …</option>` + opts;
   nd.onchange = () => ruleNew(nd); nt.onchange = () => ruleNew(nt, true);
-  const grp = (list, which) => list.filter(([t]) => !(fixed && (t === 'price' || t === 'cheapest'))).map(([t, l]) => `<option value="${which}:${t}">${l}</option>`).join('');
-  const addSel = `<select style="width:auto;margin-top:10px" onchange="ruleAddCond(this)"><option value="">+ Bedingung hinzufügen …</option><optgroup label="Einschalten, wenn …">${grp(ADD_ON, 'on')}</optgroup><optgroup label="Ausschalten, sobald …">${grp(ADD_OFF, 'off')}</optgroup></select>`;
+  FIXED = fixed;
+  // Bedingung hinzufuegen in zwei Schritten: erst Einschalten/Ausschalten waehlen, dann erscheint die Auswahl WAS
+  const addSel = `<div class="add-cond" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><select class="add-mode" style="width:auto" onchange="addModeChosen(this)"><option value="">+ Bedingung hinzufügen …</option><option value="on">Einschalten, wenn …</option><option value="off">Ausschalten, sobald …</option></select><select class="add-what" style="width:auto" hidden onchange="ruleAddCond(this)"></select></div>`;
   box.innerHTML = R.length ? R.map(r => {
     const d = dev(r.device_id);
     return `<div data-rule="${escH(r.id)}" style="border:1px solid var(--border);border-radius:10px;padding:10px">
