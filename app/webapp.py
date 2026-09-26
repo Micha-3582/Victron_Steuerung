@@ -1119,9 +1119,14 @@ def api_ess_min_soc():
             return jsonify(error="Der Trockenlauf der Ladesteuerung ist an – dabei wird nichts am Cerbo geändert. Schalte ihn unter Einstellungen aus."), 400
         old = cerbo.read_min_soc()
         cerbo.write_min_soc(pct, dry_run=False)
-        new = cerbo.read_min_soc()
+        new = old
+        for _ in range(10):                              # der Cerbo uebernimmt den Wert erst einen Moment spaeter
+            time.sleep(0.5)
+            new = cerbo.read_min_soc()
+            if abs(new - pct) <= 0.6:
+                break
         if abs(new - pct) > 0.6:
-            return jsonify(error=f"Der Cerbo hat {new:g} % gemeldet statt {pct} % – bitte im VRM-Portal prüfen"), 400
+            return jsonify(error=f"Der Cerbo meldet noch {new:g} % statt {pct} % – bitte kurz warten und im VRM-Portal prüfen"), 400
         opslog.log("ess", f"Minimaler Akkustand (Cerbo) von {old:g} % auf {new:g} % gesetzt")
         return jsonify(ok=True, min_soc=new)
     except Exception as e:                               # noqa: BLE001
