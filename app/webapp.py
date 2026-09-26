@@ -30,6 +30,7 @@ import tuya
 import updater
 import vrm
 import vrm_import
+import weather
 from auth import UserError, UserStore, new_secret_key
 from datasources import fetch_tibber_prices
 from logic import ESS_CHARGE, ESS_IDLE, Params, decide
@@ -667,6 +668,7 @@ def api_status():
                "show_charge_log": bool(cfg.get("show_charge_log", True)),
                "show_ev_card": bool(cfg.get("show_ev_card", True)),
                "show_shelly_card": bool(cfg.get("show_shelly_card", True)),
+               "show_weather_card": bool(cfg.get("show_weather_card", True)),
                "tile_order": [k for k in (cfg.get("tile_order") or []) if isinstance(k, str)]},
         "prices": prices,
         "ev_schedules": store.list_ev(),
@@ -762,7 +764,7 @@ def api_config():
                "show_live_values", "show_energy_chart", "show_flow_chart",
                "show_week_overview", "show_month_overview", "show_tibber_card",
                "show_override_card", "show_price_plan", "show_charge_log",
-               "show_ev_card", "show_shelly_card", "surplus_enabled", "surplus_dry_run",
+               "show_ev_card", "show_shelly_card", "show_weather_card", "surplus_enabled", "surplus_dry_run",
                "surplus_min_soc", "tile_order", "scan_networks"] + list(Params().__dict__.keys())
     allowed = allowed + ["surplus_" + k for k in surplus.DEFAULTS]     # einstellbare Automatik-Werte
     if "scan_networks" in body:
@@ -928,6 +930,32 @@ def api_shelly_auto_order():
         return jsonify(error="ids fehlt"), 400
     shelly.reorder_auto(ids)
     return jsonify(ok=True)
+
+
+@app.route("/api/weather", methods=["GET"])
+def api_weather():
+    """Wettervorhersage fuer den Standort (nur Anzeige). ?refresh=1 umgeht den Zwischenspeicher."""
+    return jsonify(weather.forecast(force=request.args.get("refresh") == "1"))
+
+
+@app.route("/api/weather/location", methods=["GET", "POST"])
+def api_weather_location():
+    if request.method == "GET":
+        return jsonify(weather.get_location())
+    body = request.get_json(silent=True) or {}
+    try:
+        weather.save_location(body.get("lat"), body.get("lon"), body.get("name", ""))
+    except weather.WeatherError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True)
+
+
+@app.route("/api/weather/search", methods=["GET"])
+def api_weather_search():
+    try:
+        return jsonify(weather.search_places(request.args.get("q", "")))
+    except weather.WeatherError as e:
+        return jsonify(error=str(e)), 400
 
 
 @app.route("/api/vrm", methods=["GET"])

@@ -287,6 +287,33 @@
     <span id="grid-msg" class="muted" style="margin-left:12px"></span></div>
 </div>
 
+<div class="card" id="weather-admin">
+  <h2><svg class="h2i" viewBox="0 0 24 24"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>Wettervorhersage – Standort</h2>
+  <div class="muted" style="margin-bottom:10px">Zeigt auf dem Dashboard das Wetter für den Standort der Anlage (Kachel „Wetter“, nur Anzeige – die Steuerung nutzt das nicht).
+    Die Daten kommen von <b>Open-Meteo</b>; dorthin gehen nur die Koordinaten. Ohne Standort bleibt die Kachel unsichtbar.</div>
+  <label>Ort suchen</label>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <input id="wx-q" placeholder="z. B. Alpen" autocomplete="off" style="flex:1;min-width:160px">
+    <button id="wx-search" class="ghost" type="button">Suchen</button>
+    <button id="wx-gps" class="ghost" type="button">📍 Meinen Standort verwenden</button>
+  </div>
+  <div id="wx-results" style="display:flex;flex-direction:column;gap:2px;margin-top:6px"></div>
+  <label style="margin-top:12px">Oder aus Google Maps einfügen</label>
+  <input id="wx-coords" placeholder="51.592657, 6.504778" autocomplete="off">
+  <small class="hint">Beide Zahlen zusammen einfügen – wird automatisch aufgeteilt. (Google Maps: Rechtsklick auf den Standort → oben stehen die Koordinaten.)</small>
+  <div class="grid2" style="margin-top:10px">
+    <div><label>Breitengrad</label><input id="wx-lat" inputmode="decimal"></div>
+    <div><label>Längengrad</label><input id="wx-lon" inputmode="decimal"></div>
+  </div>
+  <label style="margin-top:10px">Anzeigename (optional)</label>
+  <input id="wx-name" placeholder="z. B. Zuhause" maxlength="80" autocomplete="off">
+  <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <button id="wx-save" type="button">Standort speichern</button>
+    <button id="wx-clear" class="ghost" type="button">Standort entfernen</button>
+  </div>
+  <div class="muted" id="wx-msg" style="margin-top:10px"></div>
+</div>
+
 <div class="card" id="vrm-admin">
   <h2>Victron VRM – Zugang &amp; Solar-Prognose</h2>
   <div class="muted" style="margin-bottom:10px">Zeigt auf dem Dashboard den Solarertrag, den das Victron-VRM-Portal für heute und morgen erwartet.
@@ -439,6 +466,7 @@ const TILE_DEFS = [
   { key: 'show_charge_log', label: 'Ladevorgänge (heute)', hint: 'Protokoll geplanter/durchgeführter Ladungen.' },
   { key: 'show_ev_card', label: 'Manuelle Ladetermine', hint: 'Formular zum Anlegen eines Ladetermins.' },
   { key: 'show_shelly_card', label: 'Geräte (Shelly/Tasmota/Tuya)', hint: 'Schalter für smarte Steckdosen auf dem Dashboard.' },
+  { key: 'show_weather_card', label: 'Wetter', hint: 'Wettervorhersage für den Standort (Standort im Reiter „Wetter“).' },
 ];
 let tileOrder = TILE_DEFS.map(t => t.key);   // Reihenfolge auf dem Dashboard (▲▼ unten)
 function mergeTileOrder(saved) {
@@ -946,6 +974,60 @@ loadVrmInfo();
       `Aktuell steuert: ${st.pv_source}${st.pv_note ? ' – ⚠ ' + st.pv_note : ''}`;
   } catch (e) { /* egal */ }
 })();
+/* --- Wetter: Standort --- */
+function wxMsg(t, err) { const m = document.getElementById('wx-msg'); m.textContent = t; m.style.color = err ? '#e5544a' : ''; }
+async function wxLoad() {
+  try {
+    const l = await (await fetch('/api/weather/location')).json();
+    document.getElementById('wx-lat').value = l.lat ?? ''; document.getElementById('wx-lon').value = l.lon ?? '';
+    document.getElementById('wx-name').value = l.name || '';
+    if (l.configured) {
+      const w = await (await fetch('/api/weather')).json();
+      wxMsg(w.current ? `Aktuell: ${w.current.temp.toFixed(0)} °C, ${w.current.text}${w.name ? ' (' + w.name + ')' : ''}` : (w.error || ''), !w.current);
+    } else wxMsg('Noch kein Standort gespeichert.');
+  } catch (e) { /* egal */ }
+}
+document.getElementById('wx-search').addEventListener('click', async () => {
+  const box = document.getElementById('wx-results'); box.innerHTML = '';
+  try {
+    const res = await shellyApi('/api/weather/search?q=' + encodeURIComponent(document.getElementById('wx-q').value), 'GET');
+    wxMsg(res.length ? 'Treffer anklicken, dann „Standort speichern“:' : 'Nichts gefunden – anderen Namen oder Koordinaten versuchen.', !res.length);
+    res.forEach(p => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost'; b.style.textAlign = 'left';
+      b.textContent = `${p.name}${p.region ? ' – ' + p.region : ''}  (${p.lat}, ${p.lon})`;
+      b.onclick = () => { document.getElementById('wx-lat').value = p.lat; document.getElementById('wx-lon').value = p.lon;
+        document.getElementById('wx-name').value = p.name; box.innerHTML = ''; wxMsg('Übernommen – jetzt „Standort speichern“.'); };
+      box.appendChild(b);
+    });
+  } catch (e) { wxMsg(e.message, true); }
+});
+document.getElementById('wx-q').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('wx-search').click(); });
+document.getElementById('wx-coords').addEventListener('input', e => {
+  const m = e.target.value.split(',').map(x => parseFloat(x.trim()));
+  if (m.length === 2 && !isNaN(m[0]) && !isNaN(m[1])) { document.getElementById('wx-lat').value = m[0]; document.getElementById('wx-lon').value = m[1]; }
+});
+document.getElementById('wx-gps').addEventListener('click', () => {
+  if (!navigator.geolocation || !window.isSecureContext) {
+    wxMsg('Der Browser erlaubt den Standortzugriff nur auf https-Seiten. Bitte den Ort suchen oder die Koordinaten aus Google Maps einfügen.', true); return;
+  }
+  wxMsg('Ermittle Standort …');
+  navigator.geolocation.getCurrentPosition(p => {
+    document.getElementById('wx-lat').value = p.coords.latitude.toFixed(5); document.getElementById('wx-lon').value = p.coords.longitude.toFixed(5);
+    wxMsg('Standort übernommen – jetzt „Standort speichern“.');
+  }, err => wxMsg('Standort nicht verfügbar: ' + err.message, true), { timeout: 10000 });
+});
+document.getElementById('wx-save').addEventListener('click', async () => {
+  try {
+    await shellyApi('/api/weather/location', 'POST', { lat: document.getElementById('wx-lat').value, lon: document.getElementById('wx-lon').value,
+      name: document.getElementById('wx-name').value });
+    savedToast(); wxLoad();
+  } catch (e) { wxMsg(e.message, true); }
+});
+document.getElementById('wx-clear').addEventListener('click', async () => {
+  try { await shellyApi('/api/weather/location', 'POST', { lat: null, lon: null }); savedToast('Entfernt ✓'); wxLoad(); }
+  catch (e) { wxMsg(e.message, true); }
+});
+wxLoad();
 /* --- Fehlende Verlaufsdaten aus dem VRM nachholen (erst Vorschau, dann Übernehmen) --- */
 function restoreMsg(t, err) { const m = document.getElementById('vrm-restore-msg'); m.textContent = t; m.style.color = err ? '#e5544a' : ''; }
 function fmtDay(d) { const [Y, M, D] = d.split('-'); return `${D}.${M}.${Y}`; }
@@ -987,6 +1069,7 @@ const ADMIN_TABS = [
   { id: 'tarif', label: 'Tarif & Laden', match: ['Tibber', 'Stromtarif', 'Peak-Schutz', 'SOC-Strategie', 'PV-Prognose'] },
   { id: 'solar', label: 'Solar', match: ['PV-Wechselrichter'] },
   { id: 'vrm', label: 'VRM', match: ['Victron VRM'] },
+  { id: 'wetter', label: 'Wetter', match: ['Wettervorhersage'] },
   { id: 'geraete', label: 'Geräte & Überschuss', match: ['Geräte', 'Shelly', 'Überschuss'] },
   { id: 'anzeige', label: 'Dashboard', match: ['Kacheln', 'Diagramme'] },
   { id: 'system', label: 'System & Konto', match: ['App-Version', 'Betrieb', 'Konto'] },
@@ -1008,7 +1091,7 @@ const ADMIN_TABS = [
   function show(id) {
     if (!TABS.some(t => t.id === id)) id = TABS[0].id;
     // Speichern-Leiste ueberall ausser bei 'Geraete' und 'VRM' (dort speichert jede Aenderung sofort bzw. hat eigene Knoepfe)
-    cards.forEach(c => { c.hidden = c.dataset.tab === '*' ? (id === 'geraete' || id === 'vrm') : c.dataset.tab !== id; });
+    cards.forEach(c => { c.hidden = c.dataset.tab === '*' ? (id === 'geraete' || id === 'vrm' || id === 'wetter') : c.dataset.tab !== id; });
     bar.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
     if (id !== 'geraete') { const f = document.getElementById('shelly-found'); if (f) f.innerHTML = ''; }   // Suchergebnisse nur solange man im Reiter bleibt
     bar.querySelector('.active')?.scrollIntoView({ inline: 'center', block: 'nearest' });
