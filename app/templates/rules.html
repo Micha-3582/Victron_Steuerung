@@ -180,9 +180,10 @@ function ruleEdited(el) {
   r.on = collectConds(box.querySelector('.list-on')); r.off = collectConds(box.querySelector('.list-off'));
   r.min_on_min = box.querySelector('.r-minon').value; r.min_off_min = box.querySelector('.r-minoff').value;
   touch();
+  box.querySelector('.r-status').innerHTML = statusBlock(r);
 }
 function ruleCondDel(btn) { const box = btn.closest('[data-rule]'); btn.closest('.cond').remove(); ruleEdited(box.querySelector('.r-dev')); renderRules(); }
-function ruleAddCond(sel, which) { const t = sel.value; if (!t) return; const r = ruleOf(sel); r[which] = [...r[which], clone(COND_DEFAULT[t])]; touch(); renderRules(); }
+function ruleAddCond(sel) { if (!sel.value) return; const [which, t] = sel.value.split(':'); const r = ruleOf(sel); r[which] = [...r[which], clone(COND_DEFAULT[t])]; touch(); renderRules(); }
 async function ruleDelete(id) {
   if (!await uiConfirm('Regel löschen?', 'Die Regel wird entfernt, sobald du „Speichern“ drückst. Das Gerät bleibt in der Liste.', 'Löschen')) return;
   R = R.filter(r => r.id !== id); touch(); renderRules();
@@ -192,13 +193,18 @@ function ruleNew(sel, timer) {
   R.push({ id: 'new-' + (++newId), name: '', device_id: d, enabled: true, min_on_min: 5, min_off_min: 5, on: timer ? [] : [clone(COND_DEFAULT.time)], off: timer ? [clone(COND_DEFAULT.at)] : [] });
   sel.value = ''; touch(); renderRules();
 }
-function statusHtml(r) {
-  if (String(r.id).startsWith('new-')) return '<span class="muted">Noch nicht gespeichert – die Regel wirkt erst nach „Speichern“.</span>';
+const norm = v => Array.isArray(v) ? v.map(norm) : (v && typeof v === 'object') ? Object.fromEntries(Object.keys(v).sort().map(k => [k, norm(v[k])])) : (typeof v === 'string' && v.trim() !== '' && !isNaN(v) ? Number(v) : v);
+const sig = r => JSON.stringify(norm({ device_id: r.device_id, enabled: r.enabled !== false, on: r.on || [], off: r.off || [], min_on_min: r.min_on_min ?? 5, min_off_min: r.min_off_min ?? 5 }));
+function statusHtml(r) {                          // Status gibt es nur fuer die gespeicherte, unveraenderte Regel - waehrend des Bearbeitens steht dort nichts
+  if (String(r.id).startsWith('new-') || !(r.on || []).length && !(r.off || []).length) return '';
+  const saved = (S.A.rules || []).find(x => x.id === r.id);
+  if (!saved || sig(saved) !== sig(r)) return '';
   const st = (S.A.status || {})[r.id];
   if (!st) return '<span class="muted">Noch nicht ausgewertet.</span>';
   const icon = { on: '🟢', wait: '🟡', off: '⚪', paused: '⏸', disabled: '⚪' }[st.state] || '⚪';
-  return `<span>${icon} ${escH(st.text)}</span> ${dirty ? '<span class="muted">(Stand der gespeicherten Regel)</span>' : ''}`;
+  return `<span>${icon} ${escH(st.text)}</span>`;
 }
+const statusBlock = r => { const h = statusHtml(r); return h ? `<div style="margin-top:10px">${h}</div>` : ''; };
 function renderRules() {
   const box = $('rules-list'), fixed = S.A.tariff_mode === 'fixed';
   const sw = S.devs.filter(d => d.switchable !== false && !d.auto);          // Geraete der Ueberschuss-Automatik gehoeren dieser (getrennt), nicht den Regeln
@@ -206,7 +212,8 @@ function renderRules() {
   const opts = sw.map(d => `<option value="${escH(d.id)}">${escH(d.icon)} ${escH(d.name)}</option>`).join('');
   nd.innerHTML = `<option value="">+ Neue Regel für …</option>` + opts; nt.innerHTML = `<option value="">+ Ausschalt-Timer für …</option>` + opts;
   nd.onchange = () => ruleNew(nd); nt.onchange = () => ruleNew(nt, true);
-  const addSel = (list, which) => `<select style="width:auto;margin-top:4px" onchange="ruleAddCond(this, '${which}')"><option value="">+ Bedingung hinzufügen …</option>${list.filter(([t]) => !(fixed && (t === 'price' || t === 'cheapest'))).map(([t, l]) => `<option value="${t}">${l}</option>`).join('')}</select>`;
+  const grp = (list, which) => list.filter(([t]) => !(fixed && (t === 'price' || t === 'cheapest'))).map(([t, l]) => `<option value="${which}:${t}">${l}</option>`).join('');
+  const addSel = `<select style="width:auto;margin-top:10px" onchange="ruleAddCond(this)"><option value="">+ Bedingung hinzufügen …</option><optgroup label="Einschalten, wenn …">${grp(ADD_ON, 'on')}</optgroup><optgroup label="Ausschalten, sobald …">${grp(ADD_OFF, 'off')}</optgroup></select>`;
   box.innerHTML = R.length ? R.map(r => {
     const d = dev(r.device_id);
     return `<div data-rule="${escH(r.id)}" style="border:1px solid var(--border);border-radius:10px;padding:10px">
@@ -217,13 +224,12 @@ function renderRules() {
           <button class="ghost" onclick="ruleDelete('${escH(r.id)}')" title="Regel löschen">✕</button>
         </div>
       </div>
-      <div style="margin-top:10px"><b style="color:var(--cheap)">Einschalten, wenn alles stimmt:</b>
-        <div class="list-on">${r.on.map(c => condHtml(c, fixed)).join('')}</div>
-        ${r.on.length ? '' : '<div class="muted" style="margin:2px 0 4px">Keine – das Gerät wird nicht automatisch eingeschaltet (du schaltest es selbst ein).</div>'}${addSel(ADD_ON, 'on')}</div>
-      <div style="margin-top:12px"><b style="color:var(--exp)">Ausschalten, sobald eines davon zutrifft:</b>
-        <div class="list-off">${(r.off || []).map(c => condHtml(c, fixed)).join('')}</div>
-        ${(r.off || []).length ? '' : '<div class="muted" style="margin:2px 0 4px">Keine – das Gerät wird ausgeschaltet, sobald die Einschalt-Bedingungen nicht mehr stimmen.</div>'}${addSel(ADD_OFF, 'off')}</div>
-      <div class="r-status" style="margin-top:10px">${statusHtml(r)}</div>
+      <div style="margin-top:10px"${r.on.length ? '' : ' hidden'}><b style="color:var(--cheap)">Einschalten, wenn alles stimmt:</b>
+        <div class="list-on">${r.on.map(c => condHtml(c, fixed)).join('')}</div></div>
+      <div style="margin-top:12px"${(r.off || []).length ? '' : ' hidden'}><b style="color:var(--exp)">Ausschalten, sobald eines davon zutrifft:</b>
+        <div class="list-off">${(r.off || []).map(c => condHtml(c, fixed)).join('')}</div></div>
+      ${addSel}
+      <div class="r-status">${statusBlock(r)}</div>
       <details style="margin-top:8px"><summary class="muted">Einstellungen für diese Regel</summary>
         <div class="grid2" style="margin-top:8px;grid-template-columns:repeat(2,1fr)">
           <div><label>Mind. an (min)</label><input class="r-minon" type="number" min="0" value="${escH(r.min_on_min ?? 5)}" oninput="ruleEdited(this)"></div>
@@ -242,7 +248,7 @@ async function loadServer() {
 }
 async function refresh() {                        // alle 10 s: Status auffrischen, den Entwurf nie anfassen
   try { await loadServer(); } catch (e) { return; }
-  document.querySelectorAll('[data-rule]').forEach(el => { const r = R.find(x => x.id === el.dataset.rule), s = el.querySelector('.r-status'); if (r && s) s.innerHTML = statusHtml(r); });
+  document.querySelectorAll('[data-rule]').forEach(el => { const r = R.find(x => x.id === el.dataset.rule), s = el.querySelector('.r-status'); if (r && s) s.innerHTML = statusBlock(r); });
   if (!dirty) { const a = document.activeElement; if (!(a && ['INPUT', 'SELECT'].includes(a.tagName))) { resetDraft(); renderAll(); } }
 }
 (async () => { await loadServer(); resetDraft(); renderAll(); setInterval(refresh, 10000); })();
