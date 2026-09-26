@@ -786,7 +786,7 @@ class Controller:
 
     def _apply_rule(self, act, dry: bool, cfg: dict):
         action, dev, why, rule_id = act
-        if action in ("adopt", "manual"):                # nur ins Logbuch: nichts wird geschaltet
+        if action in ("adopt", "manual", "paused"):      # nur ins Logbuch: nichts wird geschaltet
             text = ("(Trockenlauf) " if dry else "") + f"{dev['name']} {why}"          # "(Trockenlauf)" steht immer am Anfang
             log.info("Regeln: %s", text)
             opslog.log("rules", text, dry=dry)

@@ -336,6 +336,7 @@ class RuleEngine:
         self.fired: dict[str, str] = {}                  # regel -> Tag, an dem ein 'Um HH:MM'-Ausloeser schon gefeuert hat
         self._prev_on: dict[str, bool] = {}              # geraet -> Zustand beim letzten Schritt (Erkennung von Handschaltungen am Geraet)
         self._hold_until: dict[str, datetime] = {}
+        self._skip_noted: dict[str, str] = {}            # regel -> Ende der Pause, fuer die das Logbuch schon Bescheid weiss
         self._armed: dict[str, datetime] = {}
         self._last_step: datetime | None = None
         self._loaded = False
@@ -379,6 +380,14 @@ class RuleEngine:
             self.owner_rule.pop(dev_id, None)
             self._armed.pop(dev_id, None)
         self._save_state()
+
+    def _note_paused(self, notes: list, rule_id: str, dev: dict, until: datetime, what: str, result: str):
+        """Logbuch-Eintrag (einmal je Pause): die Regel waere dran, wartet aber wegen der Pause nach Handschaltung."""
+        key = until.isoformat()
+        if self._skip_noted.get(rule_id) == key:
+            return
+        self._skip_noted[rule_id] = key
+        notes.append(("paused", dev, f"{what}, aber Pause nach Handschaltung bis {until:%H:%M} Uhr – die Regel {result}", rule_id))
 
     def _block(self, rule_id: str, reason: str):
         self.blocked.add(rule_id)
@@ -522,6 +531,8 @@ class RuleEngine:
                 dvc = by_dev.get(r["device_id"])
                 if dvc and dvc.get("switchable", True) and dvc.get("online") and dvc.get("on") and off_hit and hold.get(dvc["id"], now) <= now:
                     pure_off_acts.append(("off", dvc, "Ausschalt-Bedingung: " + ", ".join(off_hit), r["id"]))
+                elif dvc and dvc.get("on") and off_hit and hold.get(dvc["id"], now) > now:
+                    self._note_paused(notes, r["id"], dvc, hold[dvc["id"]], "Ausschalt-Bedingung erfüllt (" + ", ".join(off_hit) + ")", "schaltet nicht aus")
                 status[r["id"]] = {"state": "off", "text": ("schaltet aus: " + ", ".join(off_hit)) if off_hit else "schaltet nur aus (nie automatisch ein) – wartet auf: " + ", ".join(t for _, _, t in off_res),
                                    "conds": [{"ok": ok, "text": txt} for _, ok, txt in off_res]}
                 continue
@@ -533,6 +544,8 @@ class RuleEngine:
                 continue
             if hold.get(dev["id"], now) > now:
                 status[r["id"]] = {"state": "paused", "text": "Pause nach Handschaltung", "conds": conds}
+                if base_on and r["id"] not in self.blocked and not (dev.get("on") and self.owner.get(dev["id"]) == "rule"):
+                    self._note_paused(notes, r["id"], dev, hold[dev["id"]], "Einschalt-Bedingung erfüllt (" + ", ".join(t for _, _, t in on_res) + ")", "schaltet nicht ein")
                 continue
             owned_here = self.owner.get(dev["id"]) == "rule" and self.owner_rule.get(dev["id"]) == r["id"]
             if owned_here and dev.get("on") and "budget" in {c["type"] for c in r["on"] + r.get("off", [])}:
