@@ -226,9 +226,8 @@ function statusHtml(r) {                          // Status gibt es nur fuer die
   const saved = (S.A.rules || []).find(x => x.id === r.id);
   if (!saved || sig(saved) !== sig(r)) return '';
   const st = (S.A.status || {})[r.id];
-  if (!st) return '<span class="muted">Noch nicht ausgewertet.</span>';
-  const icon = { on: '🟢', wait: '🟡', off: '⚪', paused: '⏸', disabled: '⚪' }[st.state] || '⚪';
-  return `<span>${icon} ${escH(st.text)}</span>`;
+  if (!st) return '';                             // noch nicht ausgewertet: nichts anzeigen
+  return st.state === 'on' ? '<span>🟢 läuft</span>' : '<span class="muted">⚪ läuft nicht</span>';        // nur zwei Zustaende
 }
 const statusBlock = r => { const h = statusHtml(r); return h ? `<div style="margin-top:10px">${h}</div>` : ''; };
 function grpHtml(list, mode) {                    // WENN a UND b DANN einschalten  /  WENN c ODER d DANN ausschalten

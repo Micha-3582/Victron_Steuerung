@@ -245,9 +245,8 @@
   <main>{% block content %}{% endblock %}</main>
   {% block scripts %}{% endblock %}
   <script>
-    // Ungelesene Logbuch-Eintraege (Automatik / Regeln): roter Zaehler an "Automatik"/"Regeln" in der Kopfleiste und an den Logbuch-Knoepfen
+    // Ungelesene Logbuch-Eintraege (Automatik / Regeln): roter Zaehler an den Logbuch-Knoepfen
     (function () {
-      const nav = { surplus: 'header nav a[href="/automation"]', rules: 'header nav a[href="/rules"]' };
       function put(el, n) {
         if (!el) return;
         let b = el.querySelector(':scope > .log-badge');
@@ -257,7 +256,6 @@
       async function refresh() {
         let d; try { const r = await fetch('/api/automation/unread'); if (!r.ok) return; d = await r.json(); } catch (e) { return; }
         for (const m of ['surplus', 'rules']) {
-          put(document.querySelector(nav[m]), window.LOG_OPEN === m ? 0 : d[m]);
           document.querySelectorAll('[data-log-badge="' + m + '"]').forEach(el => put(el, window.LOG_OPEN === m ? 0 : d[m]));
         }
       }
