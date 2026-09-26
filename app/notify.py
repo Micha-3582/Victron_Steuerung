@@ -250,11 +250,17 @@ def daily_summary(cfg: dict, now: datetime, extra=None) -> None:
     except Exception as e:                                  # noqa: BLE001
         log.warning("Tages-Zusammenfassung nicht berechenbar: %s", e)
         return
-    aut = f" · Autarkie {day['autarky']:.0f} %" if day.get("autarky") is not None else ""
+    zeilen = [f"📊 Tagesbilanz {now:%d.%m.}",
+              f"☀️ Solar: {day['solar']:.1f} kWh",
+              f"🏠 Verbrauch: {day['verbrauch']:.1f} kWh",
+              f"⬇️ Netzbezug: {day['import']:.1f} kWh",
+              f"⬆️ Einspeisung: {day['export']:.1f} kWh"]
+    if day.get("autarky") is not None:
+        zeilen.append(f"🔋 Autarkie: {day['autarky']:.0f} %")
+    if day.get("cost_eur"):
+        zeilen.append(f"💶 Netzkosten: {day['cost_eur']:.2f} €")
     try:
-        zusatz = ("\n" + extra()) if extra else ""
+        zusatz = ("\n\n" + extra()) if extra else ""
     except Exception:                                       # noqa: BLE001
         zusatz = ""
-    _send_async(_prefix(cfg) + f"📊 Tagesbilanz {now:%d.%m.}: Solar {day['solar']:.1f} kWh · Verbrauch {day['verbrauch']:.1f} kWh · "
-                f"Netzbezug {day['import']:.1f} kWh · Einspeisung {day['export']:.1f} kWh{aut}"
-                + (f" · Netzkosten {day['cost_eur']:.2f} €" if day.get("cost_eur") else "") + zusatz)
+    _send_async(_prefix(cfg) + "\n".join(zeilen) + zusatz)

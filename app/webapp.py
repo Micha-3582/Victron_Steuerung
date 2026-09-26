@@ -555,7 +555,7 @@ class Controller:
         bad = [c for c in r["checks"] if c["status"] in ("fail", "warn")]
         if not bad:
             return "🩺 Systemcheck: ✅ läuft sauber"
-        return "🩺 Systemcheck: " + ("❌ Probleme" if r["verdict"] == "fail" else "⚠️ Hinweise") + " – " + "; ".join(f"{c['title']}: {c['detail']}" for c in bad[:4])
+        return "🩺 Systemcheck: " + ("❌ Probleme" if r["verdict"] == "fail" else "⚠️ Hinweise") + "".join(f"\n• {c['title']}: {c['detail']}" for c in bad[:4])
 
     def safe_tick(self):
         """Tick mit Fehlerabfang - für Hintergrundschleife und On-Demand-Aufrufe."""
