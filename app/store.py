@@ -1311,3 +1311,41 @@ def battery_watchdog_state() -> dict:
         except ValueError:
             status["duration_min"] = None
     return {"status": status, "events": data.get("events", [])[:20]}
+
+
+# --- VRM-Stundenprognose je Tag aufheben (das VRM zeigt sie nach Tagesende nicht mehr) -----------------
+FORECAST_HOURS_PATH = os.path.join(_DIR, "forecast_hours.json")
+FORECAST_KEEP_DAYS = 800
+
+
+def record_forecast_hours(vrm_data: dict | None, now: datetime | None = None):
+    """Merkt sich je Tag die stuendliche VRM-Prognose (Solar + Verbrauch). Der Folgetag wird bei jedem Abruf aktualisiert;
+    sobald der Tag laeuft, bleibt der zuletzt gemerkte Stand stehen (so sieht man spaeter, was vorhergesagt war)."""
+    if not vrm_data or not vrm_data.get("hours"):
+        return
+    now = now or datetime.now()
+    keys = {"today": now.date().isoformat(), "tomorrow": (now.date() + timedelta(days=1)).isoformat()}
+    data = _load_json_recovering(FORECAST_HOURS_PATH, lambda: {"days": {}})
+    days = data.setdefault("days", {})
+    changed = False
+    frozen = {(keys["today"], f) for f in ("solar", "cons") if (days.get(keys["today"]) or {}).get(f)}   # laufender Tag: schon gemerkt
+    for src, field in ((vrm_data, "solar"), (vrm_data.get("cons") or {}, "cons")):
+        for h in src.get("hours") or []:
+            day = keys.get(h.get("day"))
+            if day is None or (day, field) in frozen:
+                continue
+            e = days.setdefault(day, {})
+            e.setdefault(field, {})[str(int(h["hour"]))] = round(float(h["wh"]), 1)
+            changed = True
+    if not changed:
+        return
+    for old in sorted(days)[:-FORECAST_KEEP_DAYS]:
+        del days[old]
+    _dump_json(FORECAST_HOURS_PATH, data, indent=None)
+
+
+def forecast_hours_for_day(day: str) -> dict:
+    """{'solar': {stunde: Wh}, 'cons': {stunde: Wh}} des gemerkten Tages (leer, wenn nichts gemerkt)."""
+    data = _load_json_recovering(FORECAST_HOURS_PATH, lambda: {"days": {}})
+    e = (data.get("days", {}) if isinstance(data, dict) else {}).get(day) or {}
+    return {"solar": e.get("solar") or {}, "cons": e.get("cons") or {}}

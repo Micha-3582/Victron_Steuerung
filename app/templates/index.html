@@ -247,6 +247,7 @@ function applyTileVisibility(ui) {
 }
 let chart, energyChart, flowChart, prices = [], allPrices = [], schedules = [], nowSlot = '', nowIso = '';
 let energyDay = '', energyMinDay = '';
+let pastFc = null;   // gemerkte VRM-Prognose eines vergangenen Tages: {day, solar, cons}
 let fcData = null, lastEnergyHist = [], energyFcFull = [], energyCFull = [];   // VRM-Prognose, zuletzt gezeigte Messwerte, Prognose je Balken
 const legendHidden = new Set((() => { try { return JSON.parse(localStorage.getItem('energyLegendHidden') || '[]'); } catch (e) { return []; } })());
 let activeDay = 'today', chargePowerW = 3500, overrideBusy = false;
@@ -382,6 +383,11 @@ function buildEnergyChart() {
       plugins: {
         legend: { display: false },
         tooltip: { callbacks: {
+          labelColor(item) {
+            const c = item.dataset.borderColor;
+            if (item.dataset.label === 'Solarprognose' || item.dataset.label === 'Verbrauchsprognose') return { borderColor: c, backgroundColor: hatchPattern(c, '#252a33') };
+            return Chart.defaults.plugins.tooltip.callbacks.labelColor.call(this, item);
+          },
           label: item => {
             const l = item.dataset.label;
             if (l === 'SOC Max' || l === 'SOC Min') return null;
@@ -440,9 +446,10 @@ function aggregateHourly(hist) {
   });
 }
 /* Gestrichelte Schraffur fuer die Solarprognose-Balken (wie im VRM) */
-function hatchPattern(color) {
+function hatchPattern(color, bg) {
   const c = document.createElement('canvas'); c.width = c.height = 8;
-  const x = c.getContext('2d'); x.strokeStyle = color; x.lineWidth = 1.6;
+  const x = c.getContext('2d'); if (bg) { x.fillStyle = bg; x.fillRect(0, 0, 8, 8); }
+  x.strokeStyle = color; x.lineWidth = 1.6;
   x.beginPath(); x.moveTo(0, 8); x.lineTo(8, 0); x.moveTo(-2, 2); x.lineTo(2, -2); x.moveTo(6, 10); x.lineTo(10, 6); x.stroke();
   return x.createPattern(c, 'repeat');
 }
@@ -452,7 +459,10 @@ function fcForDay(day, src) {
   src = src === undefined ? fcData : src;
   if (!src || !src.hours || !src.hours.length) return null;
   const key = day === todayStr() ? 'today' : day === tomorrowStr() ? 'tomorrow' : null;
-  if (!key) return null;
+  if (!key) {                                            // vergangener Tag: gemerkte Prognose
+    const p = pastFc && pastFc.day === day ? (src === fcData ? pastFc.solar : pastFc.cons) : null;
+    return p && Object.keys(p).length ? p : null;
+  }
   const m = {}; src.hours.filter(h => h.day === key).forEach(h => { m[h.hour] = h.wh; });
   return Object.keys(m).length ? m : null;
 }
@@ -593,6 +603,10 @@ function applyEnergyDayUI() {
 async function loadEnergyDay(day) {
   energyDay = day;
   try {
+    pastFc = null;
+    if (day < todayStr() && fcData && fcData.configured) {       // vergangener Tag: gemerkte VRM-Prognose dazuholen
+      try { const p = await (await fetch('/api/vrm/forecast/history?day=' + day)).json(); pastFc = { day, solar: p.solar || {}, cons: p.cons || {} }; } catch (e) { pastFc = null; }
+    }
     const d = day > todayStr() ? { history: [] }        // Zukunft: keine Messwerte, nur die Prognose
       : await (await fetch('/api/history?day=' + day)).json();
     energyMinDay = d.min_day || energyMinDay;
@@ -1008,10 +1022,10 @@ function renderEnergyTiles(history, day) {
   const fcm = fcForDay(day);
   const fcSum = fcm ? Object.values(fcm).reduce((a, b) => a + b, 0) / 1000 : null;
   if (fcSum != null) tile('forecast', sun + ' Solar-Prognose', fcSum.toFixed(1) + ' kWh',
-    day === todayStr() ? `noch ${fcData.remaining_today_kwh.toFixed(1)} kWh bis Tagesende (VRM)` : 'erwartet (VRM)', 'var(--timer)');
+    day === todayStr() ? `noch ${fcData.remaining_today_kwh.toFixed(1)} kWh bis Tagesende (VRM)` : day < todayStr() ? 'Prognose (VRM, gemerkt)' : 'erwartet (VRM)', 'var(--timer)');
   const ccm = fcForDay(day, fcData && fcData.cons);
   if (ccm) tile('cforecast', '🏠 Verbrauchs-Prognose', (Object.values(ccm).reduce((a, b) => a + b, 0) / 1000).toFixed(1) + ' kWh',
-    day === todayStr() ? `noch ${fcData.cons.remaining_today_kwh.toFixed(1)} kWh bis Tagesende (VRM)` : 'erwartet (VRM)', '#e0761f');
+    day === todayStr() ? `noch ${fcData.cons.remaining_today_kwh.toFixed(1)} kWh bis Tagesende (VRM)` : day < todayStr() ? 'Prognose (VRM, gemerkt)' : 'erwartet (VRM)', '#e0761f');
   if (day <= todayStr()) {                         // Zukunft: nur die Prognosen
     // Autarkiegrad: Anteil des Verbrauchs, der aus eigener PV/Batterie gedeckt
     // wurde statt aus dem Netz bezogen zu werden. 100 % = komplett autark.

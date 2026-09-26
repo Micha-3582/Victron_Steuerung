@@ -353,6 +353,10 @@ class Controller:
             store.record_vrm_forecast(vrm_data["today_kwh"] if vrm_data and vrm_data.get("hours") else None, now)
         except Exception as e:                               # noqa: BLE001
             log.warning("Solar-Logbuch konnte nicht geschrieben werden: %s", e)
+        try:
+            store.record_forecast_hours(vrm_data, now)
+        except Exception as e:                               # noqa: BLE001
+            log.warning("VRM-Prognose (Stunden) konnte nicht gespeichert werden: %s", e)
 
         dry = bool(cfg.get("dry_run", True))
         wrote = False
@@ -1314,6 +1318,17 @@ def api_vrm_restore():
     except Exception as e:                               # noqa: BLE001
         log.warning("VRM-Import fehlgeschlagen: %s", e)
         return jsonify(error=f"Import fehlgeschlagen: {e}"), 500
+
+
+@app.route("/api/vrm/forecast/history", methods=["GET"])
+def api_vrm_forecast_history():
+    """Gemerkte VRM-Stundenprognose eines vergangenen Tages (?day=YYYY-MM-DD) fuer die schraffierten Balken im Energieverlauf."""
+    day = request.args.get("day", "")
+    try:
+        datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        return jsonify(error="Ungültiger Tag."), 400
+    return jsonify(store.forecast_hours_for_day(day))
 
 
 @app.route("/api/vrm/forecast", methods=["GET"])
