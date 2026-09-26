@@ -32,6 +32,7 @@ Alles hier ist reine Logik ohne Netzwerk (testbar). Geschaltet wird vom Aufrufer
 """
 from __future__ import annotations
 
+import json
 import math
 import os
 import threading
@@ -324,6 +325,7 @@ class RuleEngine:
         self.ran: dict[str, dict] = {}                   # regel -> {"day": iso, "min": Minuten (Tagesziel)}
         self.blocked: set[str] = set()                   # Regeln, die nach einem Ausschalten erst neu 'scharf' werden muessen
         self.block_reason: dict[str, str] = {}           # regel -> 'manual' (von Hand ausgeschaltet) | 'off' (Ausschalt-Bedingung)
+        self.sigs: dict[str, str] = {}                   # regel -> Fingerabdruck (Geraet + Bedingungen): Aenderung = Regel beginnt von vorn
         self.fired: dict[str, str] = {}                  # regel -> Tag, an dem ein 'Um HH:MM'-Ausloeser schon gefeuert hat
         self._prev_on: dict[str, bool] = {}              # geraet -> Zustand beim letzten Schritt (Erkennung von Handschaltungen am Geraet)
         self._hold_until: dict[str, datetime] = {}
@@ -346,13 +348,14 @@ class RuleEngine:
                 self.block_reason = {k: v for k, v in (d.get("blocked") or {}).items() if isinstance(v, str)}
                 self.blocked = set(self.block_reason)
                 self.fired = {k: v for k, v in (d.get("fired") or {}).items() if isinstance(v, str)}
+                self.sigs = {k: v for k, v in (d.get("sigs") or {}).items() if isinstance(v, str)}
         except Exception:                                # noqa: BLE001
             pass
 
     def _save_state(self):
         try:
             _store()._dump_json(STATE_PATH, {"owner": self.owner, "owner_rule": self.owner_rule, "ran": self.ran,
-                                             "blocked": {r: self.block_reason.get(r, "off") for r in self.blocked}, "fired": self.fired}, indent=None)
+                                             "blocked": {r: self.block_reason.get(r, "off") for r in self.blocked}, "fired": self.fired, "sigs": self.sigs}, indent=None)
         except Exception:                                # noqa: BLE001
             pass
 
@@ -417,6 +420,27 @@ class RuleEngine:
                 self._armed.pop(dev_id, None)
         self._save_state()
 
+    def _check_changed(self, r: dict):
+        """Wurde die Regel geaendert (Geraet/Bedingungen), beginnt sie von vorn: alte Ausloeser-Tage, Sperren, Laufzeit und die
+        Uebernahme eines Geraets werden vergessen (das Geraet selbst bleibt, wie es ist)."""
+        sig = json.dumps([r["device_id"], r["on"], r.get("off", [])], sort_keys=True)      # (an/aus-Schalter zaehlt nicht: Ausschalten muss das Geraet noch abschalten koennen)
+        prev = self.sigs.get(r["id"])
+        self.sigs[r["id"]] = sig
+        if prev is None or prev == sig:
+            return
+        rid = r["id"]
+        for k in (rid + ":on", rid + ":off"):
+            self.fired.pop(k, None)
+        self.blocked.discard(rid)
+        self.block_reason.pop(rid, None)
+        self.ran.pop(rid, None)
+        for dev_id, owned_rule in list(self.owner_rule.items()):
+            if owned_rule == rid:
+                self.owner.pop(dev_id, None)
+                self.owner_rule.pop(dev_id, None)
+                self._armed.pop(dev_id, None)
+        self._save_state()
+
     # ---- Kern
     def step(self, now: datetime, ctx: dict, cfg: dict, devices: list[dict], rules: list[dict]) -> list[tuple]:
         """Ein Regelschritt. devices: Live-Status (online, on, switchable). 
@@ -452,7 +476,10 @@ class RuleEngine:
             if d.get("online"):
                 self._prev_on[d["id"]] = bool(d.get("on"))
 
+        for gone in set(self.sigs) - rule_ids:
+            self.sigs.pop(gone, None)
         for r in rules:
+            self._check_changed(r)
             dev = by_dev.get(r["device_id"])
             if not r.get("enabled", True):
                 status[r["id"]] = {"state": "disabled", "text": "Regel ist ausgeschaltet", "conds": []}
