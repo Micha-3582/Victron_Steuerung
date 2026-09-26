@@ -541,7 +541,7 @@ class RuleEngine:
             elif base_on and r["id"] not in self.blocked:
                 if dev.get("on") and dev["id"] not in self.owner:
                     self.set_owner(dev["id"], "rule", r["id"])            # Geraet laeuft schon, waehrend die Bedingungen stimmen: Regel uebernimmt es
-                    notes.append(("adopt", dev, "läuft bereits – die Regel übernimmt es und schaltet es später aus", r["id"]))
+                    notes.append(("adopt", dev, "war schon eingeschaltet (Einschalt-Bedingung erfüllt: " + ", ".join(t for _, _, t in on_res) + ") – die Regel übernimmt es und schaltet es später aus", r["id"]))
                     if has_on_at:
                         self.fired[r["id"] + ":on"] = today
                     status[r["id"]] = {"state": "on", "text": "läuft – von der Regel übernommen", "conds": conds}
