@@ -26,3 +26,4 @@ app/__pycache__/
 **/__pycache__/
 *.pyc
 app/vrm_cloud.json
+app/price_cache.json

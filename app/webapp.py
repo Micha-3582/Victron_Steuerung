@@ -27,6 +27,7 @@ import shelly
 import store
 import surplus
 import tuya
+import price_cache
 import updater
 import vrm
 import vrm_import
@@ -229,7 +230,7 @@ class Controller:
         except Exception as e:                           # noqa: BLE001
             system = None
             log.warning("System-Werte nicht lesbar: %s", e)
-        prices = fetch_tibber_prices(cfg["tibber_token"])
+        prices, price_note = self._tibber_prices(cfg, cerbo, current_ess)
         pv_note = None
 
         now = datetime.now()
@@ -310,7 +311,7 @@ class Controller:
                 "dry_run": dry,
                 "wrote": wrote,
                 "ev_active": ev,
-                "pv_note": pv_note,
+                "pv_note": " · ".join(x for x in (price_note, pv_note) if x) or None,
                 "system": system,
                 "override": bool(cfg.get("manual_override")),
             }
@@ -347,6 +348,44 @@ class Controller:
                 "cheap_lock": bool(absolute_cheap_price) and ct <= absolute_cheap_price,
             })
         return out
+
+    # ------------------------------------------------------------ Tibber-Preise mit Ausfallsicherung
+    _price_fail_since = None
+    PRICE_GRACE_MIN = 10          # so lange ohne brauchbare Preise, bevor ein laufendes Netzladen gestoppt wird
+
+    def _tibber_prices(self, cfg, cerbo, current_ess):
+        """Preise von Tibber. Faellt der Abruf aus, gelten die zuletzt geholten Preise weiter, solange sie die aktuelle
+        Zeit abdecken. Gibt es keine brauchbaren mehr, wird ein laufendes Netzladen nach PRICE_GRACE_MIN gestoppt
+        (sichere Rueckfallstufe) und der Durchlauf mit einer klaren Meldung beendet.
+        Rueckgabe: (Preise, Hinweistext oder None)."""
+        now = datetime.now()
+        try:
+            prices = fetch_tibber_prices(cfg["tibber_token"])
+            if not prices:
+                raise ValueError("Tibber lieferte keine Preise")
+            self._price_fail_since = None
+            try:
+                price_cache.save(prices, now)
+            except Exception as e:                           # noqa: BLE001
+                log.warning("Preis-Zwischenspeicher nicht schreibbar: %s", e)
+            return prices, None
+        except Exception as e:                               # noqa: BLE001
+            log.warning("Tibber-Preise nicht abrufbar: %s", e)
+            self._price_fail_since = self._price_fail_since or now
+            cached = price_cache.load()
+            if cached and price_cache.covers(cached["prices"], now):
+                stand = str(cached.get("fetched", ""))[11:16]
+                return cached["prices"], f"Tibber nicht erreichbar – nutze die Preise von {stand} Uhr"
+            stopped = ""
+            waited = (now - self._price_fail_since).total_seconds() / 60
+            if current_ess == ESS_CHARGE and waited >= self.PRICE_GRACE_MIN:
+                try:
+                    cerbo.write_ess_mode(ESS_IDLE, dry_run=bool(cfg.get("dry_run", True)))
+                    stopped = " – Netzladen wurde gestoppt"
+                    log.warning("Keine brauchbaren Strompreise seit %.0f min - Netzladen gestoppt (Ruhe-Modus)", waited)
+                except Exception as e2:                      # noqa: BLE001
+                    log.error("Netzladen konnte nicht gestoppt werden: %s", e2)
+            raise RuntimeError(f"Keine Strompreise verfügbar ({e}){stopped}")
 
     def safe_tick(self):
         """Tick mit Fehlerabfang - für Hintergrundschleife und On-Demand-Aufrufe."""
