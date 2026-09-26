@@ -358,6 +358,26 @@
     <span id="grid-msg" class="muted" style="margin-left:12px"></span></div>
 </div>
 
+<div class="card" id="vrm-admin">
+  <h2>PV-Prognose (Victron VRM)</h2>
+  <div class="muted" style="margin-bottom:10px">Zeigt auf dem Dashboard den Solarertrag, den das Victron-VRM-Portal für heute und morgen erwartet.
+    Die Werte werden nur angezeigt und steuern nichts.</div>
+  <details id="vrm-setup">
+    <summary>So kommst du an die Zugangsdaten</summary>
+    <div class="muted" style="margin:8px 0">
+      1. Im <a href="https://vrm.victronenergy.com" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">VRM-Portal</a> anmelden → oben rechts dein Name → <i>Einstellungen</i> → <i>Integrationen</i> → <i>Zugriffstoken</i> → neuen Token anlegen und kopieren.<br>
+      2. Die <b>Installations-ID</b> steht in der Adresszeile, wenn du deine Anlage im VRM öffnest (…/installation/<b>844297</b>/…).</div>
+  </details>
+  <div class="grid2">
+    <div><label>Installations-ID</label><input id="vrm-inst" inputmode="numeric" autocomplete="off" placeholder="z. B. 844297"></div>
+    <div><label>Zugriffstoken</label><input id="vrm-token" type="password" autocomplete="new-password"></div>
+  </div>
+  <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <button id="vrm-save" class="ghost">Zugang speichern &amp; testen</button>
+    <span class="muted" id="vrm-msg"></span>
+  </div>
+</div>
+
 <div class="card" id="shelly-admin">
   <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Geräte (Shelly, Tasmota &amp; Tuya)</h2>
   <div class="muted" style="margin-bottom:12px">Shelly-, Tasmota- und Tuya-/Gosund-Geräte im Heimnetz suchen, benennen und mit einem Symbol versehen.
@@ -486,6 +506,7 @@ const TILE_DEFS = [
   { key: 'show_charge_log', label: 'Ladevorgänge (heute)', hint: 'Protokoll geplanter/durchgeführter Ladungen.' },
   { key: 'show_ev_card', label: 'Manuelle Ladetermine', hint: 'Formular zum Anlegen eines Ladetermins.' },
   { key: 'show_shelly_card', label: 'Geräte (Shelly/Tasmota/Tuya)', hint: 'Schalter für smarte Steckdosen auf dem Dashboard.' },
+  { key: 'show_forecast_card', label: 'Solar-Prognose (VRM)', hint: 'Erwarteter Solarertrag heute/morgen aus dem Victron-VRM-Portal (nur mit VRM-Zugang).' },
 ];
 let tileOrder = TILE_DEFS.map(t => t.key);   // Reihenfolge auf dem Dashboard (▲▼ unten)
 function mergeTileOrder(saved) {
@@ -992,6 +1013,29 @@ async function tuyaAdd(devId, ip) {
   foundAdded(devId); loadShellyAdmin();
 }
 loadTuyaInfo();
+
+/* --- VRM-Zugang (Solar-Prognose) --- */
+function vrmMsg(t, err) { const m = document.getElementById('vrm-msg'); m.textContent = t; m.style.color = err ? '#e5544a' : ''; }
+async function loadVrmInfo() {
+  let v; try { v = await (await fetch('/api/vrm')).json(); } catch (e) { return; }
+  document.getElementById('vrm-inst').value = v.installation_id || '';
+  document.getElementById('vrm-token').placeholder = v.configured ? '(gespeichert – leer lassen = unverändert)' : '';
+  document.getElementById('vrm-setup').open = !v.configured;
+}
+document.getElementById('vrm-save').addEventListener('click', async e => {
+  const b = e.target; b.disabled = true; vrmMsg('Speichere und teste …');
+  try {
+    await shellyApi('/api/vrm/credentials', 'POST', { installation_id: document.getElementById('vrm-inst').value,
+      token: document.getElementById('vrm-token').value });
+    document.getElementById('vrm-token').value = '';
+    const f = await (await fetch('/api/vrm/forecast?refresh=1')).json();
+    if (f.error && !(f.hours || []).length) vrmMsg('Gespeichert, aber: ' + f.error, true);
+    else { vrmMsg(`Verbindung ok ✓ – heute ${f.today_kwh} kWh, morgen ${f.tomorrow_kwh} kWh erwartet.`); savedToast(); }
+    loadVrmInfo();
+  } catch (err) { vrmMsg(err.message, true); }
+  b.disabled = false;
+});
+loadVrmInfo();
 
 loadShellyAdmin();
 loadSurplus(true);

@@ -141,6 +141,19 @@
   <h2>Geräte</h2>
   <div class="sysgrid" id="shelly-grid"></div>
 </div>
+
+<div class="card full" id="forecast-card" hidden style="margin-bottom:14px">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <h2 style="margin:0">Solar-Prognose (Victron VRM)</h2>
+    <button id="fc-today" class="ghost daytab active">Heute</button>
+    <button id="fc-tomorrow" class="ghost daytab">Morgen</button>
+    <span class="muted" style="margin-left:auto" id="fc-hint"></span>
+  </div>
+  <div class="chart-scroll">
+    <div class="chart-inner" style="min-width:0"><canvas id="fc-chart" style="max-height:240px"></canvas></div>
+  </div>
+  <div class="sysgrid" id="fc-tiles" style="margin-top:12px"></div>
+</div>
 </div>
 
 {% endblock %}
@@ -161,15 +174,16 @@ const TILE_IDS = {
   show_charge_log: 'charge-log-card', show_ev_card: 'ev-card',
 };
 // Reihenfolge der Kacheln (Einstellungen -> Kacheln); Standard = Reihenfolge dieser Liste.
-const ORDER_IDS = { ...TILE_IDS, show_shelly_card: 'shelly-card' };
+const ORDER_IDS = { ...TILE_IDS, show_shelly_card: 'shelly-card', show_forecast_card: 'forecast-card' };
 function applyTileOrder(order) {
   const keys = Object.keys(ORDER_IDS), given = (order || []).filter(k => keys.includes(k));
   [...given, ...keys.filter(k => !given.includes(k))].forEach((k, i) => { const el = $(ORDER_IDS[k]); if (el) el.style.order = i; });
 }
-let shellyEnabled = true;
+let shellyEnabled = true, forecastEnabled = true;
 function applyTileVisibility(ui) {
   applyTileOrder(ui.tile_order);
   shellyEnabled = ui.show_shelly_card !== false;
+  if (forecastEnabled !== (ui.show_forecast_card !== false)) { forecastEnabled = ui.show_forecast_card !== false; if (typeof loadForecast === 'function') loadForecast(); }
   for (const [key, id] of Object.entries(TILE_IDS)) {
     const el = $(id);
     if (el) el.hidden = ui[key] === false;
@@ -1176,5 +1190,51 @@ function initShellyDragging() {
 }
 initShellyDragging();
 setInterval(loadShelly, 15000);
+
+/* --- Solar-Prognose aus dem VRM-Portal (Zugang in den Einstellungen; Server puffert 30 min) --- */
+let fcData = null, fcDay = 'today', fcChart = null;
+async function loadForecast() {
+  const card = $('forecast-card');
+  if (!forecastEnabled) { card.hidden = true; return; }
+  try { fcData = await (await fetch('/api/vrm/forecast')).json(); } catch (e) { return; }
+  if (!fcData.configured) { card.hidden = true; return; }      // ohne Zugang keine Kachel
+  card.hidden = false;
+  renderForecast();
+}
+function renderForecast() {
+  const d = fcData; if (!d) return;
+  const rows = d.hours.filter(h => h.day === fcDay);
+  const nowH = new Date().getHours();
+  const hrs = rows.length ? rows.filter(h => h.wh > 0) : [];
+  const lo = hrs.length ? Math.max(0, Math.min(...hrs.map(h => h.hour)) - 1) : 5;
+  const hi = hrs.length ? Math.min(23, Math.max(...hrs.map(h => h.hour)) + 1) : 21;
+  const shown = rows.filter(h => h.hour >= lo && h.hour <= hi);
+  const colors = shown.map(h => fcDay === 'today' && h.hour === nowH ? '#f0a63c' : 'rgba(240,166,60,.55)');
+  if (!fcChart) {
+    fcChart = new Chart($('fc-chart').getContext('2d'), { type: 'bar',
+      data: { labels: [], datasets: [{ data: [], borderWidth: 0 }] },
+      options: { responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: {
+          title: it => it[0].label + ' Uhr', label: it => `${Math.round(it.parsed.y)} Wh` } } },
+        scales: { x: { ticks: { color: '#8b93a3' }, grid: { display: false } },
+                  y: { beginAtZero: true, ticks: { color: '#8b93a3', callback: v => v >= 1000 ? (v / 1000) + ' kWh' : v + ' Wh' }, grid: { color: 'rgba(139,147,163,.15)' } } } } });
+  }
+  fcChart.data.labels = shown.map(h => pad(h.hour));
+  fcChart.data.datasets[0].data = shown.map(h => h.wh);
+  fcChart.data.datasets[0].backgroundColor = colors;
+  fcChart.update();
+  const tile = (t, v, s, c) => `<div class="systile"><div class="systile-t">${t}</div><div class="systile-v" style="color:${c}">${v}</div><div class="systile-s">${s}</div></div>`;
+  $('fc-tiles').innerHTML =
+    tile('☀︎ Heute erwartet', d.today_kwh.toFixed(1) + ' kWh', 'Prognose gesamt', 'var(--timer)') +
+    tile('⏳ Heute noch', d.remaining_today_kwh.toFixed(1) + ' kWh', 'bis Sonnenuntergang', 'var(--accent)') +
+    tile('🌤 Morgen erwartet', d.tomorrow_kwh.toFixed(1) + ' kWh', 'Prognose gesamt', 'var(--timer)');
+  $('fc-hint').textContent = d.error ? '⚠ ' + d.error : (d.updated ? 'Stand ' + d.updated.slice(11, 16) + ' Uhr' : '');
+  $('fc-today').classList.toggle('active', fcDay === 'today');
+  $('fc-tomorrow').classList.toggle('active', fcDay === 'tomorrow');
+}
+$('fc-today').addEventListener('click', () => { fcDay = 'today'; renderForecast(); });
+$('fc-tomorrow').addEventListener('click', () => { fcDay = 'tomorrow'; renderForecast(); });
+loadForecast();
+setInterval(loadForecast, 300000);
 </script>
 {% endblock %}

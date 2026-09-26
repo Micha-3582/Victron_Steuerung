@@ -25,3 +25,4 @@ app/.venv/
 app/__pycache__/
 **/__pycache__/
 *.pyc
+app/vrm_cloud.json
