@@ -30,6 +30,7 @@
   <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Deine Regeln</h2>
   <div id="rules-list" style="display:flex;flex-direction:column;gap:12px"></div>
   <div id="rule-wizard" style="margin-top:12px"></div>
+  <div style="display:flex;justify-content:flex-end;margin-top:12px"><button type="button" id="fab-add" title="Neue Regel" onclick="wizStart()" style="width:48px;height:48px;border-radius:50%;padding:0;font-size:28px;line-height:1;display:flex;align-items:center;justify-content:center">+</button></div>
   <div class="muted" id="rules-msg" style="margin-top:8px"></div>
   <details style="margin-top:14px">
     <summary>Einstellungen für Regeln (Pause nach Handschaltung, Sicherheits-Timer)</summary>
@@ -37,8 +38,6 @@
     <div style="margin-top:10px"><button id="rules-settings-reset" class="ghost" type="button">Alle auf Standard</button></div>
   </details>
 </div>
-
-<button type="button" id="fab-add" title="Neue Regel" onclick="wizStart()" style="position:fixed;right:20px;bottom:76px;z-index:800;width:56px;height:56px;border-radius:50%;padding:0;font-size:32px;line-height:1;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(0,0,0,.45)">+</button>
 
 <div id="savebar" style="display:none;position:fixed;left:0;right:0;bottom:0;z-index:900;background:var(--card);border-top:1px solid var(--border);padding:10px 16px;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;box-shadow:0 -6px 20px rgba(0,0,0,.35)">
   <span id="savebar-msg">● Ungespeicherte Änderungen – die Steuerung nutzt noch die bisherigen Regeln</span>
