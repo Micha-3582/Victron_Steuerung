@@ -92,13 +92,25 @@ def mark_read(module: str, now: datetime | None = None):
             pass
 
 
+_unread_cache: dict = {}
+
+
 def unread(module: str, now: datetime | None = None) -> int:
-    """Anzahl Eintraege, die neuer sind als die letzte Lesemarke (ohne Marke: alle)."""
+    """Anzahl Eintraege, die neuer sind als die letzte Lesemarke (ohne Marke: alle). Wird nur neu gezaehlt, wenn sich Datei oder Marke geaendert haben."""
     since = _read_marks().get(module, "")
+    try:
+        st = os.stat(PATHS[module])
+        key = (st.st_mtime_ns, st.st_size, since)
+    except OSError:
+        return 0
+    hit = _unread_cache.get(module)
+    if hit and hit[0] == key:
+        return hit[1]
     n = 0
     for e in recent(module, 1000, None, now):
         if e.get("ts", "") > since:
             n += 1
         else:
             break
+    _unread_cache[module] = (key, n)
     return n

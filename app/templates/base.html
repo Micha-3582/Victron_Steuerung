@@ -262,7 +262,11 @@
         }
       }
       window.refreshLogBadges = refresh;
-      if (document.querySelector('header nav')) { refresh(); setInterval(refresh, 15000); }
+      if (document.querySelector('header nav')) {
+        refresh(); setInterval(refresh, 4000);                                            // zeitnah: neue Eintraege erscheinen nach wenigen Sekunden
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });   // Browser bremsen Hintergrund-Tabs aus - beim Zurueckkehren sofort nachsehen
+        window.addEventListener('focus', refresh);
+      }
     })();
   </script>
   <script>
