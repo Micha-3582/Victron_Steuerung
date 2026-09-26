@@ -12,7 +12,6 @@
     Bei Netzbezug oder Batterie-Entladung werden sie in umgekehrter Reihenfolge wieder abgeschaltet.
     Die Geräte richtest du unter Einstellungen → Geräte ein; eigene Schaltregeln (Uhrzeit, Preis, …) gibt es auf der Seite „Regeln“ – ein Gerät gehört entweder hierher oder zu einer Regel.
     <b>Änderungen werden erst mit „Speichern“ (Leiste unten) übernommen.</b></div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"><a href="/automation-log"><button type="button" class="ghost">📒 Logbuch</button></a><a href="/rules"><button type="button" class="ghost">Zu den Regeln</button></a><a href="/admin#geraete"><button type="button" class="ghost">Geräte einrichten</button></a></div>
   <div style="display:flex;align-items:center;gap:14px">
     <label class="switch" style="margin:0"><input type="checkbox" id="surplus_enabled"><span class="slider"></span></label>
     <div><b>Überschuss-Automatik aktiv</b></div>
@@ -21,8 +20,7 @@
     <label class="switch" style="margin:0"><input type="checkbox" id="surplus_dry"><span class="slider"></span></label>
     <div><b>Trockenlauf</b><div class="muted">Nur protokollieren (und melden), was geschaltet würde – nichts wird wirklich geschaltet.</div></div>
   </div>
-  <div style="margin-top:12px"><b>Letzte Aktionen</b>
-    <div id="surplus-events" class="muted" style="margin-top:4px">–</div></div>
+  <div style="margin-top:14px"><a href="/automation-log"><button type="button" class="ghost">📒 Logbuch</button></a></div>
 </div>
 
 <div class="card">
@@ -173,8 +171,7 @@ function renderFine() {
 }
 $('surplus_min_soc').addEventListener('input', () => { const v = parseInt($('surplus_min_soc').value); if (v >= 50 && v <= 100) { CFG.min_soc = v; touch(); } });
 
-function eventsHtml() { const ev = S.A.events || []; return ev.length ? ev.slice(0, 6).map(e => `${escH(e.ts.slice(5, 16).replace('T', ' '))} · ${escH(e.text)}`).join('<br>') : 'Noch keine.'; }
-function renderMain() { $('surplus_enabled').checked = CFG.enabled; $('surplus_dry').checked = CFG.dry; $('surplus-events').innerHTML = eventsHtml(); }
+function renderMain() { $('surplus_enabled').checked = CFG.enabled; $('surplus_dry').checked = CFG.dry; }
 function renderAll() { renderMain(); renderFine(); renderSurplus(); }
 async function loadServer() {
   const devs = await (await fetch('/api/shelly')).json();
@@ -182,9 +179,8 @@ async function loadServer() {
   const R = await (await fetch('/api/rules')).json();
   S = { devs: Array.isArray(devs) ? devs : [], A, ruledDevs: (R.rules || []).map(r => r.device_id) };
 }
-async function refresh() {                        // alle 10 s: Live-Zustand und letzte Aktionen auffrischen, den Entwurf nie anfassen
+async function refresh() {                        // alle 10 s: Live-Zustand auffrischen, den Entwurf nie anfassen
   try { await loadServer(); } catch (e) { return; }
-  $('surplus-events').innerHTML = eventsHtml();
   document.querySelectorAll('[data-dev]').forEach(el => { const d = dev(el.dataset.dev), s = el.querySelector('.dev-stat'); if (d && s) s.textContent = statText(d); });
   if (!dirty) { const a = document.activeElement; if (!(a && ['INPUT', 'SELECT'].includes(a.tagName))) { resetDraft(); renderAll(); } }
 }
