@@ -57,7 +57,7 @@ async function load() {
   const v = { ok: ['✅ Läuft sauber', 'rgba(53,192,122,.14)', 'var(--cheap)'], warn: ['⚠️ Läuft – mit Hinweisen', 'rgba(240,166,60,.14)', 'var(--timer)'], fail: ['❌ Probleme', 'rgba(229,84,74,.14)', '#e5544a'] }[r.verdict];
   const box = $('rp-verdict'); box.textContent = v[0]; box.style.background = v[1]; box.style.color = v[2];
   $('rp-msg').textContent = `Stand ${r.generated.replace('T', ' ')} · Version ${r.version} · gestartet ${r.started ? r.started.replace('T', ' ') : '?'}`;
-  $('rp-checks').innerHTML = r.checks.map((c, i) => `<div style="display:flex;gap:10px;padding:7px 10px;border-radius:8px;${i % 2 ? 'background:rgba(255,255,255,.04)' : ''}">
+  $('rp-checks').innerHTML = r.checks.map((c, i) => `<div style="display:flex;gap:10px;padding:7px 10px;${i % 2 ? 'background:rgba(255,255,255,.04)' : ''}">
     <span>${ICON[c.status]}</span><div><b>${esc(c.title)}</b><div class="muted">${esc(c.detail)}</div></div></div>`).join('');
   const c = r.current || {};
   $('rp-now').innerHTML = `Akku <b>${f(c.soc, 0)} %</b> · ESS <b>${esc(c.ess || '–')}</b> · Strategie <b>${esc(c.strategy || '–')}</b> · Preis <b>${f(c.now_price)} ct</b><br>
@@ -69,7 +69,7 @@ async function load() {
       <td>${d.price_min == null ? '–' : Math.round(d.price_min) + '/' + Math.round(d.price_avg) + '/' + Math.round(d.price_max)}</td>
       <td>${d.vrm_forecast == null ? '–' : f(d.vrm_forecast) + ' (' + (d.vrm_dev_pct == null ? '–' : (d.vrm_dev_pct > 0 ? '+' : '') + Math.round(d.vrm_dev_pct) + ' %') + ')'}</td>
       <td>${d.ticks_ok ?? '–'}/${d.ticks_err ?? '–'}</td><td>${d.charge_ticks ?? '–'}</td><td>${d.ess_writes ?? '–'}</td></tr>`).join('');
-  $('rp-events').innerHTML = r.events.length ? r.events.map((e, i) => `<div style="padding:6px 10px;border-radius:8px;${i % 2 ? 'background:rgba(255,255,255,.04)' : ''}">
+  $('rp-events').innerHTML = r.events.length ? r.events.map((e, i) => `<div style="padding:6px 10px;${i % 2 ? 'background:rgba(255,255,255,.04)' : ''}">
     <span class="muted">${e.ts.slice(5, 16).replace('T', ' ')}</span> <b>[${esc(e.kind)}]</b> ${esc(e.text)}</div>`).join('') : '<div class="muted">Keine bemerkenswerten Ereignisse im Zeitraum.</div>';
   try { lastText = await (await fetch('/api/report?format=md&days=' + days)).text(); $('rp-text').value = lastText; } catch (e) { lastText = ''; }
 }

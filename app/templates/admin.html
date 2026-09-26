@@ -29,7 +29,7 @@
   .tabbar button:hover { color: var(--fg); }
   .tabbar button.active { background: var(--accent); border-color: var(--accent); color: #06121f; font-weight: 600; }
   /* Trefferlisten der Geraetesuche: Zeilen abwechselnd schattiert, gut getrennt */
-  #shelly-found > div { padding: 10px 12px; border-radius: 8px; border: 1px solid transparent; }
+  #shelly-found > div { padding: 10px 12px; border: 1px solid transparent; }
   #shelly-found > div:nth-child(odd) { background: var(--card2); border-color: var(--border); }
   #shelly-found > div:hover { border-color: var(--accent); }
   .card.savebar { position: sticky; bottom: 12px; z-index: 25; box-shadow: 0 6px 24px rgba(0,0,0,.45); }
@@ -1132,7 +1132,7 @@ async function vrmRestore(apply) {
       list.innerHTML = ''; ab.hidden = true;
     } else {
       restoreMsg(`${r.slots} fehlende Viertelstunden gefunden (VRM-Auflösung: ${r.interval}${r.soc ? ', mit Batterie-SOC' : ', ohne Batterie-SOC'}). Vorschau – noch nichts gespeichert:`);
-      list.innerHTML = r.days.map((d, i) => `<div style="display:flex;gap:14px;flex-wrap:wrap;padding:5px 8px;border-radius:6px;${i % 2 ? 'background:rgba(255,255,255,.04)' : ''}">
+      list.innerHTML = r.days.map((d, i) => `<div style="display:flex;gap:14px;flex-wrap:wrap;padding:5px 8px;${i % 2 ? 'background:rgba(255,255,255,.04)' : ''}">
         <b style="min-width:92px">${fmtDay(d.day)}</b><span>${d.slots} Slots</span><span>Solar ${d.solar} kWh</span><span>Verbrauch ${d.verbrauch} kWh</span>
         <span>Bezug ${d.import} kWh</span><span>Einspeisung ${d.export} kWh</span></div>`).join('');
       ab.hidden = false;
