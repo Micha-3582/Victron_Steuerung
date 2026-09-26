@@ -829,6 +829,9 @@ def _finalize_solar_days(days: dict, now: datetime):
                 _finalize_vrm(e)
 
 
+VRM_HISTORY_MIN_STEP = 0.1     # kWh: kleinere Schwankungen der VRM-Tagesprognose gelten nicht als Nachjustierung
+
+
 def record_vrm_forecast(vrm_kwh: float | None, now: datetime | None = None):
     """Friert die VRM-Tagesprognose EINMAL pro Tag ein (erster Durchlauf des Tages; Grundlage der Abweichungs-
     Statistik), merkt sich daneben den laufenden Stand ("vrm_latest") und schließt vergangene Tage ab."""
@@ -845,6 +848,10 @@ def record_vrm_forecast(vrm_kwh: float | None, now: datetime | None = None):
         days[today]["vrm_forecast"] = v
     if v is not None and today in days:
         days[today]["vrm_latest"] = v            # laufender Stand (das VRM justiert nach) - nur fuer die Anzeige des heutigen Tages
+        hist = days[today].setdefault("vrm_history", [])       # [[HH:MM, kWh], ...] - jede Aenderung ab 0,1 kWh
+        if not hist or abs(hist[-1][1] - v) >= VRM_HISTORY_MIN_STEP:
+            hist.append([now.strftime("%H:%M"), v])
+            del hist[:-60]
     _dump_json(SOLAR_LOG_PATH, data, indent=2)
 
 

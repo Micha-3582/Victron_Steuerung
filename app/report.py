@@ -218,6 +218,7 @@ def _day_rows(now: datetime, days: int, stats: dict, hist_days: dict) -> list[di
             "charged_kwh": round(charged.get(day, 0.0), 1),
             "price_min": round(min(p), 1) if p else None, "price_avg": round(sum(p) / len(p), 1) if p else None, "price_max": round(max(p), 1) if p else None,
             "vrm_forecast": (sl.get(day) or {}).get("vrm_forecast"), "vrm_dev_pct": (sl.get(day) or {}).get("vrm_deviation_pct"),
+            "vrm_history": (sl.get(day) or {}).get("vrm_history") or [],
             "ticks_ok": o.get("ticks_ok"), "ticks_err": o.get("ticks_err"), "charge_ticks": o.get("charge_ticks"), "ess_writes": o.get("ess_writes"),
             "src_vrm": o.get("src_vrm"), "src_avg": o.get("src_avg"),
             "plan_diff_ct": round(ps[day]["current_net"] - ps[day]["sim_net"], 1) if day in ps else None,
@@ -290,6 +291,11 @@ def to_markdown(r: dict) -> str:
                  f"{_f(d['avg_import_ct'])} ct | {_f(d['charged_kwh'])} | {_f(d['price_min'], '{:.0f}')}/{_f(d['price_avg'], '{:.0f}')}/{_f(d['price_max'], '{:.0f}')} | "
                  f"{_f(d['vrm_forecast'])} ({_f(d['vrm_dev_pct'], '{:+.0f}')} %) | {d['ticks_ok'] if d['ticks_ok'] is not None else '–'}/{d['ticks_err'] if d['ticks_err'] is not None else '–'} | "
                  f"{d['charge_ticks'] if d['charge_ticks'] is not None else '–'} | {d['ess_writes'] if d['ess_writes'] is not None else '–'} | {_f(d['plan_diff_ct'], '{:+.0f}')} |")
+    vh = [d for d in r["days"] if len(d.get("vrm_history") or []) > 1]
+    if vh:
+        L += ["", "## VRM-Tagesprognose: Nachjustierungen (Uhrzeit Wert kWh)"]
+        for d in vh:
+            L.append(f"- {d['date'][5:]}: " + " → ".join(f"{t} {v:.1f}" for t, v in d["vrm_history"]) + f" (Ertrag {_f(d['solar'])})")
     L += ["", "## Ereignisse (neueste zuerst)"]
     if r["events"]:
         for e in r["events"][:30]:

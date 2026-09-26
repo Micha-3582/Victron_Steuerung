@@ -39,8 +39,11 @@ async function load() {
       : '';
     const upd = (r.provisional && r.vrm_latest != null && r.vrm_forecast != null && Math.abs(r.vrm_latest - r.vrm_forecast) >= 0.05)
       ? `<br><span class="muted">aktuell nachjustiert: </span><b>${r.vrm_latest.toFixed(1)} kWh</b>` : '';
+    const vh = (r.vrm_history && r.vrm_history.length > 1)
+      ? `<details style="margin-top:4px"><summary class="muted" style="cursor:pointer">${r.vrm_history.length - 1}× nachjustiert</summary>`
+        + `<div class="muted" style="margin-top:2px">${r.vrm_history.map(x => `${x[0]} <b>${x[1].toFixed(1)}</b>`).join(' → ')} kWh</div></details>` : '';
     const fc = r.vrm_forecast != null
-      ? `${r.vrm_forecast.toFixed(1)} kWh <span class="muted">(morgens)</span>${upd}<br><span class="muted">Abw. </span>${devSpan(r.vrm_deviation_pct)}`
+      ? `${r.vrm_forecast.toFixed(1)} kWh <span class="muted">(morgens)</span>${upd}<br><span class="muted">Abw. </span>${devSpan(r.vrm_deviation_pct)}${vh}`
       : '<span class="muted">–</span>';
     const vm = (r.vrm_measured != null && r.actual != null && r.vrm_measured > 0.5)
       ? `<br><span class="muted">VRM misst ${r.vrm_measured.toFixed(1)} kWh · Abw. </span>${devSpan((r.actual - r.vrm_measured) / r.vrm_measured * 100)}`
