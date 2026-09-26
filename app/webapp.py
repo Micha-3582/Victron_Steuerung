@@ -657,7 +657,7 @@ class Controller:
                 iv = 10
             self._stop.wait(iv)
 
-    def _rules_ctx(self, cfg: dict, system: dict | None, now: datetime) -> dict:
+    def _rules_ctx(self, cfg: dict, system, now: datetime) -> dict:
         """Messwerte fuer die Bedingungen der Regeln (Preis, Akku, Sonne morgen)."""
         with self.lock:
             st = dict(self.status)
