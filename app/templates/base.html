@@ -150,6 +150,10 @@
     body.selecting .chart-scroll canvas { touch-action: none; }
     .sel-btn[aria-pressed="true"] { background: var(--timer); color: #14171c; border-color: var(--timer); }
     .daytab { font-size: 13px; padding: 6px 14px; }
+    .chip { display:inline-flex; margin:0; font-weight:normal; cursor:pointer; }
+    .chip input { display:none; }
+    .chip span { border:1px solid var(--border); border-radius:999px; padding:1px 8px; font-size:12px; color:var(--muted); }
+    .chip input:checked + span { background:var(--accent); border-color:var(--accent); color:#14171c; font-weight:600; }
     .daytab.active { background: var(--accent); color: #14171c; border-color: var(--accent); }
     /* Victron Live-Kacheln */
     /* Festes Raster: 6 pro Zeile (Desktop), damit nichts springt */

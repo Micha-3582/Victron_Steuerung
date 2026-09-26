@@ -31,6 +31,7 @@ import planner
 import notify
 import opslog
 import price_cache
+import rules
 import report
 import updater
 import vrm
@@ -47,6 +48,7 @@ logging.basicConfig(level=logging.INFO,
                     datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger("webapp")
 surplus_ctrl = surplus.SurplusController()
+rule_engine = rules.RuleEngine(surplus_ctrl)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -655,48 +657,73 @@ class Controller:
                 iv = 10
             self._stop.wait(iv)
 
+    def _rules_ctx(self, cfg: dict, system: dict | None, now: datetime) -> dict:
+        """Messwerte fuer die Bedingungen der Regeln (Preis, Akku, Sonne morgen)."""
+        with self.lock:
+            st = dict(self.status)
+        prices, price_ct = None, None
+        if cfg.get("tariff_mode") == "fixed":
+            fp = float(cfg.get("fixed_price_ct") or 0)
+            if fp > 0:
+                prices, price_ct = [fp] * 96, fp
+        else:
+            prices = store.price_slots(now.date().isoformat())
+            if prices:
+                price_ct = prices[now.hour * 4 + now.minute // 15]
+            if price_ct is None:
+                price_ct = st.get("now_price")
+        try:
+            soc = float(system["battery"]["soc"]) if system else None
+        except (KeyError, TypeError, ValueError):
+            soc = None
+        return {"soc": soc, "price_ct": price_ct, "prices_today": prices, "pv_tomorrow": st.get("pv_tom")}
+
     def run_surplus(self):
-        """Ueberschuss-Automatik fuer Shelly-Geraete (alle 10 s). Nutzt die Messwerte
-        des Energie-Samplers; ohne frische Werte wird nichts geschaltet."""
+        """Regel-Engine fuer Geraete inkl. Ueberschuss-Automatik (alle 10 s). Nutzt die Messwerte des Energie-Samplers;
+        ohne frische Messwerte wird kein Ueberschuss-Geraet zugeschaltet."""
+        last_flush = 0.0
         while not self._stop.is_set():
             try:
                 cfg = store.load_config()
-                if cfg.get("surplus_enabled"):
+                all_rules = rules.list_rules()
+                rl = all_rules if rules.enabled(cfg) and any(r.get("enabled", True) for r in all_rules) else []   # ausgeschaltete Regeln bleiben drin (Status, Abschalten)
+                if rl:
                     system = self.last_system if time.time() - self.last_system_ts < 45 else None
-                    if system:
-                        dry = bool(cfg.get("surplus_dry_run"))
-                        devs = sorted(shelly.list_with_status(),
-                                      key=lambda d: d.get("prio") or 10 ** 6)   # Prioritaet
-                        if dry:      # Trockenlauf: mit gedachtem statt echtem Zustand rechnen
-                            for d in devs:
-                                if d["id"] in self._surplus_dry_on:
-                                    d["on"] = self._surplus_dry_on[d["id"]]
-                        now = datetime.now()
-                        if dry:
-                            surplus_ctrl.disarm_all()
-                        else:        # Sicherheits-Timer der zugeschalteten Geraete verlaengern (nur bei frischen Messwerten)
-                            fs = surplus.settings(cfg)["failsafe_min"]
-                            for d in surplus_ctrl.due_rearm(now, cfg, devs):
-                                try:
-                                    shelly.set_state(d["id"], True, timer_s=int(fs * 60))
-                                    surplus_ctrl.mark_armed(d["id"], now)
-                                except shelly.ShellyError as e:
-                                    log.warning("Sicherheits-Timer %s: %s", d["name"], e)
-                        act = surplus_ctrl.step(now, system, cfg, devs)
-                        if act:
-                            self._apply_surplus(act, dry, cfg)
+                    dry = rules.dry_run(cfg)
+                    devs = shelly.list_with_status()
+                    if dry:      # Trockenlauf: mit gedachtem statt echtem Zustand rechnen
+                        for d in devs:
+                            if d["id"] in self._surplus_dry_on:
+                                d["on"] = self._surplus_dry_on[d["id"]]
+                    now = datetime.now()
+                    if dry:
+                        rule_engine.disarm_all()
+                    else:        # Sicherheits-Timer der eingeschalteten Geraete verlaengern
+                        fs = surplus.settings(cfg)["failsafe_min"]
+                        for d in rule_engine.due_rearm(now, devs, fs):
+                            try:
+                                shelly.set_state(d["id"], True, timer_s=int(fs * 60))
+                                rule_engine.mark_armed(d["id"], now)
+                            except shelly.ShellyError as e:
+                                log.warning("Sicherheits-Timer %s: %s", d["name"], e)
+                    for act in rule_engine.step(now, self._rules_ctx(cfg, system, now), system, cfg, devs, rl):
+                        self._apply_surplus(act, dry, cfg)
+                    if time.time() - last_flush > 60:
+                        rule_engine.flush()
+                        last_flush = time.time()
                 else:
-                    surplus_ctrl.reset_timers()
-                    surplus_ctrl.disarm_all()   # Timer laufen aus -> Geraete schalten sich selbst ab
+                    rule_engine.reset()
+                    rule_engine.disarm_all()    # Timer laufen aus -> Geraete schalten sich selbst ab
                     self._surplus_dry_on.clear()
             except Exception as e:                       # noqa: BLE001
-                log.warning("Ueberschuss-Automatik: %s", e)
+                log.warning("Regel-Engine: %s", e)
             self._stop.wait(10)
 
     def _apply_surplus(self, act, dry: bool, cfg: dict):
-        action, dev, why = act
+        action, dev, why, src = act
         on = action == "on"
         verb = "eingeschaltet" if on else "ausgeschaltet"
+        ok = True
         if dry:
             self._surplus_dry_on[dev["id"]] = on
             text = f"(Trockenlauf) {dev['name']} würde {verb} – {why}"
@@ -706,13 +733,16 @@ class Controller:
                 timer_s = int(fs * 60) if on and fs > 0 and dev.get("kind") != "tuya" else None
                 shelly.set_state(dev["id"], on, timer_s=timer_s)
                 if timer_s:
-                    surplus_ctrl.mark_armed(dev["id"])
+                    rule_engine.mark_armed(dev["id"])
                 elif not on:
-                    surplus_ctrl.disarm(dev["id"])
+                    rule_engine.disarm(dev["id"])
                 text = f"{dev['name']} {verb} – {why}"
             except shelly.ShellyError as e:
+                ok = False
                 text = f"{dev['name']}: Schalten fehlgeschlagen ({e})"
-        log.info("Ueberschuss-Automatik: %s", text)
+        if ok:
+            rule_engine.set_owner(dev["id"], src if on else None)
+        log.info("Regel-Engine: %s", text)
         opslog.log("surplus", text, dry=dry)
         surplus_ctrl.log(text)
         notify.push("surplus", ("🧪 " if dry else "🔌 ") + text, cfg)      # auch im Trockenlauf (Text beginnt dann mit "(Trockenlauf)")
@@ -1020,7 +1050,7 @@ def api_config():
                "show_live_values", "show_energy_chart", "show_flow_chart",
                "show_week_overview", "show_month_overview", "show_tibber_card",
                "show_override_card", "show_price_plan", "show_charge_log",
-               "show_ev_card", "show_shelly_card", "show_weather_card", "show_plansim_card", "show_savings_card", "pv_auto_calibration", "surplus_enabled", "surplus_dry_run",
+               "show_ev_card", "show_shelly_card", "show_weather_card", "show_plansim_card", "show_savings_card", "pv_auto_calibration", "surplus_enabled", "surplus_dry_run", "rules_enabled", "rules_dry_run",
                "surplus_min_soc", "tile_order", "scan_networks",
                "has_pv_inverter", "has_mppt", "tariff_mode",
                "fixed_price_ct", "pv_inverters"] + list(Params().__dict__.keys())
@@ -1167,18 +1197,52 @@ def _scan_networks() -> list[str]:
 @app.route("/api/shelly", methods=["GET"])
 def api_shelly_list():
     """?dashboard=1: nur die in den Einstellungen fuers Dashboard freigegebenen."""
-    return jsonify(shelly.list_with_status(only_shown=request.args.get("dashboard") == "1"))
+    devs = shelly.list_with_status(only_shown=request.args.get("dashboard") == "1")
+    ruled = {r["device_id"] for r in rules.list_rules() if r.get("enabled", True)} if rules.enabled(store.load_config()) else set()
+    for d in devs:
+        d["auto"] = d["id"] in ruled                       # "Auto"-Hinweis im Dashboard: das Geraet hat eine aktive Regel
+    return jsonify(devs)
 
 
 @app.route("/api/shelly/auto", methods=["GET"])
 def api_shelly_auto():
     cfg = store.load_config()
-    return jsonify({"enabled": bool(cfg.get("surplus_enabled")),
-                    "dry_run": bool(cfg.get("surplus_dry_run")),
+    return jsonify({"enabled": rules.enabled(cfg),
+                    "dry_run": rules.dry_run(cfg),
                     "min_soc": cfg.get("surplus_min_soc", surplus.DEFAULT_MIN_SOC),
                     "settings": surplus.settings(cfg), "defaults": surplus.DEFAULTS,
                     "bounds": surplus.BOUNDS,
+                    "tariff_mode": cfg.get("tariff_mode", "tibber"),
+                    "rules": rules.list_rules(), "status": dict(rule_engine.status), "owner": dict(rule_engine.owner),
                     "events": surplus_ctrl.recent()})
+
+
+@app.route("/api/rules", methods=["POST"])
+def api_rules_add():
+    try:
+        return jsonify(rules.add_rule(request.get_json(silent=True) or {})), 201
+    except rules.RuleError as e:
+        return jsonify(error=str(e)), 400
+
+
+@app.route("/api/rules/<rule_id>", methods=["PATCH", "DELETE"])
+def api_rules_modify(rule_id):
+    if request.method == "DELETE":
+        return (jsonify(ok=True), 200) if rules.delete_rule(rule_id) else (jsonify(error="Regel nicht gefunden."), 404)
+    try:
+        r = rules.update_rule(rule_id, request.get_json(silent=True) or {})
+    except rules.RuleError as e:
+        return jsonify(error=str(e)), 400
+    return (jsonify(r), 200) if r else (jsonify(error="Regel nicht gefunden."), 404)
+
+
+@app.route("/api/rules/order", methods=["POST"])
+def api_rules_order():
+    ids = (request.get_json(silent=True) or {}).get("ids")
+    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+        return jsonify(error="ids fehlt"), 400
+    rules.reorder(ids)
+    return jsonify(ok=True)
 
 
 @app.route("/api/shelly/auto-order", methods=["POST"])
@@ -1455,6 +1519,8 @@ def api_shelly_add():
 def api_shelly_modify(dev_id):
     if request.method == "DELETE":
         ok = shelly.remove(dev_id)
+        if ok:
+            rules.remove_device(dev_id)
     else:
         body = request.get_json(silent=True) or {}
         try:
@@ -1475,7 +1541,9 @@ def api_shelly_switch(dev_id):
         result = shelly.set_state(dev_id, on, timer_s=0 if on else None)     # 0 = evtl. laufenden Auto-Timer aufheben
     except shelly.ShellyError as e:
         return jsonify(error=str(e)), 400      # nicht 502/504: Cloudflare ersetzt diese Antworten durch eine eigene Fehlerseite
-    surplus_ctrl.note_manual(dev_id, hold_min=surplus.settings(store.load_config())["manual_hold_min"])   # Automatik pausiert fuer dieses Geraet
+    hold_min = surplus.settings(store.load_config())["manual_hold_min"]
+    surplus_ctrl.note_manual(dev_id, hold_min=hold_min)                 # Automatik pausiert fuer dieses Geraet
+    rule_engine.note_manual(dev_id, hold_min=hold_min)
     return jsonify(result)
 
 
@@ -1516,6 +1584,12 @@ def main():
         log.warning("Preis-Historie-Nachtrag fehlgeschlagen: %s", e)
     notify.push("startup", "🔄 Die Steuerung wurde gestartet.", cfg)
     opslog.count("restarts")
+    try:
+        made = rules.migrate_from_devices(shelly.load_devices())
+        if made:
+            log.info("Regeln: %d Ueberschuss-Regel(n) aus der bisherigen Automatik uebernommen", made)
+    except Exception as e:                               # noqa: BLE001
+        log.warning("Regel-Migration fehlgeschlagen: %s", e)
     opslog.log("startup", "Steuerung gestartet")
     # PORT-Umgebungsvariable hat Vorrang (pm2/systemd), sonst web_port aus Config
     port = int(os.environ.get("PORT", cfg.get("web_port", 5005)))

@@ -35,3 +35,5 @@ app/events.jsonl
 app/ops_stats.json
 app/forecast_hours.json
 app/savings_days.json
+app/rules.json
+app/rules_state.json

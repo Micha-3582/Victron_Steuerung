@@ -34,7 +34,7 @@ EVENTS = {
     "vrm": ("VRM-Prognose nicht verfügbar", True),
     "watchdog": ("Batterie-Watchdog schlägt an (Batterie reagiert nicht)", True),
     "low_soc": ("Akkustand niedrig", True),
-    "surplus": ("Überschuss-Automatik schaltet ein Gerät (auch im Trockenlauf)", False),
+    "surplus": ("Geräte-Regeln / Überschuss schalten ein Gerät (auch im Trockenlauf)", False),
     "summary": ("Tages-Zusammenfassung am Abend", False),
     "startup": ("App wurde gestartet / neu gestartet", False),
 }

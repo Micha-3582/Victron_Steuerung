@@ -956,6 +956,12 @@ def record_prices(entries: list) -> int:
     return changed
 
 
+def price_slots(day: str):
+    """96 Viertelstunden-Preise (ct) eines Tages aus der Preis-Historie (nur Original-Tibber-Preise) oder None."""
+    rec = _price_days().get(day)
+    return list(rec["p"]) if rec and rec.get("src") == "tibber" and len(rec.get("p") or []) == 96 else None
+
+
 def backfill_prices_from_history() -> int:
     """Rechnet fuer Tage OHNE Tibber-Originalpreise aus dem Verlauf zurueck: Preis = Bezugskosten / Bezugsmenge (nur Slots mit
     Netzbezug). Idempotent; laeuft beim Start. Rueckgabe: Anzahl neu gefuellter Slots."""

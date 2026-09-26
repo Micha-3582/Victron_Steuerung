@@ -186,11 +186,12 @@ def _checks(now: datetime, cfg: dict, ctrl: dict, stats: dict, hist_days: dict) 
         pass
 
     # 11) Ueberschuss-Automatik
-    if cfg.get("surplus_enabled"):
+    import rules
+    if rules.enabled(cfg):
         acts = opslog.recent(300, {"surplus"}, now - timedelta(days=7))
         real = sum(1 for e in acts if not e.get("dry"))
-        out.append(_check("surplus", "Überschuss-Automatik", "info",
-                          f"aktiv, {'TROCKENLAUF' if cfg.get('surplus_dry_run') else 'scharf'}; Aktionen 7 Tage: {len(acts)} (davon echt {real})"))
+        out.append(_check("surplus", "Geräte-Regeln", "info",
+                          f"aktiv, {'TROCKENLAUF' if rules.dry_run(cfg) else 'scharf'}; {len([x for x in rules.list_rules() if x.get('enabled', True)])} Regel(n); Aktionen 7 Tage: {len(acts)} (davon echt {real})"))
     return out
 
 
@@ -250,7 +251,7 @@ def build(days: int = 7, ctrl: dict | None = None, now: datetime | None = None) 
     cal = _safe(store.pv_calibration, now)
     settings = {k: cfg.get(k) for k in ("battery_usable_kwh", "daily_usage_kwh", "charge_power_w", "pv_reserve_kwh", "max_charge_soc", "absolute_cheap_price",
                                         "pv_tom_morning_factor", "min_peak_soc", "night_safety_soc", "target_safe_soc", "hysterese_soc",
-                                        "peak_avoid_price", "poll_seconds", "dry_run", "surplus_enabled", "surplus_dry_run", "surplus_min_soc", "tariff_mode")
+                                        "peak_avoid_price", "poll_seconds", "dry_run", "rules_enabled", "rules_dry_run", "surplus_enabled", "surplus_dry_run", "surplus_min_soc", "tariff_mode")
                 if cfg.get(k) is not None}
     return {"generated": now.isoformat(timespec="seconds"), "app": cfg.get("app_display_name") or "Victron Steuerung", "version": _version(),
             "started": ctrl.get("started"), "verdict": verdict, "checks": checks, "days": rows, "events": events, "settings": settings,
