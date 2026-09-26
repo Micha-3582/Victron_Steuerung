@@ -69,6 +69,24 @@ def counts(module: str, days: int = 7, now: datetime | None = None) -> dict:
     return {"total": len(rows), "real": sum(1 for r in rows if not r.get("dry")), "failed": sum(1 for r in rows if r.get("action") == "fail")}
 
 
+def clear(module: str) -> int:
+    """Logbuch leeren. Rueckgabe: Anzahl geloeschter Eintraege."""
+    if module not in PATHS:
+        raise ValueError(module)
+    with _lock:
+        path = PATHS[module]
+        n = 0
+        try:
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    n = sum(1 for line in f if line.strip())
+                open(path, "w", encoding="utf-8").close()
+        except OSError:
+            pass
+        _unread_cache.pop(module, None)
+    return n
+
+
 def _read_marks() -> dict:
     try:
         with open(READ_PATH, encoding="utf-8") as f:

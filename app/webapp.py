@@ -1328,6 +1328,15 @@ def api_automation_log_read():
     return jsonify(ok=True)
 
 
+@app.route("/api/automation/log/clear", methods=["POST"])
+def api_automation_log_clear():
+    """Logbuch eines Bausteins leeren (Knopf auf der Logbuch-Seite)."""
+    module = (request.get_json(silent=True) or {}).get("module", "")
+    if module not in autolog.MODULES:
+        return jsonify(error="module: surplus oder rules"), 400
+    return jsonify(ok=True, deleted=autolog.clear(module))
+
+
 @app.route("/automation-log")
 def automation_log_page():
     """Logbuch der Ueberschuss-Automatik (eigene Seite)."""

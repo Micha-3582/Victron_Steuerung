@@ -6,7 +6,8 @@
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
     <h2 style="margin:0">{{ log_title }}</h2>
     <select id="days" class="ghost" style="width:auto"><option value="7">7 Tage</option><option value="30" selected>30 Tage</option><option value="">Alles</option></select>
-    <a href="{{ back_url }}" style="margin-left:auto"><button type="button" class="ghost">← {{ back_label }}</button></a>
+    <button type="button" class="ghost" id="btn-clear" style="margin-left:auto" title="Alle Einträge dieses Logbuchs löschen">🗑 Logbuch leeren</button>
+    <a href="{{ back_url }}"><button type="button" class="ghost">← {{ back_label }}</button></a>
   </div>
   <div class="muted" style="margin:6px 0 10px">{{ log_hint }} Auch die Aktionen des Trockenlaufs stehen hier (dort steht „würde …“), neueste zuerst.</div>
   <div id="summary" class="muted" style="margin-bottom:8px"></div>
@@ -34,6 +35,26 @@ async function load() {
     return `<tr><td style="white-space:nowrap">${fmt(r.ts)}</td><td>${escH(r.dev || '–')}</td><td><b style="color:${c}">${t}</b></td><td>${escH(r.text)}</td></tr>`;
   }).join('') : '<tr><td colspan="4" class="muted">Keine Einträge.</td></tr>');
 }
+function uiConfirm(title, message, okText) {
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px';
+    ov.innerHTML = `<div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;width:100%;max-width:400px;box-shadow:0 12px 40px rgba(0,0,0,.5)">
+      <h3 style="margin:0 0 10px;font-size:17px"></h3><div class="muted dlg-msg"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px"><button class="ghost dlg-no">Abbrechen</button><button class="dlg-ok danger"></button></div></div>`;
+    ov.querySelector('h3').textContent = title; ov.querySelector('.dlg-msg').textContent = message; ov.querySelector('.dlg-ok').textContent = okText || 'OK';
+    const close = v => { document.removeEventListener('keydown', onKey); ov.remove(); resolve(v); };
+    const onKey = e => { if (e.key === 'Escape') close(false); };
+    ov.querySelector('.dlg-ok').onclick = () => close(true); ov.querySelector('.dlg-no').onclick = () => close(false);
+    ov.addEventListener('mousedown', e => { if (e.target === ov) close(false); });
+    document.addEventListener('keydown', onKey); document.body.appendChild(ov); ov.querySelector('.dlg-no').focus();
+  });
+}
+$('btn-clear').addEventListener('click', async () => {
+  if (!await uiConfirm('Logbuch leeren?', 'Alle Einträge dieses Logbuchs werden endgültig gelöscht. Das lässt sich nicht rückgängig machen.', 'Alles löschen')) return;
+  try { await fetch('/api/automation/log/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ module: MODULE }) }); } catch (e) { /* egal */ }
+  await load(); if (window.refreshLogBadges) window.refreshLogBadges();
+});
 window.LOG_OPEN = MODULE;                                   // dieses Logbuch ist offen: sein Zaehler bleibt aus
 async function markRead() { try { await fetch('/api/automation/log/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ module: MODULE }) }); if (window.refreshLogBadges) window.refreshLogBadges(); } catch (e) { /* egal */ } }
 async function loadAndRead() { await load(); markRead(); }
