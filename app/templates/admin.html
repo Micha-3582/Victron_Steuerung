@@ -265,7 +265,9 @@
         <option value="48" selected>48 V</option>
       </select>
       <small class="hint">Ladeleistung: <b id="charge_power_preview">–</b></small></div>
-    <div><label>PV-Reserve (kWh)</label><input id="pv_reserve_kwh" type="number" step="0.5"></div>
+    <div><label>PV-Reserve (kWh)
+        <span class="qhelp" role="button" tabindex="0" data-help="Platz, der beim Netzladen im Akku frei bleibt, damit mittags noch Solarstrom hineinpasst. Die Steuerung plant nur so viel Netzstrom ein, dass Kapazität minus PV-Reserve nicht überschritten wird. Nur bei dynamischem Tarif relevant. 0 = kein Puffer. Das Ladelimit (max. SOC) bleibt davon unabhängig die harte Obergrenze.">?</span>
+      </label><input id="pv_reserve_kwh" type="number" step="0.5"></div>
     <div><label>Ladelimit / max. SOC (%)
         <span class="qhelp" role="button" tabindex="0" data-help="Harte Obergrenze: ab diesem Ladestand wird nie aus dem Netz geladen - auch nicht bei manuellen Ladeterminen oder Sofort-Override.">?</span>
       </label><input id="max_charge_soc" type="number" min="1" max="100"></div>
