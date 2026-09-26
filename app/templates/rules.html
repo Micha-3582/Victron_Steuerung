@@ -127,15 +127,19 @@ function renderSettings() {
   $('rules-settings-reset').onclick = () => { CFG.settings = { ...A.defaults }; touch(); renderSettings(); };
 }
 
-const ADD_ON = [['time', 'Uhrzeit / Wochentage'], ['price', 'Strompreis unter/über …'], ['cheapest', 'In den günstigsten Stunden'], ['budget', 'Tagesziel: Laufzeit pro Tag'], ['soc', 'Akkustand'], ['sun_tomorrow', 'Sonne morgen (Prognose)']];
-const ADD_OFF = [['at', 'Um eine Uhrzeit (einmal pro Tag)'], ...ADD_ON.filter(([t]) => t !== 'budget')];
+const TYPES = [['time', 'Uhrzeit von–bis'], ['at', 'Uhrzeit (einmal pro Tag)'], ['price', 'Strompreis'], ['cheapest', 'Günstigste Stunden des Tages'], ['budget', 'Tagesziel (Minuten pro Tag)'], ['soc', 'Akkustand'], ['sun_tomorrow', 'Sonne morgen (Prognose)']];
+const MODES = [['on', 'Einschalten, wenn'], ['off', 'Ausschalten, sobald']];
+const allowed = (mode, fixed) => TYPES.filter(([t]) => !(fixed && (t === 'price' || t === 'cheapest')) && !(mode === 'on' && t === 'at') && !(mode === 'off' && t === 'budget'));
 const COND_DEFAULT = {
   at: { type: 'at', time: '23:30', days: [] }, time: { type: 'time', from: '09:00', to: '16:00', days: [] }, price: { type: 'price', op: 'below', ct: 25 }, cheapest: { type: 'cheapest', hours: 3 },
   budget: { type: 'budget', minutes: 120, from: '06:00', to: '22:00' }, soc: { type: 'soc', op: 'above', pct: 50 }, sun_tomorrow: { type: 'sun_tomorrow', op: 'above', kwh: 15 },
 };
 const WD = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
-function condHtml(c, fixed) {
-  const sel = (cls, val, opts) => `<select class="${cls}" style="width:auto" onchange="ruleEdited(this)">${opts.map(([v, t]) => `<option value="${v}" ${val === v ? 'selected' : ''}>${t}</option>`).join('')}</select>`;
+let FIXED = false;
+const PEND = {};                                  // Regel-ID -> {mode}: Zeile, die gerade angelegt wird (erst Ein/Aus waehlen, dann WAS)
+const optHtml = (list, val) => list.map(([v, t]) => `<option value="${v}" ${val === v ? 'selected' : ''}>${t}</option>`).join('');
+function condRow(c, mode) {
+  const sel = (cls, val, list) => `<select class="${cls}" style="width:auto" onchange="ruleEdited(this)">${optHtml(list, val)}</select>`;
   const num = (cls, val, w) => `<input class="${cls}" type="number" step="any" value="${escH(val)}" style="width:${w}px" oninput="ruleEdited(this)">`;
   const tm = (cls, val, end) => {
     const [h, m] = String(val).split(':').map(Number), pad2 = n => String(n).padStart(2, '0');
@@ -144,54 +148,78 @@ function condHtml(c, fixed) {
       + `<select class="t-m" style="width:auto" onchange="ruleEdited(this)">${mins.map(i => `<option value="${pad2(i)}" ${i === m ? 'selected' : ''}>${pad2(i)}</option>`).join('')}</select></span>`;
   };
   const cmp = (cls, v) => sel(cls, v, [['below', 'unter'], ['above', 'über']]);
-  const chips = days => `<span style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-left:6px" title="Keine Auswahl = jeden Tag">${WD.map((n, i) => `<label class="chip"><input type="checkbox" class="c-day" value="${i}" ${(days || []).includes(i) ? 'checked' : ''} onchange="ruleEdited(this)"><span>${n}</span></label>`).join('')}</span>`;
+  const chips = days => `<span style="display:inline-flex;gap:4px;flex-wrap:wrap" title="Keine Auswahl = jeden Tag">${WD.map((n, i) => `<label class="chip"><input type="checkbox" class="c-day" value="${i}" ${(days || []).includes(i) ? 'checked' : ''} onchange="ruleEdited(this)"><span>${n}</span></label>`).join('')}</span>`;
   let body = '';
-  if (c.type === 'time') body = `Zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to, true)} Uhr ${chips(c.days)}`;
-  else if (c.type === 'at') body = `Um ${tm('c-at', c.time)} Uhr <span class="muted">(einmal pro Tag)</span> ${chips(c.days)}`;
-  else if (c.type === 'price') body = `Strompreis ${cmp('c-op', c.op)} ${num('c-ct', c.ct, 70)} ct/kWh`;
-  else if (c.type === 'cheapest') body = `In den ${num('c-hours', c.hours, 60)} günstigsten Stunden des Tages`;
-  else if (c.type === 'budget') body = `Tagesziel: ${num('c-min', c.minutes, 70)} Minuten pro Tag, ${fixed ? 'so früh wie möglich' : 'zu den günstigsten Zeiten'}, zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to, true)} Uhr`;
-  else if (c.type === 'soc') body = `Akku ${cmp('c-op', c.op)} ${num('c-pct', c.pct, 70)} %`;
-  else if (c.type === 'sun_tomorrow') body = `Sonne morgen ${cmp('c-op', c.op)} ${num('c-kwh', c.kwh, 70)} kWh`;
+  if (c.type === 'time') body = `von ${tm('c-from', c.from)} bis ${tm('c-to', c.to, true)} Uhr ${chips(c.days)}`;
+  else if (c.type === 'at') body = `um ${tm('c-at', c.time)} Uhr ${chips(c.days)}`;
+  else if (c.type === 'price') body = `${cmp('c-op', c.op)} ${num('c-ct', c.ct, 70)} ct/kWh`;
+  else if (c.type === 'cheapest') body = `unter den ${num('c-hours', c.hours, 60)} günstigsten Stunden`;
+  else if (c.type === 'budget') body = `${num('c-min', c.minutes, 70)} Min pro Tag, ${FIXED ? 'so früh wie möglich' : 'zu den günstigsten Zeiten'}, zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to, true)} Uhr`;
+  else if (c.type === 'soc') body = `${cmp('c-op', c.op)} ${num('c-pct', c.pct, 70)} %`;
+  else if (c.type === 'sun_tomorrow') body = `${cmp('c-op', c.op)} ${num('c-kwh', c.kwh, 70)} kWh`;
+  const modeColor = mode === 'on' ? 'var(--cheap)' : 'var(--exp)';
   return `<div class="cond" data-type="${c.type}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border)">
-    <span style="flex:1;min-width:200px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${body}</span>
+    <select class="c-mode" style="width:auto;font-weight:600;color:${modeColor}" onchange="condModeChanged(this)">${optHtml(MODES, mode)}</select>
+    <select class="c-type" style="width:auto" onchange="condTypeChanged(this)">${optHtml(allowed(mode, FIXED), c.type)}</select>
+    <span style="flex:1;min-width:160px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${body}</span>
     <button class="ghost" style="padding:2px 9px" title="Bedingung entfernen" onclick="ruleCondDel(this)">✕</button></div>`;
 }
-function collectConds(list) {
-  return [...list.querySelectorAll('.cond')].map(row => {
-    const t = row.dataset.type, v = c => {
-      const e = row.querySelector('.' + c); if (e) return e.value;
-      const ts = row.querySelector('.tsel[data-t="' + c + '"]'); return ts ? ts.querySelector('.t-h').value + ':' + (ts.querySelector('.t-h').value === '24' ? '00' : ts.querySelector('.t-m').value) : '';
-    };
-    const days = () => [...row.querySelectorAll('.c-day:checked')].map(x => +x.value);
-    if (t === 'time') return { type: t, from: v('c-from'), to: v('c-to'), days: days() };
-    if (t === 'at') return { type: t, time: v('c-at'), days: days() };
-    if (t === 'price') return { type: t, op: v('c-op'), ct: v('c-ct') };
-    if (t === 'cheapest') return { type: t, hours: v('c-hours') };
-    if (t === 'budget') return { type: t, minutes: v('c-min'), from: v('c-from'), to: v('c-to') };
-    if (t === 'soc') return { type: t, op: v('c-op'), pct: v('c-pct') };
-    return { type: 'sun_tomorrow', op: v('c-op'), kwh: v('c-kwh') };
-  });
+function collectCond(row) {
+  const t = row.dataset.type, v = c => {
+    const e = row.querySelector('.' + c); if (e) return e.value;
+    const ts = row.querySelector('.tsel[data-t="' + c + '"]'); return ts ? ts.querySelector('.t-h').value + ':' + (ts.querySelector('.t-h').value === '24' ? '00' : ts.querySelector('.t-m').value) : '';
+  };
+  const days = () => [...row.querySelectorAll('.c-day:checked')].map(x => +x.value);
+  if (t === 'time') return { type: t, from: v('c-from'), to: v('c-to'), days: days() };
+  if (t === 'at') return { type: t, time: v('c-at'), days: days() };
+  if (t === 'price') return { type: t, op: v('c-op'), ct: v('c-ct') };
+  if (t === 'cheapest') return { type: t, hours: v('c-hours') };
+  if (t === 'budget') return { type: t, minutes: v('c-min'), from: v('c-from'), to: v('c-to') };
+  if (t === 'soc') return { type: t, op: v('c-op'), pct: v('c-pct') };
+  return { type: 'sun_tomorrow', op: v('c-op'), kwh: v('c-kwh') };
 }
 const ruleOf = el => R.find(r => r.id === el.closest('[data-rule]').dataset.rule);
-function ruleEdited(el) {
-  const box = el.closest('[data-rule]'), r = ruleOf(el);
+function syncRule(box) {                          // Entwurf der Regel aus den sichtbaren Zeilen neu aufbauen
+  const r = R.find(x => x.id === box.dataset.rule);
   r.device_id = box.querySelector('.r-dev').value; r.enabled = box.querySelector('.r-en').checked;
-  r.on = collectConds(box.querySelector('.list-on')); r.off = collectConds(box.querySelector('.list-off'));
+  r.on = []; r.off = [];
+  box.querySelectorAll('.cond:not(.pend)').forEach(row => (row.querySelector('.c-mode').value === 'on' ? r.on : r.off).push(collectCond(row)));
   r.min_on_min = box.querySelector('.r-minon').value; r.min_off_min = box.querySelector('.r-minoff').value;
+  return r;
+}
+function ruleEdited(el) {                         // Feld geaendert: nur den Entwurf aktualisieren (kein Speichern, kein Neuzeichnen)
+  const box = el.closest('[data-rule]'), r = syncRule(box);
   touch();
   box.querySelector('.r-status').innerHTML = statusBlock(r);
 }
-function ruleCondDel(btn) { const box = btn.closest('[data-rule]'); btn.closest('.cond').remove(); ruleEdited(box.querySelector('.r-dev')); renderRules(); }
-let FIXED = false;
-function addModeChosen(sel) {
-  const what = sel.parentElement.querySelector('.add-what'), mode = sel.value;
-  if (!mode) { what.hidden = true; what.innerHTML = ''; return; }
-  const list = (mode === 'on' ? ADD_ON : ADD_OFF).filter(([t]) => !(FIXED && (t === 'price' || t === 'cheapest')));
-  what.innerHTML = `<option value="">${mode === 'on' ? 'Einschalten, wenn …' : 'Ausschalten, sobald …'}</option>` + list.map(([t, l]) => `<option value="${mode}:${t}">${l}</option>`).join('');
-  what.hidden = false; what.focus();
+function condModeChanged(sel) {                   // Ein <-> Aus: Bedingung wandert in die andere Liste (Typ, der dort nicht erlaubt ist, wird zu 'Uhrzeit')
+  const row = sel.closest('.cond'), box = row.closest('[data-rule]'), mode = sel.value;
+  if (!allowed(mode, FIXED).some(([t]) => t === row.dataset.type)) { row.dataset.type = 'time'; row.dataset.reset = '1'; }
+  const r = R.find(x => x.id === box.dataset.rule);
+  const rows = [...box.querySelectorAll('.cond:not(.pend)')];
+  r.on = []; r.off = [];
+  rows.forEach(rw => { const m = rw.querySelector('.c-mode').value, c = rw.dataset.reset ? clone(COND_DEFAULT.time) : collectCond(rw); (m === 'on' ? r.on : r.off).push(c); });
+  r.device_id = box.querySelector('.r-dev').value; r.enabled = box.querySelector('.r-en').checked;
+  touch(); renderRules();
 }
-function ruleAddCond(sel) { if (!sel.value) return; const [which, t] = sel.value.split(':'); const r = ruleOf(sel); r[which] = [...r[which], clone(COND_DEFAULT[t])]; touch(); renderRules(); }
+function condTypeChanged(sel) {                   // Typ gewechselt: Bedingung bekommt die Standardwerte des neuen Typs
+  const row = sel.closest('.cond'), box = row.closest('[data-rule]');
+  const r = R.find(x => x.id === box.dataset.rule);
+  const rows = [...box.querySelectorAll('.cond:not(.pend)')];
+  r.on = []; r.off = [];
+  rows.forEach(rw => { const m = rw.querySelector('.c-mode').value, c = rw === row ? clone(COND_DEFAULT[sel.value]) : collectCond(rw); (m === 'on' ? r.on : r.off).push(c); });
+  r.device_id = box.querySelector('.r-dev').value; r.enabled = box.querySelector('.r-en').checked;
+  touch(); renderRules();
+}
+function ruleCondDel(btn) { const box = btn.closest('[data-rule]'); btn.closest('.cond').remove(); syncRule(box); touch(); renderRules(); }
+function addStart(id) { PEND[id] = { mode: '' }; renderRules(); }
+function addCancel(id) { delete PEND[id]; renderRules(); }
+function addMode(sel) { const id = sel.closest('[data-rule]').dataset.rule; PEND[id].mode = sel.value; renderRules(); }
+function addType(sel) {                            // Ein/Aus und WAS gewaehlt: Zeile wird Teil der Regel
+  const box = sel.closest('[data-rule]'), r = syncRule(box), mode = PEND[r.id].mode;
+  if (!sel.value) return;
+  r[mode] = [...r[mode], clone(COND_DEFAULT[sel.value])]; delete PEND[r.id]; touch(); renderRules();
+}
 async function ruleDelete(id) {
   if (!await uiConfirm('Regel löschen?', 'Die Regel wird entfernt, sobald du „Speichern“ drückst. Das Gerät bleibt in der Liste.', 'Löschen')) return;
   R = R.filter(r => r.id !== id); touch(); renderRules();
@@ -213,6 +241,13 @@ function statusHtml(r) {                          // Status gibt es nur fuer die
   return `<span>${icon} ${escH(st.text)}</span>`;
 }
 const statusBlock = r => { const h = statusHtml(r); return h ? `<div style="margin-top:10px">${h}</div>` : ''; };
+function pendHtml(r) {                            // Zeile in Arbeit: erst Ein/Aus, danach erscheint die Auswahl WAS
+  const p = PEND[r.id]; if (!p) return '';
+  return `<div class="cond pend" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border)">
+    <select style="width:auto;font-weight:600" onchange="addMode(this)"><option value="">Einschalten oder Ausschalten …</option>${optHtml(MODES, p.mode)}</select>
+    ${p.mode ? `<select style="width:auto" onchange="addType(this)"><option value="">Bedingung wählen …</option>${optHtml(allowed(p.mode, FIXED), '')}</select>` : ''}
+    <button class="ghost" style="padding:2px 9px;margin-left:auto" title="Abbrechen" onclick="addCancel('${escH(r.id)}')">✕</button></div>`;
+}
 function renderRules() {
   const box = $('rules-list'), fixed = S.A.tariff_mode === 'fixed';
   const sw = S.devs.filter(d => d.switchable !== false && !d.auto);          // Geraete der Ueberschuss-Automatik gehoeren dieser (getrennt), nicht den Regeln
@@ -221,8 +256,6 @@ function renderRules() {
   nd.innerHTML = `<option value="">+ Neue Regel für …</option>` + opts; nt.innerHTML = `<option value="">+ Ausschalt-Timer für …</option>` + opts;
   nd.onchange = () => ruleNew(nd); nt.onchange = () => ruleNew(nt, true);
   FIXED = fixed;
-  // Bedingung hinzufuegen in zwei Schritten: erst Einschalten/Ausschalten waehlen, dann erscheint die Auswahl WAS
-  const addSel = `<div class="add-cond" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><select class="add-mode" style="width:auto" onchange="addModeChosen(this)"><option value="">+ Bedingung hinzufügen …</option><option value="on">Einschalten, wenn …</option><option value="off">Ausschalten, sobald …</option></select><select class="add-what" style="width:auto" hidden onchange="ruleAddCond(this)"></select></div>`;
   box.innerHTML = R.length ? R.map(r => {
     const d = dev(r.device_id);
     return `<div data-rule="${escH(r.id)}" style="border:1px solid var(--border);border-radius:10px;padding:10px">
@@ -233,11 +266,8 @@ function renderRules() {
           <button class="ghost" onclick="ruleDelete('${escH(r.id)}')" title="Regel löschen">✕</button>
         </div>
       </div>
-      <div style="margin-top:10px"${r.on.length ? '' : ' hidden'}><b style="color:var(--cheap)">Einschalten, wenn alles stimmt:</b>
-        <div class="list-on">${r.on.map(c => condHtml(c, fixed)).join('')}</div></div>
-      <div style="margin-top:12px"${(r.off || []).length ? '' : ' hidden'}><b style="color:var(--exp)">Ausschalten, sobald eines davon zutrifft:</b>
-        <div class="list-off">${(r.off || []).map(c => condHtml(c, fixed)).join('')}</div></div>
-      ${addSel}
+      <div class="conds" style="margin-top:10px">${r.on.map(c => condRow(c, 'on')).join('')}${(r.off || []).map(c => condRow(c, 'off')).join('')}${pendHtml(r)}</div>
+      ${PEND[r.id] ? '' : `<button type="button" class="ghost" style="margin-top:10px" onclick="addStart('${escH(r.id)}')">+ Bedingung hinzufügen</button>`}
       <div class="r-status">${statusBlock(r)}</div>
       <details style="margin-top:8px"><summary class="muted">Einstellungen für diese Regel</summary>
         <div class="grid2" style="margin-top:8px;grid-template-columns:repeat(2,1fr)">
