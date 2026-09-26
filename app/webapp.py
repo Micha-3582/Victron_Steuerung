@@ -382,9 +382,9 @@ class Controller:
         if d.ess_mode != current_ess:
             wrote = cerbo.write_ess_mode(d.ess_mode, dry_run=dry)
             opslog.count("ess_writes", now=now)
-            opslog.log("ess", f"ESS-Modus {ESS_TEXT.get(current_ess, current_ess)} → {ESS_TEXT.get(d.ess_mode, d.ess_mode)} "
-                       f"({d.strategy}; Preis {d.now_price} ct, Akku {soc:.0f} %)" + ("" if wrote else " [Trockenlauf: nicht geschrieben]" if dry else " [Schreiben fehlgeschlagen]"),
-                       dry=dry, price=d.now_price, soc=round(soc, 1), strategy=d.strategy)
+            opslog.log("ess", ("(Trockenlauf) " if dry and not wrote else "") + f"ESS-Modus {ESS_TEXT.get(current_ess, current_ess)} → {ESS_TEXT.get(d.ess_mode, d.ess_mode)} "
+                       f"({d.strategy}; Preis {d.now_price} ct, Akku {soc:.0f} %)" + ("" if wrote or dry else " [Schreiben fehlgeschlagen]"),
+                       dry=dry, price=d.now_price, soc=round(soc, 1), strategy=d.strategy)      # "(Trockenlauf)" immer am Anfang
 
         with self.lock:
             self.prices = self._prep_prices(prices, d, Params.from_config(cfg).absolute_cheap_price)
@@ -787,7 +787,7 @@ class Controller:
     def _apply_rule(self, act, dry: bool, cfg: dict):
         action, dev, why, rule_id = act
         if action in ("adopt", "manual"):                # nur ins Logbuch: nichts wird geschaltet
-            text = f"{dev['name']} {why}" + (" (Trockenlauf)" if dry else "")
+            text = ("(Trockenlauf) " if dry else "") + f"{dev['name']} {why}"          # "(Trockenlauf)" steht immer am Anfang
             log.info("Regeln: %s", text)
             opslog.log("rules", text, dry=dry)
             autolog.log("rules", text, dev=dev["name"], action=action, dry=dry, rule=rule_id)
