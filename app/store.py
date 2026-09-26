@@ -911,6 +911,114 @@ def plansim_log(limit: int = 30) -> list:
     return [{"date": d, **days[d]} for d in sorted(days, reverse=True)[:limit]]
 
 
+# --- Preis-Historie (Tibber-Preise je Viertelstunde, lange aufbewahrt) --------------------------
+# price_history.json: {"days": {"YYYY-MM-DD": {"p": [96 Werte in ct/kWh oder null], "src": "tibber" | "derived"}}}
+# "tibber" = Originalpreise, "derived" = aus Bezugskosten/-menge im Verlauf zurueckgerechnet (nur Slots mit Netzbezug, lueckenhaft).
+PRICE_HISTORY_PATH = os.path.join(_DIR, "price_history.json")
+_PRICE_KEEP_DAYS = 800            # rund 2 Jahre; die Datei bleibt trotzdem klein (~0,5 MB)
+_PRICE_LOCK = threading.Lock()
+_price_cache: dict | None = None
+
+
+def _price_days() -> dict:
+    global _price_cache
+    if _price_cache is None:
+        d = _load_json_recovering(PRICE_HISTORY_PATH, lambda: {"days": {}})
+        _price_cache = d.get("days", {}) if isinstance(d, dict) and isinstance(d.get("days"), dict) else {}
+    return _price_cache
+
+
+def _save_price_days(days: dict):
+    for old in sorted(days)[:-_PRICE_KEEP_DAYS]:
+        del days[old]
+    _dump_json(PRICE_HISTORY_PATH, {"days": days}, indent=None, backup=True)
+
+
+def record_prices(entries: list) -> int:
+    """Haelt die Tibber-Preise fest (heute UND morgen, sobald sie da sind). Schreibt nur bei Aenderungen; ein Tag mit
+    Originalpreisen wird nur ergaenzt bzw. korrigiert, nie durch weniger Daten ersetzt. Rueckgabe: Anzahl geaenderter Tage."""
+    from logic import _parse_iso
+    starts = []
+    for e in entries or []:
+        try:
+            starts.append((_parse_iso(e["startsAt"]), round(float(e["total"]) * 100, 2)))
+        except (KeyError, TypeError, ValueError):
+            continue
+    starts.sort()
+    new: dict[str, list] = {}
+    for i, (t, ct) in enumerate(starts):
+        if i + 1 < len(starts):
+            gap = (starts[i + 1][0] - t).total_seconds() / 60
+        else:                                                       # letzter Eintrag: gleiche Dauer wie der davor
+            gap = (t - starts[i - 1][0]).total_seconds() / 60 if i else 15
+        n = 4 if gap >= 55 else 1                                  # Stundenpreis gilt fuer alle 4 Viertelstunden
+        vals = new.setdefault(t.date().isoformat(), [None] * 96)
+        base = t.hour * 4 + t.minute // 15
+        for k in range(n):
+            if base + k < 96:
+                vals[base + k] = ct
+    changed = 0
+    with _PRICE_LOCK:
+        days = _price_days()
+        for day, vals in new.items():
+            rec = days.get(day)
+            if rec and rec.get("src") == "tibber":
+                merged = [v if v is not None else o for v, o in zip(vals, rec["p"])]
+                if merged == rec["p"]:
+                    continue
+                vals = merged
+            days[day] = {"p": vals, "src": "tibber"}
+            changed += 1
+        if changed:
+            _save_price_days(days)
+    return changed
+
+
+def backfill_prices_from_history() -> int:
+    """Rechnet fuer Tage OHNE Tibber-Originalpreise aus dem Verlauf zurueck: Preis = Bezugskosten / Bezugsmenge (nur Slots mit
+    Netzbezug). Idempotent; laeuft beim Start. Rueckgabe: Anzahl neu gefuellter Slots."""
+    per_day: dict[str, dict[int, float]] = {}
+    for key, b in _load_history().get("hours", {}).items():
+        imp = b.get("g_load", 0.0) + b.get("g_batt", 0.0)
+        cost = b.get("grid_cost_ct", 0.0)
+        if imp > 0.005 and cost > 0 and len(key) >= 16:
+            try:
+                slot = int(key[11:13]) * 4 + int(key[14:16]) // 15
+            except ValueError:
+                continue
+            per_day.setdefault(key[:10], {})[slot] = round(cost / imp, 2)
+    filled = 0
+    with _PRICE_LOCK:
+        days = _price_days()
+        for day, m in per_day.items():
+            rec = days.get(day)
+            if rec and rec.get("src") == "tibber":
+                continue
+            vals = list(rec["p"]) if rec else [None] * 96
+            for slot, p in m.items():
+                if vals[slot] is None:
+                    vals[slot] = p
+                    filled += 1
+            days[day] = {"p": vals, "src": "derived"}
+        if filled:
+            _save_price_days(days)
+    return filled
+
+
+def price_history_info() -> dict:
+    with _PRICE_LOCK:
+        days = _price_days()
+        real = sum(1 for r in days.values() if r.get("src") == "tibber")
+        return {"days": len(days), "tibber_days": real, "derived_days": len(days) - real,
+                "first": min(days) if days else None, "last": max(days) if days else None}
+
+
+def price_history(days: int = 90) -> dict:
+    with _PRICE_LOCK:
+        d = _price_days()
+        return {k: d[k] for k in sorted(d)[-days:]}
+
+
 def energy_grid_charge_buckets(day: str) -> dict:
     """{slot_key 'YYYY-MM-DDTHH:MM': gemessene Netz→Batterie-kWh} eines Tages.
     Basis für die tatsächliche (statt geschätzte) Lademenge in den Ladevorgängen."""

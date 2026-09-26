@@ -417,6 +417,10 @@ class Controller:
             self._price_fail_since = None
             notify.event("tibber", False, "", "✅ Tibber-Preise sind wieder verfügbar.")
             try:
+                store.record_prices(prices)                  # Preis-Historie (nur bei Aenderung wird geschrieben)
+            except Exception as e:                           # noqa: BLE001
+                log.warning("Preis-Historie nicht schreibbar: %s", e)
+            try:
                 price_cache.save(prices, now)
             except Exception as e:                           # noqa: BLE001
                 log.warning("Preis-Zwischenspeicher nicht schreibbar: %s", e)
@@ -1035,6 +1039,16 @@ def api_shelly_auto_order():
     return jsonify(ok=True)
 
 
+@app.route("/api/prices/history", methods=["GET"])
+def api_price_history():
+    """Gespeicherte Tibber-Preise je Viertelstunde (?days=N, Standard 90) + Kurzinfo."""
+    try:
+        n = max(1, min(800, int(request.args.get("days", 90))))
+    except ValueError:
+        n = 90
+    return jsonify({"info": store.price_history_info(), "days": store.price_history(n)})
+
+
 @app.route("/api/plan-sim", methods=["GET"])
 def api_plan_sim():
     """Ladeplan-Simulation (nur Anzeige): letzter Lauf + Tages-Vergleich der letzten Tage."""
@@ -1288,6 +1302,12 @@ def api_test():
 def main():
     ctrl.start()
     cfg = store.load_config()
+    try:
+        n = store.backfill_prices_from_history()
+        if n:
+            log.info("Preis-Historie: %d Slots aus dem Verlauf zurückgerechnet", n)
+    except Exception as e:                               # noqa: BLE001
+        log.warning("Preis-Historie-Nachtrag fehlgeschlagen: %s", e)
     notify.push("startup", "🔄 Die Steuerung wurde gestartet.", cfg)
     # PORT-Umgebungsvariable hat Vorrang (pm2/systemd), sonst web_port aus Config
     port = int(os.environ.get("PORT", cfg.get("web_port", 5005)))
