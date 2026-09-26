@@ -16,6 +16,7 @@ _GRID_COUNTER_WARNING_INTERVAL = 600   # nur alle 10 Min erneut loggen (Live-/Sa
 SOC_BMS_UNIT, SOC_BMS_REG = 225, 266      # Wert = %*10  -> /10
 SOC_SYS_UNIT, SOC_SYS_REG = 100, 843      # Wert = %     (Gegencheck)
 ESS_MODE_UNIT, ESS_MODE_REG = 100, 2900   # Holding: 9=laden, 10=idle
+MIN_SOC_UNIT, MIN_SOC_REG = 100, 2901     # Holding: ESS 'Minimaler SOC (es sei denn, Netz faellt aus)', Wert = %*10
 
 
 def _call(fn, address, unit):
@@ -149,6 +150,32 @@ class Cerbo:
             if rr.isError():
                 raise IOError(f"ESS-Mode nicht lesbar: {rr}")
             return rr.registers[0]
+        finally:
+            c.close()
+
+    def read_min_soc(self):
+        """Minimaler SOC (ESS, in %) - dieselbe Einstellung wie im VRM-Portal 'Minimaler SOC'."""
+        c = self._client()
+        try:
+            rr = _call(c.read_holding_registers, MIN_SOC_REG, MIN_SOC_UNIT)
+            if rr.isError():
+                raise IOError(f"Minimaler SOC nicht lesbar: {rr}")
+            return rr.registers[0] / 10.0
+        finally:
+            c.close()
+
+    def write_min_soc(self, pct, dry_run=True):
+        """Setzt den minimalen SOC (ganze %). Bei dry_run wird NICHT geschrieben."""
+        if dry_run:
+            log.info("[DRY-RUN] wuerde Minimalen SOC = %s %% schreiben (kein Schreibzugriff)", pct)
+            return False
+        c = self._client()
+        try:
+            rr = _write(c.write_register, MIN_SOC_REG, int(round(pct * 10)), MIN_SOC_UNIT)
+            if rr.isError():
+                raise IOError(f"Minimaler SOC schreiben fehlgeschlagen: {rr}")
+            log.info("Minimaler SOC = %s %% geschrieben", pct)
+            return True
         finally:
             c.close()
 

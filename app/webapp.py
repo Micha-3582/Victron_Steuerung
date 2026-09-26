@@ -1099,6 +1099,36 @@ def api_live():
     return jsonify(data)
 
 
+@app.route("/api/ess/min-soc", methods=["GET", "POST"])
+def api_ess_min_soc():
+    """'Minimaler SOC' der Anlage am Cerbo lesen/setzen (wie im VRM-Portal). Schreiben nur ausserhalb des Trockenlaufs."""
+    cfg = store.load_config()
+    if not store.is_configured(cfg):
+        return jsonify(error="Cerbo ist noch nicht eingerichtet"), 400
+    cerbo = Cerbo(cfg["cerbo_host"], cfg.get("cerbo_port", 502))
+    try:
+        if request.method == "GET":
+            return jsonify(ok=True, min_soc=cerbo.read_min_soc())
+        try:
+            pct = int(float((request.get_json(silent=True) or {}).get("min_soc")))
+        except (TypeError, ValueError):
+            return jsonify(error="Bitte eine ganze Zahl eintragen"), 400
+        if not 0 <= pct <= 100:
+            return jsonify(error="Minimaler Akkustand: zwischen 0 und 100 %"), 400
+        if cfg.get("dry_run", True):
+            return jsonify(error="Der Trockenlauf der Ladesteuerung ist an – dabei wird nichts am Cerbo geändert. Schalte ihn unter Einstellungen aus."), 400
+        old = cerbo.read_min_soc()
+        cerbo.write_min_soc(pct, dry_run=False)
+        new = cerbo.read_min_soc()
+        if abs(new - pct) > 0.6:
+            return jsonify(error=f"Der Cerbo hat {new:g} % gemeldet statt {pct} % – bitte im VRM-Portal prüfen"), 400
+        opslog.log("ess", f"Minimaler Akkustand (Cerbo) von {old:g} % auf {new:g} % gesetzt")
+        return jsonify(ok=True, min_soc=new)
+    except Exception as e:                               # noqa: BLE001
+        log.warning("Minimaler SOC: %s", e)
+        return jsonify(error=str(e)), 400
+
+
 @app.route("/api/config", methods=["GET", "POST"])
 def api_config():
     if request.method == "GET":

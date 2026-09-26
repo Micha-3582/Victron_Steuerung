@@ -269,6 +269,11 @@
     <div><label>Ladelimit / max. SOC (%)
         <span class="qhelp" role="button" tabindex="0" data-help="Harte Obergrenze: ab diesem Ladestand wird nie aus dem Netz geladen - auch nicht bei manuellen Ladeterminen oder Sofort-Override.">?</span>
       </label><input id="max_charge_soc" type="number" min="1" max="100"></div>
+    <div><label>Minimaler Akkustand am Cerbo (%)
+        <span class="qhelp" role="button" tabindex="0" data-help="Dieselbe Einstellung wie im VRM-Portal unter „Minimaler SOC (es sei denn, Netz fällt aus)“: Darunter entlädt der Akku nicht weiter, das Haus läuft dann aus dem Netz. Wird direkt am Cerbo gesetzt, nicht erst mit „Speichern“.">?</span>
+      </label>
+      <div style="display:flex;gap:8px"><input id="ess_min_soc" type="number" min="0" max="100" step="1" placeholder="…"><button type="button" class="ghost" id="ess_min_soc_btn" style="white-space:nowrap">Am Cerbo setzen</button></div>
+      <small class="hint" id="ess_min_soc_msg">Wird direkt am Cerbo gesetzt (nicht mit „Speichern“).</small></div>
     <div><label>Immer laden unter (ct/kWh)
         <span class="qhelp" role="button" tabindex="0" data-help="Gegenstück zum Ladelimit: faellt der Preis auf oder unter diesen Wert, wird sofort geladen, unabhaengig davon, ob gerade eine Strategie ueberhaupt Bedarf sieht - fuer Preise, die an dem Tag mit hoher Sicherheit nicht mehr unterboten werden. Bleibt weiterhin unter dem Ladelimit oben. 0 = deaktiviert.">?</span>
       </label><input id="absolute_cheap_price" type="number" step="0.5" min="0"></div>
@@ -582,6 +587,18 @@ function renderTileToggles() {
 }
 renderTileToggles();
 
+async function loadMinSoc() {
+  const m = document.getElementById('ess_min_soc_msg'), inp = document.getElementById('ess_min_soc');
+  try { const j = await (await fetch('/api/ess/min-soc')).json(); if (j.ok) { inp.value = Math.round(j.min_soc); m.style.color = ''; } else { m.textContent = 'Cerbo nicht lesbar: ' + (j.error || ''); } }
+  catch (e) { m.textContent = 'Cerbo nicht lesbar'; }
+}
+document.getElementById('ess_min_soc_btn').addEventListener('click', async () => {
+  const m = document.getElementById('ess_min_soc_msg'), btn = document.getElementById('ess_min_soc_btn');
+  btn.disabled = true; m.style.color = ''; m.textContent = 'Setze …';
+  try { const j = await shellyApi('/api/ess/min-soc', 'POST', { min_soc: document.getElementById('ess_min_soc').value }); document.getElementById('ess_min_soc').value = Math.round(j.min_soc); m.textContent = 'Am Cerbo gesetzt: ' + j.min_soc + ' %'; savedToast('Minimaler Akkustand gesetzt ✓'); }
+  catch (e) { m.style.color = '#e5544a'; m.textContent = e.message; }
+  btn.disabled = false;
+});
 async function init() {
   cfg = await (await fetch('/api/config')).json();
   document.getElementById('app_display_name').value = cfg.app_display_name || '';
@@ -611,6 +628,7 @@ async function init() {
     document.getElementById('charge_current_a').value = Math.round(cfg.charge_power_w / parseInt(voltSel.value));
   }
   updateChargePowerPreview();
+  loadMinSoc();
 }
 
 function updateChargePowerPreview() {
