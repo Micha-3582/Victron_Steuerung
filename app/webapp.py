@@ -720,7 +720,7 @@ class Controller:
             self._stop.wait(10)
 
     def _apply_surplus(self, act, dry: bool, cfg: dict):
-        action, dev, why, src = act
+        action, dev, why, src, rule_id = act
         on = action == "on"
         verb = "eingeschaltet" if on else "ausgeschaltet"
         ok = True
@@ -741,7 +741,7 @@ class Controller:
                 ok = False
                 text = f"{dev['name']}: Schalten fehlgeschlagen ({e})"
         if ok:
-            rule_engine.set_owner(dev["id"], src if on else None)
+            rule_engine.set_owner(dev["id"], src if on else None, rule_id)
         log.info("Regel-Engine: %s", text)
         opslog.log("surplus", text, dry=dry)
         surplus_ctrl.log(text)
@@ -1200,7 +1200,7 @@ def api_shelly_list():
     devs = shelly.list_with_status(only_shown=request.args.get("dashboard") == "1")
     ruled = {r["device_id"] for r in rules.list_rules() if r.get("enabled", True)} if rules.enabled(store.load_config()) else set()
     for d in devs:
-        d["auto"] = d["id"] in ruled                       # "Auto"-Hinweis im Dashboard: das Geraet hat eine aktive Regel
+        d["automated"] = bool(d.get("auto")) or d["id"] in ruled      # "Auto"-Hinweis im Dashboard: Ueberschuss-Automatik oder aktive Regel
     return jsonify(devs)
 
 
@@ -1234,15 +1234,6 @@ def api_rules_modify(rule_id):
     except rules.RuleError as e:
         return jsonify(error=str(e)), 400
     return (jsonify(r), 200) if r else (jsonify(error="Regel nicht gefunden."), 404)
-
-
-@app.route("/api/rules/order", methods=["POST"])
-def api_rules_order():
-    ids = (request.get_json(silent=True) or {}).get("ids")
-    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
-        return jsonify(error="ids fehlt"), 400
-    rules.reorder(ids)
-    return jsonify(ok=True)
 
 
 @app.route("/api/shelly/auto-order", methods=["POST"])
@@ -1330,6 +1321,11 @@ def _ctrl_info():
         st = dict(ctrl.status)
     return {"status": st, "last_tick": ctrl.last_tick, "last_system_ts": ctrl.last_system_ts, "started": ctrl.started_at,
             "plansim": getattr(ctrl, "plansim", None)}
+
+
+@app.route("/automation")
+def automation_page():
+    return render_template("automation.html")
 
 
 @app.route("/report")
@@ -1584,12 +1580,12 @@ def main():
         log.warning("Preis-Historie-Nachtrag fehlgeschlagen: %s", e)
     notify.push("startup", "🔄 Die Steuerung wurde gestartet.", cfg)
     opslog.count("restarts")
-    try:
-        made = rules.migrate_from_devices(shelly.load_devices())
-        if made:
-            log.info("Regeln: %d Ueberschuss-Regel(n) aus der bisherigen Automatik uebernommen", made)
+    try:                                                 # Umstellung alter Regeln: Ueberschuss-Regeln -> Flag "In der Ueberschuss-Automatik"
+        for dev_id in rules.pending_auto():
+            shelly.update(dev_id, auto=True)
+            log.info("Regeln: Gerät %s steht jetzt in der Überschuss-Automatik", dev_id)
     except Exception as e:                               # noqa: BLE001
-        log.warning("Regel-Migration fehlgeschlagen: %s", e)
+        log.warning("Regel-Umstellung fehlgeschlagen: %s", e)
     opslog.log("startup", "Steuerung gestartet")
     # PORT-Umgebungsvariable hat Vorrang (pm2/systemd), sonst web_port aus Config
     port = int(os.environ.get("PORT", cfg.get("web_port", 5005)))

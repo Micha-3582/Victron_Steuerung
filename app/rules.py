@@ -1,22 +1,25 @@
 """
 Regel-Engine fuer Geraete (Shelly, Tasmota, Tuya).
 
-Eine Regel gehoert zu EINEM Geraet und besteht aus Bedingungen. Sind ALLE Bedingungen erfuellt, soll das Geraet an sein,
-sonst (wenn die Regel es eingeschaltet hat) wird es wieder ausgeschaltet. Mehrere Regeln pro Geraet gelten als ODER.
+Eine Regel gehoert zu EINEM Geraet und hat zwei Teile:
+  "Einschalten, wenn"   Bedingungen (UND): Sind alle erfuellt, wird das Geraet eingeschaltet.
+  "Ausschalten, wenn"   Bedingungen (ODER, optional): Trifft eine zu, wird es ausgeschaltet.
+                        Ohne Ausschalt-Bedingung schaltet das Geraet aus, sobald die Einschalt-Bedingungen nicht mehr stimmen.
+Nach einem Ausschalten durch eine Ausschalt-Bedingung ist die Regel gesperrt, bis ihre Einschalt-Bedingungen einmal nicht mehr galten
+(sonst wuerde sie sofort wieder einschalten). Mehrere Regeln pro Geraet sind moeglich (eine reicht zum Einschalten).
 
-Bedingungen (Reihenfolge = Reihenfolge in der Oberflaeche):
-  time        Zwischen von und bis Uhr (optional nur an bestimmten Wochentagen)
-  price       Strompreis unter/ueber X ct
-  cheapest    In den N guenstigsten Stunden des Tages
-  budget      Tagesziel: X Minuten pro Tag, zu den guenstigsten Zeiten (im Zeitfenster)
-  soc         Akku ueber/unter X %
-  surplus     PV-Ueberschuss vorhanden (Akku voll, es wird eingespeist) - nutzt die bewaehrte Ueberschuss-Logik (surplus.py)
+Bedingungen:
+  time          Zwischen von und bis Uhr (optional nur an bestimmten Wochentagen)
+  price         Strompreis unter/ueber X ct
+  cheapest      In den N guenstigsten Stunden des Tages
+  budget        Tagesziel: X Minuten pro Tag, zu den guenstigsten Zeiten (nur bei "Einschalten"; beim Erreichen schaltet die Regel aus)
+  soc           Akku ueber/unter X %
   sun_tomorrow  Sonne morgen (VRM-Prognose) ueber/unter X kWh
 
-Die Ueberschuss-Logik bleibt unveraendert (Prioritaet = Reihenfolge der Regeln, Ein-/Aus-Verzoegerung, Hysterese): Geraete, deren
-uebrige Bedingungen erfuellt sind und die eine Ueberschuss-Bedingung haben, werden ihr als Kandidaten uebergeben.
+Die PV-Ueberschuss-Automatik ist ein eigener Baustein (surplus.py): Geraete mit Flag "auto" (Reihenfolge = Prioritaet) bekommen ueberschuessigen Strom.
+Hat eine Regel ein Geraet gerade eingeschaltet oder soll es laufen, laesst die Ueberschuss-Automatik es in Ruhe.
 
-Sicherheit: geschaltet wird nur, was die Regel selbst eingeschaltet hat (Besitzer-Merkung, ueberlebt Neustarts); von Hand geschaltete Geraete
+Sicherheit: geschaltet wird nur, was die Engine selbst eingeschaltet hat (Besitzer-Merkung, ueberlebt Neustarts); von Hand geschaltete Geraete
 bleiben fuer eine Weile in Ruhe; Shelly bekommen einen Rueckschalt-Timer (wie bisher).
 
 Alles hier ist reine Logik ohne Netzwerk (testbar). Geschaltet wird vom Aufrufer (webapp.py).
@@ -33,8 +36,9 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 RULES_PATH = os.path.join(_DIR, "rules.json")
 STATE_PATH = os.path.join(_DIR, "rules_state.json")
 
-TYPES = ("time", "price", "cheapest", "budget", "soc", "surplus", "sun_tomorrow")
+TYPES = ("time", "price", "cheapest", "budget", "soc", "sun_tomorrow")
 WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+VERSION = 2
 
 
 class RuleError(ValueError):
@@ -47,10 +51,32 @@ def _store():
     return store
 
 
+def _upgrade(d: dict) -> dict:
+    """Aeltere Fassung (Version 1: 'conditions' inkl. 'surplus') auf Version 2 heben. Ueberschuss-Regeln werden zu einem
+    'auto'-Flag am Geraet (siehe pending_auto), die uebrigen Bedingungen zu 'Einschalten, wenn'."""
+    if d.get("version") == VERSION:
+        return d
+    rules, pending = [], list(d.get("pending_auto") or [])
+    for r in d.get("rules", []):
+        conds = r.pop("conditions", None)
+        if conds is not None:
+            if any(c.get("type") == "surplus" for c in conds):
+                if r.get("device_id") and r["device_id"] not in pending:
+                    pending.append(r["device_id"])
+            r["on"] = [c for c in conds if c.get("type") != "surplus"]
+            r["off"] = []
+        if r.get("on"):
+            rules.append(r)
+    return {"version": VERSION, "rules": rules, "pending_auto": pending}
+
+
 def load() -> dict:
-    d = _store()._load_json_recovering(RULES_PATH, lambda: {"rules": []})
+    d = _store()._load_json_recovering(RULES_PATH, lambda: {"version": VERSION, "rules": []})
     if not isinstance(d, dict) or not isinstance(d.get("rules"), list):
-        d = {"rules": []}
+        d = {"version": VERSION, "rules": []}
+    if d.get("version") != VERSION:
+        d = _upgrade(d)
+        _save(d)
     return d
 
 
@@ -60,6 +86,16 @@ def _save(d: dict):
 
 def list_rules() -> list[dict]:
     return load()["rules"]
+
+
+def pending_auto(clear: bool = True) -> list[str]:
+    """Geraete, die bei der Umstellung von Version 1 in die Ueberschuss-Automatik gehoeren (auto=True setzen)."""
+    d = load()
+    ids = list(d.get("pending_auto") or [])
+    if ids and clear:
+        d["pending_auto"] = []
+        _save(d)
+    return ids
 
 
 def enabled(cfg: dict) -> bool:
@@ -93,9 +129,9 @@ def _num(v, lo, hi, what):
     return x
 
 
-def normalize_condition(c: dict) -> dict:
+def normalize_condition(c: dict, allow_budget: bool = True) -> dict:
     t = c.get("type")
-    if t not in TYPES:
+    if t not in TYPES or (t == "budget" and not allow_budget):
         raise RuleError("Unbekannte Bedingung")
     if t == "time":
         days = sorted({int(x) for x in (c.get("days") or []) if str(x).isdigit() and 0 <= int(x) <= 6})
@@ -111,23 +147,20 @@ def normalize_condition(c: dict) -> dict:
         return {"type": t, "op": op, "kwh": _num(c.get("kwh"), 0, 500, "Sonne morgen (kWh)")}
     if t == "cheapest":
         return {"type": t, "hours": int(_num(c.get("hours"), 1, 23, "Stunden"))}
-    if t == "budget":
-        return {"type": t, "minutes": int(_num(c.get("minutes"), 15, 1440, "Minuten pro Tag")),
-                "from": _hhmm(c.get("from", "00:00"), "Von"), "to": _hhmm(c.get("to", "24:00"), "Bis")}
-    return {"type": "surplus"}
+    return {"type": "budget", "minutes": int(_num(c.get("minutes"), 15, 1440, "Minuten pro Tag")),
+            "from": _hhmm(c.get("from", "00:00"), "Von"), "to": _hhmm(c.get("to", "24:00"), "Bis")}
 
 
 def normalize_rule(body: dict, rule_id: str | None = None) -> dict:
-    conds = [normalize_condition(c) for c in (body.get("conditions") or [])]
-    if not conds:
-        raise RuleError("Mindestens eine Bedingung angeben")
-    if sum(1 for c in conds if c["type"] == "surplus") > 1:
-        raise RuleError("Die Überschuss-Bedingung nur einmal verwenden")
+    on = [normalize_condition(c) for c in (body.get("on") if body.get("on") is not None else body.get("conditions") or [])]
+    off = [normalize_condition(c, allow_budget=False) for c in (body.get("off") or [])]
+    if not on:
+        raise RuleError("Mindestens eine Einschalt-Bedingung angeben")
     if not body.get("device_id"):
         raise RuleError("Gerät wählen")
     name = str(body.get("name") or "").strip()[:60]
     return {"id": rule_id or uuid.uuid4().hex[:8], "name": name, "device_id": str(body["device_id"]),
-            "enabled": bool(body.get("enabled", True)), "conditions": conds}
+            "enabled": bool(body.get("enabled", True)), "on": on, "off": off}
 
 
 def add_rule(body: dict) -> dict:
@@ -142,7 +175,7 @@ def update_rule(rule_id: str, body: dict) -> dict | None:
     d = load()
     for i, r in enumerate(d["rules"]):
         if r["id"] == rule_id:
-            merged = {**r, **{k: v for k, v in body.items() if k in ("name", "device_id", "enabled", "conditions")}}
+            merged = {**r, **{k: v for k, v in body.items() if k in ("name", "device_id", "enabled", "on", "off")}}
             d["rules"][i] = normalize_rule(merged, rule_id)
             _save(d)
             return d["rules"][i]
@@ -159,35 +192,12 @@ def delete_rule(rule_id: str) -> bool:
     return False
 
 
-def reorder(ids: list[str]):
-    d = load()
-    by = {r["id"]: r for r in d["rules"]}
-    d["rules"] = [by[i] for i in ids if i in by] + [r for r in d["rules"] if r["id"] not in ids]
-    _save(d)
-
-
 def remove_device(dev_id: str):
     d = load()
     keep = [r for r in d["rules"] if r["device_id"] != dev_id]
     if len(keep) != len(d["rules"]):
         d["rules"] = keep
         _save(d)
-
-
-def migrate_from_devices(devices: list[dict]) -> int:
-    """Einmalig: Geraete, die bisher in der Ueberschuss-Automatik waren (auto=True), bekommen eine Regel 'Ueberschuss'."""
-    d = load()
-    if d.get("migrated"):
-        return 0
-    made = 0
-    for dev in sorted((x for x in devices if x.get("auto")), key=lambda x: x.get("prio") or 10 ** 6):
-        if not any(r["device_id"] == dev["id"] and any(c["type"] == "surplus" for c in r["conditions"]) for r in d["rules"]):
-            d["rules"].append({"id": uuid.uuid4().hex[:8], "name": "Überschuss", "device_id": dev["id"], "enabled": True,
-                               "conditions": [{"type": "surplus"}]})
-            made += 1
-    d["migrated"] = True
-    _save(d)
-    return made
 
 
 # ------------------------------------------------------------------------------------------ Bedingungen
@@ -215,6 +225,9 @@ def _cheapest_slots(prices: list, lo: int, hi: int, n: int, first: int) -> list[
     return idx[:n]
 
 
+BUDGET_DONE = " – Tagesziel erreicht"
+
+
 def eval_condition(c: dict, ctx: dict, ran_min: float = 0.0) -> tuple[bool | None, str]:
     """(erfuellt?, Klartext). None = fehlende Daten (zaehlt als nicht erfuellt)."""
     now = ctx["now"]
@@ -222,8 +235,7 @@ def eval_condition(c: dict, ctx: dict, ran_min: float = 0.0) -> tuple[bool | Non
     if t == "time":
         days = c.get("days") or []
         txt = f"{c['from']}–{c['to']} Uhr" + (" (" + ", ".join(WEEKDAYS[i] for i in days) + ")" if days else "")
-        ok = in_window(now, c["from"], c["to"]) and (not days or now.weekday() in days)
-        return ok, txt
+        return in_window(now, c["from"], c["to"]) and (not days or now.weekday() in days), txt
     if t == "soc":
         soc = ctx.get("soc")
         txt = f"Akku {'unter' if c['op'] == 'below' else 'über'} {c['pct']:g} %"
@@ -241,21 +253,17 @@ def eval_condition(c: dict, ctx: dict, ran_min: float = 0.0) -> tuple[bool | Non
         txt = f"in den {c['hours']} günstigsten Stunden des Tages"
         if not prices:
             return None, txt
-        chosen = _cheapest_slots(prices, 0, 96, c["hours"] * 4, 0)
-        return _slot(now) in chosen, txt
+        return _slot(now) in _cheapest_slots(prices, 0, 96, c["hours"] * 4, 0), txt
     if t == "budget":
         txt = f"{c['minutes']} Min pro Tag zu den günstigsten Zeiten ({c['from']}–{c['to']})"
         need = math.ceil((c["minutes"] - ran_min) / 15)
         if need <= 0:
-            return False, txt + " – Tagesziel erreicht"
+            return False, txt + BUDGET_DONE
         a, b = _minutes(c["from"]), _minutes(c["to"])
         lo, hi = a // 15, (b + 14) // 15 if b > a else 96
         if b <= a:                                       # Fenster ueber Mitternacht: nur der heutige Teil ab dem Start bzw. bis zum Ende
             lo, hi = (0, min(96, b // 15)) if _slot(now) < a // 15 else (a // 15, 96)
-        chosen = _cheapest_slots(ctx.get("prices_today"), lo, hi, need, _slot(now))
-        return _slot(now) in chosen, txt
-    if t == "surplus":
-        return None, "PV-Überschuss"                       # wird vom Ueberschuss-Controller entschieden (siehe RuleEngine.step)
+        return _slot(now) in _cheapest_slots(ctx.get("prices_today"), lo, hi, need, _slot(now)), txt
     return False, t
 
 
@@ -265,7 +273,9 @@ class RuleEngine:
         self.surplus = surplus_ctrl                      # SurplusController (Verzoegerungen/Hysterese der Ueberschuss-Logik)
         self._lock = threading.RLock()
         self.owner: dict[str, str] = {}                  # geraet -> 'rule' | 'surplus' (wer es eingeschaltet hat)
+        self.owner_rule: dict[str, str] = {}             # geraet -> Regel-ID, die es eingeschaltet hat
         self.ran: dict[str, dict] = {}                   # regel -> {"day": iso, "min": Minuten (Tagesziel)}
+        self.blocked: set[str] = set()                   # Regeln, die nach einem Ausschalten erst neu 'scharf' werden muessen
         self._last_change: dict[str, datetime] = {}
         self._hold_until: dict[str, datetime] = {}
         self._armed: dict[str, datetime] = {}
@@ -282,13 +292,14 @@ class RuleEngine:
             d = _store()._load_json_recovering(STATE_PATH, lambda: {})
             if isinstance(d, dict):
                 self.owner = {k: v for k, v in (d.get("owner") or {}).items() if isinstance(v, str)}
+                self.owner_rule = {k: v for k, v in (d.get("owner_rule") or {}).items() if isinstance(v, str)}
                 self.ran = {k: v for k, v in (d.get("ran") or {}).items() if isinstance(v, dict)}
         except Exception:                                # noqa: BLE001
             pass
 
     def _save_state(self):
         try:
-            _store()._dump_json(STATE_PATH, {"owner": self.owner, "ran": self.ran}, indent=None)
+            _store()._dump_json(STATE_PATH, {"owner": self.owner, "owner_rule": self.owner_rule, "ran": self.ran}, indent=None)
         except Exception:                                # noqa: BLE001
             pass
 
@@ -298,6 +309,7 @@ class RuleEngine:
         with self._lock:
             self._hold_until[dev_id] = now.replace(microsecond=0) + timedelta(minutes=hold_min)
             self.owner.pop(dev_id, None)
+            self.owner_rule.pop(dev_id, None)
             self._armed.pop(dev_id, None)
         self._save_state()
 
@@ -332,23 +344,25 @@ class RuleEngine:
                     due.append(d)
         return due
 
-    def owned(self, dev_id: str) -> bool:
-        return dev_id in self.owner
-
-    def set_owner(self, dev_id: str, who: str | None):
+    def set_owner(self, dev_id: str, who: str | None, rule_id: str | None = None):
         with self._lock:
             if who:
                 self.owner[dev_id] = who
+                if who == "rule" and rule_id:
+                    self.owner_rule[dev_id] = rule_id
+                elif who != "rule":
+                    self.owner_rule.pop(dev_id, None)
             else:
                 self.owner.pop(dev_id, None)
+                self.owner_rule.pop(dev_id, None)
                 self._armed.pop(dev_id, None)
             self._last_change[dev_id] = datetime.now()
         self._save_state()
 
     # ---- Kern
     def step(self, now: datetime, ctx: dict, system: dict, cfg: dict, devices: list[dict], rules: list[dict]) -> list[tuple]:
-        """Ein Regelschritt. devices: Live-Status (online, on, switchable, power_w, min_on_min, min_off_min).
-        Rueckgabe: Liste von (aktion 'on'|'off', geraet, begruendung, quelle 'rule'|'surplus')."""
+        """Ein Regelschritt. devices: Live-Status (online, on, switchable, auto, prio, power_w, min_on_min, min_off_min).
+        Rueckgabe: Liste von (aktion 'on'|'off', geraet, begruendung, quelle 'rule'|'surplus', regel-id|None)."""
         self._load()
         ctx = {**ctx, "now": now}
         today = now.date().isoformat()
@@ -356,11 +370,13 @@ class RuleEngine:
         self._last_step = now
         by_dev = {d["id"]: d for d in devices}
         hold = dict(self._hold_until)
-
-        forced: dict[str, list[str]] = {}                # geraet -> Gruende (Regeln ohne Ueberschuss, alles erfuellt)
-        candidates: dict[str, str] = {}                  # geraet -> Regelname (Ueberschuss-Kandidat, uebrige Bedingungen erfuellt)
         status: dict[str, dict] = {}
-        for idx, r in enumerate(rules):
+        info: dict[str, dict] = {}                       # regel -> Auswertung
+        wants: dict[str, tuple[str, str]] = {}           # geraet -> (regel-id, Begruendung): soll jetzt eingeschaltet werden
+        rule_ids = {r["id"] for r in rules}
+        self.blocked &= rule_ids
+
+        for r in rules:
             dev = by_dev.get(r["device_id"])
             if not r.get("enabled", True):
                 status[r["id"]] = {"state": "disabled", "text": "Regel ist ausgeschaltet", "conds": []}
@@ -370,37 +386,48 @@ class RuleEngine:
                 continue
             ran = self.ran.get(r["id"], {})
             ran_min = float(ran.get("min", 0.0)) if ran.get("day") == today else 0.0
-            results = [(c, *eval_condition(c, ctx, ran_min)) for c in r["conditions"]]
-            conds = [{"ok": ok, "text": txt} for c, ok, txt in results if c["type"] != "surplus"]
-            has_surplus = any(c["type"] == "surplus" for c in r["conditions"])
-            base_ok = all(ok for c, ok, txt in results if c["type"] != "surplus")
-            missing = [txt for c, ok, txt in results if ok is None and c["type"] != "surplus"]
-            if has_surplus:
-                conds.append({"ok": None, "text": "PV-Überschuss"})
+            on_res = [(c, *eval_condition(c, ctx, ran_min)) for c in r["on"]]
+            off_res = [(c, *eval_condition(c, ctx)) for c in r.get("off", [])]
+            base_on = all(ok for _, ok, _ in on_res)
+            off_hit = [txt for _, ok, txt in off_res if ok]
+            budget_done = any(c["type"] == "budget" and txt.endswith(BUDGET_DONE) for c, _, txt in on_res)
+            missing = [txt for _, ok, txt in on_res if ok is None]
+            conds = [{"ok": ok, "text": txt} for _, ok, txt in on_res]
+            info[r["id"]] = {"base_on": base_on, "off_hit": off_hit, "budget_done": budget_done, "has_off": bool(off_res)}
+            if not base_on:
+                self.blocked.discard(r["id"])            # Einschalt-Bedingungen galten nicht mehr -> Regel wieder scharf
             if not dev.get("switchable", True):
                 status[r["id"]] = {"state": "off", "text": "Gerät ist nur zur Überwachung (nicht schaltbar)", "conds": conds}
                 continue
             if hold.get(dev["id"], now) > now:
                 status[r["id"]] = {"state": "paused", "text": "Pause nach Handschaltung", "conds": conds}
                 continue
-            if base_ok and not has_surplus:
-                forced.setdefault(dev["id"], []).append(r["name"] or ", ".join(txt for _, _, txt in results))
-                status[r["id"]] = {"state": "on", "text": "Bedingungen erfüllt", "conds": conds, "rule": r["id"]}
-                if dev.get("on") and "budget" in {c["type"] for c in r["conditions"]}:
-                    self.ran[r["id"]] = {"day": today, "min": ran_min + dt / 60.0}
-            elif base_ok and has_surplus:
-                candidates.setdefault(dev["id"], r["name"] or "Überschuss")
-                status[r["id"]] = {"state": "wait", "text": "wartet auf PV-Überschuss", "conds": conds, "rule": r["id"]}
+            owned_here = self.owner.get(dev["id"]) == "rule" and self.owner_rule.get(dev["id"]) == r["id"]
+            if owned_here and dev.get("on") and "budget" in {c["type"] for c in r["on"]}:
+                self.ran[r["id"]] = {"day": today, "min": ran_min + dt / 60.0}        # Tagesziel: Laufzeit mitzaehlen
+            if owned_here and dev.get("on"):
+                if off_hit:
+                    status[r["id"]] = {"state": "off", "text": "wird ausgeschaltet: " + ", ".join(off_hit), "conds": conds}
+                elif budget_done or (not off_res and not base_on):
+                    status[r["id"]] = {"state": "off", "text": "wird ausgeschaltet: Einschalt-Bedingungen nicht mehr erfüllt" if not budget_done else "Tagesziel erreicht", "conds": conds}
+                else:
+                    status[r["id"]] = {"state": "on", "text": "läuft" + (" – bis eine Ausschalt-Bedingung zutrifft" if off_res else " – solange die Bedingungen stimmen"), "conds": conds}
+            elif base_on and r["id"] not in self.blocked:
+                wants.setdefault(dev["id"], (r["id"], r["name"] or "Regel"))
+                status[r["id"]] = {"state": "on", "text": "Bedingungen erfüllt", "conds": conds}
+            elif base_on:
+                status[r["id"]] = {"state": "off", "text": "Ausschalt-Bedingung war erfüllt – wartet, bis die Einschalt-Bedingungen einmal nicht mehr stimmen", "conds": conds}
             else:
                 why = ("keine Daten für: " + ", ".join(missing)) if missing else "nicht erfüllt: " + ", ".join(x["text"] for x in conds if x["ok"] is False)
                 status[r["id"]] = {"state": "off", "text": why, "conds": conds}
+
         actions: list[tuple] = []
-        # ---- 1. Regeln ohne Ueberschuss: einschalten
-        for dev_id, names in forced.items():
+        # ---- 1. Einschalten
+        for dev_id, (rid, name) in wants.items():
             d = by_dev[dev_id]
             if d.get("online") and not d.get("on") and self._waited(d, now, "min_off_min"):
-                actions.append(("on", d, "Regel: " + " / ".join(names), "rule"))
-        # ---- 2. Was die Engine eingeschaltet hat, aber nicht mehr gebraucht wird: ausschalten
+                actions.append(("on", d, "Regel: " + name, "rule", rid))
+        # ---- 2. Ausschalten (nur, was die Engine selbst eingeschaltet hat)
         for dev_id, who in list(self.owner.items()):
             d = by_dev.get(dev_id)
             if not d or hold.get(dev_id, now) > now:
@@ -408,27 +435,40 @@ class RuleEngine:
             if not d.get("on"):
                 self.set_owner(dev_id, None)
                 continue
-            if dev_id in forced:
-                if who != "rule":
-                    self.set_owner(dev_id, "rule")           # eine feste Regel haelt das Geraet jetzt an
-                continue
-            if who == "surplus" and dev_id in candidates:
-                continue                                      # die Ueberschuss-Logik entscheidet ueber das Abschalten
-            if d.get("online") and d.get("switchable", True) and self._waited(d, now, "min_on_min"):
-                actions.append(("off", d, "Bedingungen nicht mehr erfüllt", "rule"))
-        # ---- 3. Ueberschuss: nur Kandidaten (uebrige Bedingungen erfuellt), nach Regel-Reihenfolge
-        order = {r["device_id"]: i for i, r in reversed(list(enumerate(rules))) if any(c["type"] == "surplus" for c in r["conditions"])}
+            rid = self.owner_rule.get(dev_id)
+            if who == "rule":
+                r = next((x for x in rules if x["id"] == rid), None)
+                inf = info.get(rid or "")
+                if r is None or not r.get("enabled", True) or inf is None:
+                    reason = "Regel nicht mehr aktiv"
+                elif inf["off_hit"]:
+                    reason = "Ausschalt-Bedingung: " + ", ".join(inf["off_hit"])
+                    if inf["base_on"]:
+                        self.blocked.add(rid)
+                elif inf["budget_done"]:
+                    reason = "Tagesziel erreicht"
+                elif not inf["has_off"] and not inf["base_on"]:
+                    reason = "Bedingungen nicht mehr erfüllt"
+                else:
+                    continue
+                if d.get("online") and d.get("switchable", True) and self._waited(d, now, "min_on_min"):
+                    actions.append(("off", d, reason, "rule", rid))
+            elif dev_id in wants:
+                self.set_owner(dev_id, "rule", wants[dev_id][0])       # eine Regel will das Geraet jetzt haben: Regel uebernimmt
+            elif who == "surplus" and not d.get("auto"):
+                if d.get("online") and d.get("switchable", True) and self._waited(d, now, "min_on_min"):
+                    actions.append(("off", d, "aus der Überschuss-Automatik genommen", "surplus", None))
+        # ---- 3. Ueberschuss (eigener Baustein): Geraete mit auto-Flag, ausser die Regeln haben das Geraet gerade in der Hand
         sdevs = []
-        for dev_id in sorted((i for i in candidates if i not in forced and self.owner.get(i, "surplus") == "surplus"), key=lambda i: order.get(i, 10 ** 6)):
-            d = dict(by_dev[dev_id])
-            d["auto"] = True
-            d["prio"] = order.get(dev_id, 10 ** 6)
+        for d in sorted((x for x in devices if x.get("auto") and x.get("switchable", True)), key=lambda x: x.get("prio") or 10 ** 6):
+            if d["id"] in wants or self.owner.get(d["id"]) == "rule":
+                continue
             sdevs.append(d)
         if sdevs and system:
             act = self.surplus.step(now, system, {**cfg, "surplus_enabled": True}, sdevs)
             if act:
                 a, d, why = act
-                actions.append((a, by_dev[d["id"]], why if a == "off" else "PV-Überschuss: " + why, "surplus"))
+                actions.append((a, by_dev[d["id"]], why if a == "off" else "PV-Überschuss: " + why, "surplus", None))
         elif not sdevs:
             self.surplus.reset_timers()
         with self._lock:

@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+{% block title %}Automatik · {{ app_display_name }}{% endblock %}
+{% block content %}
+
+<div class="card" id="auto-main">
+  <h2><svg class="h2i" style="color:var(--timer)" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Automatik</h2>
+  <div class="muted" style="margin-bottom:12px">Hier legst du fest, wann die Steuerung Geräte (Shelly, Tasmota, Tuya) von selbst schaltet – bei PV-Überschuss
+    oder nach eigenen Regeln. Die Geräte selbst richtest du unter <a href="/admin#geraete" style="color:var(--accent);font-weight:600">Einstellungen → Geräte</a> ein.</div>
+  <div style="display:flex;align-items:center;gap:14px">
+    <label class="switch" style="margin:0"><input type="checkbox" id="auto_enabled"><span class="slider"></span></label>
+    <div><b>Automatik aktiv</b><div class="muted">Hauptschalter für Überschuss-Automatik und Regeln.</div></div>
+  </div>
+  <div style="display:flex;align-items:center;gap:14px;margin-top:10px">
+    <label class="switch" style="margin:0"><input type="checkbox" id="auto_dry"><span class="slider"></span></label>
+    <div><b>Trockenlauf</b><div class="muted">Nur protokollieren (und melden), was geschaltet würde – nichts wird wirklich geschaltet.</div></div>
+  </div>
+  <div style="margin-top:12px"><b>Letzte Aktionen</b>
+    <div id="auto-events" class="muted" style="margin-top:4px">–</div></div>
+</div>
+
+<div class="card" id="surplus-card">
+  <h2><svg class="h2i" style="color:var(--timer)" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg>Überschuss-Automatik</h2>
+  <div class="muted" style="margin-bottom:12px">Ist der Akku voll und wird eingespeist, schaltet die Steuerung die Geräte dieser Liste nacheinander zu (oberstes zuerst).
+    Bei Netzbezug oder Batterie-Entladung werden sie in umgekehrter Reihenfolge wieder abgeschaltet. Ein Gerät, das gerade nach einer Regel läuft, lässt die Überschuss-Automatik in Ruhe.</div>
+  <div id="surplus-devs" style="display:flex;flex-direction:column;gap:10px"></div>
+  <div style="margin-top:10px"><select id="surplus-add" style="width:auto;min-width:240px"></select></div>
+  <details style="margin-top:14px">
+    <summary>Einstellungen (Akku-Schwelle, Zeiten, Sicherheits-Timer)</summary>
+    <div class="grid2" style="margin-top:10px">
+      <div><label>Akku mindestens (%)</label><input id="surplus_min_soc" type="number" min="50" max="100">
+        <div class="muted">Erst ab diesem Ladestand gilt Überschuss als vorhanden (bei Ladelimit 90 % z.B. 88 wählen).</div></div>
+    </div>
+    <div class="muted" style="margin:8px 0">Die Standardwerte passen für die meisten Anlagen. Änderungen wirken sofort.</div>
+    <div id="surplus-fine" class="grid2"></div>
+    <div style="margin-top:10px"><button id="surplus-fine-reset" class="ghost">Alle auf Standard</button></div>
+  </details>
+  <div class="muted" id="surplus-msg" style="margin-top:8px"></div>
+</div>
+
+<div class="card" id="rules-card">
+  <h2><svg class="h2i" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Regeln</h2>
+  <div class="muted" style="margin-bottom:12px">Sag der Steuerung in einfachen Sätzen, wann ein Gerät ein- und ausgeschaltet werden soll – zum Beispiel
+    „Heizung einschalten, wenn der Strom unter 25 ct kostet und der Akku über 50 % hat; ausschalten, sobald der Akku unter 30 % fällt“.
+    Ohne eigene Ausschalt-Bedingung schaltet das Gerät aus, sobald die Einschalt-Bedingungen nicht mehr stimmen. Geschaltet wird nur, was die Regel selbst eingeschaltet hat.</div>
+  <div id="rules-list" style="display:flex;flex-direction:column;gap:12px"></div>
+  <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <select id="rule-new-dev" style="width:auto;min-width:220px"></select>
+    <span class="muted">→ neue Regel für dieses Gerät anlegen</span>
+  </div>
+  <div class="muted" id="rules-msg" style="margin-top:8px"></div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = id => document.getElementById(id);
+const escH = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function api(url, method, body) {
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || (r.status >= 500 ? `Der Server antwortet nicht richtig (HTTP ${r.status}) – wurde die App gerade neu gestartet?` : 'Fehler ' + r.status));
+  return j;
+}
+let toastTimer = null;
+function savedToast(text = 'Gespeichert ✓') {
+  let el = $('save-toast');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'save-toast';
+    el.style.cssText = 'position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:1100;background:var(--green);color:#0b1f14;font-weight:600;padding:9px 18px;border-radius:999px;box-shadow:0 6px 22px rgba(0,0,0,.45);transition:opacity .3s;pointer-events:none';
+    document.body.appendChild(el);
+  }
+  el.textContent = text; el.style.opacity = '1';
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 1800);
+}
+function msg(id, t, err) { const m = $(id); m.textContent = t || ''; m.style.color = err ? '#e5544a' : ''; }
+/* Eigener Dialog im App-Design (statt Browser-confirm) */
+function uiConfirm(title, message, okText) {
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px';
+    ov.innerHTML = `<div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;width:100%;max-width:400px;box-shadow:0 12px 40px rgba(0,0,0,.5)">
+      <h3 style="margin:0 0 10px;font-size:17px"></h3><div class="muted dlg-msg"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px"><button class="ghost dlg-no">Abbrechen</button><button class="dlg-ok"></button></div></div>`;
+    ov.querySelector('h3').textContent = title; ov.querySelector('.dlg-msg').textContent = message; ov.querySelector('.dlg-ok').textContent = okText || 'OK';
+    const close = v => { document.removeEventListener('keydown', onKey); ov.remove(); resolve(v); };
+    const onKey = e => { if (e.key === 'Escape') close(false); else if (e.key === 'Enter') close(true); };
+    ov.querySelector('.dlg-ok').onclick = () => close(true); ov.querySelector('.dlg-no').onclick = () => close(false);
+    ov.addEventListener('mousedown', e => { if (e.target === ov) close(false); });
+    document.addEventListener('keydown', onKey); document.body.appendChild(ov); ov.querySelector('.dlg-ok').focus();
+  });
+}
+
+let devs = [], A = { rules: [], status: {}, tariff_mode: 'tibber', events: [] };
+const statText = d => !d.online ? 'nicht erreichbar' : (d.on ? 'an' : 'aus') + (d.power != null ? ` · ${Math.round(d.power)} W` : '');
+const focusInside = box => { const a = document.activeElement; return a && box.contains(a) && ['INPUT', 'SELECT'].includes(a.tagName); };
+
+/* ---------------------------------------------------------------- Hauptschalter */
+async function saveMain() {
+  try { await api('/api/config', 'POST', { rules_enabled: $('auto_enabled').checked, rules_dry_run: $('auto_dry').checked }); savedToast(); }
+  catch (e) { msg('rules-msg', 'Speichern fehlgeschlagen', true); }
+  load(false);
+}
+$('auto_enabled').addEventListener('change', saveMain);
+$('auto_dry').addEventListener('change', saveMain);
+
+/* ---------------------------------------------------------------- Ueberschuss-Automatik */
+async function deviceField(id, field, value) {
+  try { await api('/api/shelly/' + encodeURIComponent(id), 'PATCH', { [field]: value }); msg('surplus-msg', ''); savedToast(); }
+  catch (e) { msg('surplus-msg', e.message, true); }
+  rerenderNow();
+}
+function rerenderNow() { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); load(false); }
+async function moveDev(id, dir) {
+  const ids = [...document.querySelectorAll('#surplus-devs [data-dev]')].map(el => el.dataset.dev);
+  const i = ids.indexOf(id), j = i + dir; if (i < 0 || j < 0 || j >= ids.length) return;
+  [ids[i], ids[j]] = [ids[j], ids[i]];
+  try { await api('/api/shelly/auto-order', 'POST', { ids }); savedToast(); } catch (e) { msg('surplus-msg', e.message, true); }
+  rerenderNow();
+}
+function renderSurplus() {
+  const box = $('surplus-devs');
+  const autos = devs.filter(d => d.auto).sort((a, b) => (a.prio || 1e6) - (b.prio || 1e6));
+  const addable = devs.filter(d => !d.auto && d.switchable !== false);
+  const sel = $('surplus-add');
+  sel.innerHTML = `<option value="">+ Gerät zur Überschuss-Automatik hinzufügen …</option>` + addable.map(d => `<option value="${escH(d.id)}">${escH(d.icon)} ${escH(d.name)}</option>`).join('');
+  sel.onchange = () => { if (sel.value) deviceField(sel.value, 'auto', true); };
+  if (focusInside(box)) { box.querySelectorAll('[data-dev]').forEach(el => { const d = devs.find(x => x.id === el.dataset.dev); if (d) el.querySelector('.dev-stat').textContent = statText(d); }); return; }
+  box.innerHTML = autos.length ? autos.map((d, n) => {
+    const id = escH(d.id);
+    return `<div data-dev="${id}" style="border:1px solid var(--border);border-radius:10px;padding:10px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <b style="min-width:22px;text-align:center;color:var(--timer)" title="Priorität">${n + 1}.</b>
+        <span style="font-size:22px">${escH(d.icon)}</span>
+        <div style="flex:1;min-width:150px"><b>${escH(d.name)}</b><div class="muted">${escH(d.ip)} · <span class="dev-stat">${statText(d)}</span></div></div>
+        <div style="display:flex;gap:8px;margin-left:auto">
+          <button class="ghost" onclick="moveDev('${id}', -1)" title="Höhere Priorität (früher zuschalten)">▲</button>
+          <button class="ghost" onclick="moveDev('${id}', 1)" title="Niedrigere Priorität (später zuschalten)">▼</button>
+          <button class="ghost" onclick="deviceField('${id}', 'auto', false)" title="Aus der Automatik nehmen">✕</button>
+        </div>
+      </div>
+      <div class="grid2" style="margin-top:8px;grid-template-columns:repeat(3,1fr)">
+        <div><label>Leistung des Geräts (W)</label><input type="number" min="0" value="${d.power_w || ''}" placeholder="z.B. 2000" onchange="deviceField('${id}', 'power_w', this.value)"></div>
+        <div><label>Mind. an (min)</label><input type="number" min="0" value="${d.min_on_min}" onchange="deviceField('${id}', 'min_on_min', this.value)"></div>
+        <div><label>Mind. aus (min)</label><input type="number" min="0" value="${d.min_off_min}" onchange="deviceField('${id}', 'min_off_min', this.value)"></div>
+      </div>
+      ${d.power_w > 0 ? '' : '<div class="muted" style="color:#e5544a;margin-top:6px">Leistung eintragen – ohne sie wird dieses Gerät nicht geschaltet.</div>'}
+    </div>`;
+  }).join('') : '<div class="muted">Noch kein Gerät in der Überschuss-Automatik.</div>';
+}
+const SURPLUS_FINE = [
+  { k: 'on_delay_min', label: 'Zuschalten nach … Min Überschuss', unit: 'min', hint: 'So lange muss der Überschuss am Stück da sein, bevor ein Gerät zugeschaltet wird.' },
+  { k: 'off_delay_min', label: 'Abschalten nach … Min Bezug/Entladung', unit: 'min', hint: 'So lange am Stück, bevor das letzte Gerät wieder abgeschaltet wird.' },
+  { k: 'off_import_w', label: 'Netzbezug-Schwelle', unit: 'W', hint: 'Ab diesem Bezug aus dem Netz gilt der Überschuss als weg.' },
+  { k: 'off_discharge_w', label: 'Batterie-Entladung-Schwelle', unit: 'W', hint: 'Ab dieser Entladung gilt der Überschuss als weg.' },
+  { k: 'soc_hyst', label: 'Akku-Hysterese', unit: '%', hint: 'Abgeschaltet wird erst, wenn der Akku so viel unter „Akku mindestens" fällt.' },
+  { k: 'manual_hold_min', label: 'Pause nach Handschaltung', unit: 'min', hint: 'So lange lässt die Automatik ein von Hand geschaltetes Gerät in Ruhe (gilt auch für Regeln).' },
+  { k: 'failsafe_min', label: 'Sicherheits-Timer (Shelly)', unit: 'min', hint: 'Eingebauter Rückschalt-Timer im Shelly: stürzt die App ab, geht das Gerät nach dieser Zeit von selbst aus. 0 = aus (Tuya-Geräte nicht unterstützt).' },
+];
+function renderFine() {
+  const box = $('surplus-fine');
+  box.innerHTML = SURPLUS_FINE.map(f => {
+    const [lo, hi] = A.bounds[f.k];
+    return `<div><label>${f.label} (${f.unit})</label><input type="number" min="${lo}" max="${hi}" step="any" data-k="${f.k}" value="${A.settings[f.k]}" placeholder="${A.defaults[f.k]}">
+      <div class="muted">${f.hint} Standard: ${A.defaults[f.k]}</div></div>`;
+  }).join('');
+  box.onchange = e => { const inp = e.target.closest('input[data-k]'); if (inp) saveConfig({ ['surplus_' + inp.dataset.k]: inp.value === '' ? A.defaults[inp.dataset.k] : Number(inp.value) }); };
+  $('surplus-fine-reset').onclick = () => saveConfig(Object.fromEntries(SURPLUS_FINE.map(f => ['surplus_' + f.k, A.defaults[f.k]])));
+  $('surplus_min_soc').value = A.min_soc;
+}
+async function saveConfig(body) {
+  try { await api('/api/config', 'POST', body); savedToast(); load(true); } catch (e) { msg('surplus-msg', 'Speichern fehlgeschlagen', true); }
+}
+$('surplus_min_soc').addEventListener('change', () => { const v = parseInt($('surplus_min_soc').value); if (v >= 50 && v <= 100) saveConfig({ surplus_min_soc: v }); });
+
+/* ---------------------------------------------------------------- Regeln */
+const ADD_ON = [['time', 'Uhrzeit / Wochentage'], ['price', 'Strompreis unter/über …'], ['cheapest', 'In den günstigsten Stunden'], ['budget', 'Tagesziel: Laufzeit pro Tag'], ['soc', 'Akkustand'], ['sun_tomorrow', 'Sonne morgen (Prognose)']];
+const ADD_OFF = ADD_ON.filter(([t]) => t !== 'budget');
+const COND_DEFAULT = {
+  time: { type: 'time', from: '09:00', to: '16:00', days: [] }, price: { type: 'price', op: 'below', ct: 25 }, cheapest: { type: 'cheapest', hours: 3 },
+  budget: { type: 'budget', minutes: 120, from: '06:00', to: '22:00' }, soc: { type: 'soc', op: 'above', pct: 50 }, sun_tomorrow: { type: 'sun_tomorrow', op: 'above', kwh: 15 },
+};
+const WD = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+function condHtml(c, fixed) {
+  const sel = (cls, val, opts) => `<select class="${cls}" style="width:auto" onchange="ruleEdited(this)">${opts.map(([v, t]) => `<option value="${v}" ${val === v ? 'selected' : ''}>${t}</option>`).join('')}</select>`;
+  const num = (cls, val, w) => `<input class="${cls}" type="number" step="any" value="${escH(val)}" style="width:${w}px" onchange="ruleEdited(this)">`;
+  const tm = (cls, val, end) => {        // Uhrzeit als zwei Auswahlfelder (Stunde : Minute) im App-Stil statt Browser-Zeitwaehler
+    const [h, m] = String(val).split(':').map(Number), pad2 = n => String(n).padStart(2, '0');
+    const hours = Array.from({ length: end ? 25 : 24 }, (_, i) => i), mins = [...new Set([0, 15, 30, 45, m])].sort((a, b) => a - b);
+    return `<span class="tsel" data-t="${cls}" style="display:inline-flex;align-items:center;gap:3px"><select class="t-h" style="width:auto" onchange="ruleEdited(this)">${hours.map(i => `<option value="${pad2(i)}" ${i === h ? 'selected' : ''}>${pad2(i)}</option>`).join('')}</select>:`
+      + `<select class="t-m" style="width:auto" onchange="ruleEdited(this)">${mins.map(i => `<option value="${pad2(i)}" ${i === m ? 'selected' : ''}>${pad2(i)}</option>`).join('')}</select></span>`;
+  };
+  const cmp = (cls, v) => sel(cls, v, [['below', 'unter'], ['above', 'über']]);
+  let body = '';
+  if (c.type === 'time') {
+    body = `Zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to, true)} Uhr
+      <span style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-left:6px" title="Keine Auswahl = jeden Tag">${WD.map((n, i) => `<label class="chip"><input type="checkbox" class="c-day" value="${i}" ${(c.days || []).includes(i) ? 'checked' : ''} onchange="ruleEdited(this)"><span>${n}</span></label>`).join('')}</span>`;
+  } else if (c.type === 'price') body = `Strompreis ${cmp('c-op', c.op)} ${num('c-ct', c.ct, 70)} ct/kWh`;
+  else if (c.type === 'cheapest') body = `In den ${num('c-hours', c.hours, 60)} günstigsten Stunden des Tages`;
+  else if (c.type === 'budget') body = `Tagesziel: ${num('c-min', c.minutes, 70)} Minuten pro Tag, ${fixed ? 'so früh wie möglich' : 'zu den günstigsten Zeiten'}, zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to, true)} Uhr`;
+  else if (c.type === 'soc') body = `Akku ${cmp('c-op', c.op)} ${num('c-pct', c.pct, 70)} %`;
+  else if (c.type === 'sun_tomorrow') body = `Sonne morgen ${cmp('c-op', c.op)} ${num('c-kwh', c.kwh, 70)} kWh`;
+  return `<div class="cond" data-type="${c.type}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border)">
+    <span style="flex:1;min-width:200px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${body}</span>
+    <button class="ghost" style="padding:2px 9px" title="Bedingung entfernen" onclick="ruleCondDel(this)">✕</button></div>`;
+}
+function collectConds(list) {
+  return [...list.querySelectorAll('.cond')].map(row => {
+    const t = row.dataset.type, v = c => {
+      const e = row.querySelector('.' + c); if (e) return e.value;
+      const ts = row.querySelector('.tsel[data-t="' + c + '"]'); return ts ? ts.querySelector('.t-h').value + ':' + (ts.querySelector('.t-h').value === '24' ? '00' : ts.querySelector('.t-m').value) : '';
+    };
+    if (t === 'time') return { type: t, from: v('c-from'), to: v('c-to'), days: [...row.querySelectorAll('.c-day:checked')].map(x => +x.value) };
+    if (t === 'price') return { type: t, op: v('c-op'), ct: v('c-ct') };
+    if (t === 'cheapest') return { type: t, hours: v('c-hours') };
+    if (t === 'budget') return { type: t, minutes: v('c-min'), from: v('c-from'), to: v('c-to') };
+    if (t === 'soc') return { type: t, op: v('c-op'), pct: v('c-pct') };
+    return { type: 'sun_tomorrow', op: v('c-op'), kwh: v('c-kwh') };
+  });
+}
+const collectRule = box => ({ device_id: box.querySelector('.r-dev').value, enabled: box.querySelector('.r-en').checked, on: collectConds(box.querySelector('.list-on')), off: collectConds(box.querySelector('.list-off')) });
+async function ruleSave(box, extra, structural) {
+  try { await api('/api/rules/' + encodeURIComponent(box.dataset.rule), 'PATCH', { ...collectRule(box), ...(extra || {}) }); msg('rules-msg', ''); savedToast(); }
+  catch (e) { msg('rules-msg', e.message, true); structural = true; }
+  structural ? rerenderNow() : load(false);
+}
+const ruleEdited = el => ruleSave(el.closest('[data-rule]'));
+function ruleCondDel(btn) { const box = btn.closest('[data-rule]'); btn.closest('.cond').remove(); ruleSave(box, null, true); }
+async function ruleAddCond(sel, which) {
+  const t = sel.value; if (!t) return;
+  const box = sel.closest('[data-rule]'), cur = collectRule(box);
+  await ruleSave(box, { [which]: [...cur[which], COND_DEFAULT[t]] }, true);
+}
+async function ruleDelete(id) {
+  if (!await uiConfirm('Regel löschen?', 'Das Gerät bleibt in der Liste, nur diese Regel fällt weg.', 'Löschen')) return;
+  try { await api('/api/rules/' + encodeURIComponent(id), 'DELETE'); savedToast('Gelöscht ✓'); } catch (e) { msg('rules-msg', e.message, true); }
+  rerenderNow();
+}
+async function ruleNew(sel) {
+  const dev = sel.value; if (!dev) return;
+  try { await api('/api/rules', 'POST', { device_id: dev, on: [COND_DEFAULT.time] }); savedToast('Regel angelegt ✓'); } catch (e) { msg('rules-msg', e.message, true); }
+  sel.value = ''; rerenderNow();
+}
+function statusHtml(r) {
+  const st = (A.status || {})[r.id];
+  if (!st) return '<span class="muted">Noch nicht ausgewertet.</span>';
+  const icon = { on: '🟢', wait: '🟡', off: '⚪', paused: '⏸', disabled: '⚪' }[st.state] || '⚪';
+  return `<span>${icon} ${escH(st.text)}</span>`;
+}
+function renderRules() {
+  const box = $('rules-list'), fixed = A.tariff_mode === 'fixed';
+  const sw = devs.filter(d => d.switchable !== false);
+  const nd = $('rule-new-dev');
+  nd.innerHTML = `<option value="">+ Neue Regel für …</option>` + sw.map(d => `<option value="${escH(d.id)}">${escH(d.icon)} ${escH(d.name)}</option>`).join('');
+  nd.onchange = () => ruleNew(nd);
+  if (focusInside(box)) { box.querySelectorAll('[data-rule]').forEach(el => { const r = A.rules.find(x => x.id === el.dataset.rule), s = el.querySelector('.r-status'); if (r && s) s.innerHTML = statusHtml(r); }); return; }
+  const addSel = (opts, which) => `<select style="width:auto;margin-top:4px" onchange="ruleAddCond(this, '${which}')"><option value="">+ Bedingung hinzufügen …</option>${opts.filter(([t]) => !(fixed && (t === 'price' || t === 'cheapest'))).map(([t, l]) => `<option value="${t}">${l}</option>`).join('')}</select>`;
+  box.innerHTML = A.rules.length ? A.rules.map(r => {
+    const dev = devs.find(d => d.id === r.device_id);
+    return `<div data-rule="${escH(r.id)}" style="border:1px solid var(--border);border-radius:10px;padding:10px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <select class="r-dev" style="width:auto;min-width:180px;font-weight:600" onchange="ruleEdited(this)">${sw.map(d => `<option value="${escH(d.id)}" ${d.id === r.device_id ? 'selected' : ''}>${escH(d.icon)} ${escH(d.name)}</option>`).join('')}${dev ? '' : `<option value="${escH(r.device_id)}" selected>(Gerät fehlt)</option>`}</select>
+        <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+          <label class="switch" style="margin:0" title="Regel an/aus"><input type="checkbox" class="r-en" ${r.enabled !== false ? 'checked' : ''} onchange="ruleEdited(this)"><span class="slider"></span></label>
+          <button class="ghost" onclick="ruleDelete('${escH(r.id)}')" title="Regel löschen">✕</button>
+        </div>
+      </div>
+      <div style="margin-top:10px"><b style="color:var(--cheap)">Einschalten, wenn alles stimmt:</b>
+        <div class="list-on">${r.on.map(c => condHtml(c, fixed)).join('')}</div>${addSel(ADD_ON, 'on')}</div>
+      <div style="margin-top:12px"><b style="color:var(--exp)">Ausschalten, sobald eines davon zutrifft:</b>
+        <div class="list-off">${(r.off || []).map(c => condHtml(c, fixed)).join('')}</div>
+        ${(r.off || []).length ? '' : '<div class="muted" style="margin:2px 0 4px">Keine – das Gerät wird ausgeschaltet, sobald die Einschalt-Bedingungen nicht mehr stimmen.</div>'}${addSel(ADD_OFF, 'off')}</div>
+      <div class="r-status" style="margin-top:10px">${statusHtml(r)}</div>
+      ${dev ? `<details style="margin-top:8px"><summary class="muted">Einstellungen für dieses Gerät</summary>
+        <div class="grid2" style="margin-top:8px;grid-template-columns:repeat(2,1fr)">
+          <div><label>Mind. an (min)</label><input type="number" min="0" value="${dev.min_on_min}" onchange="deviceField('${escH(dev.id)}', 'min_on_min', this.value)"></div>
+          <div><label>Mind. aus (min)</label><input type="number" min="0" value="${dev.min_off_min}" onchange="deviceField('${escH(dev.id)}', 'min_off_min', this.value)"></div>
+        </div><div class="muted" style="margin-top:6px">Verhindert ständiges Ein-/Ausschalten. Gilt auch für die Überschuss-Automatik.</div></details>` : ''}
+    </div>`;
+  }).join('') : '<div class="muted">Noch keine Regel. Wähle unten ein Gerät, um eine anzulegen.</div>';
+}
+
+/* ---------------------------------------------------------------- Laden */
+async function load(fillInputs) {
+  try { devs = await (await fetch('/api/shelly')).json(); A = await (await fetch('/api/shelly/auto')).json(); } catch (e) { return; }
+  if (!Array.isArray(devs)) devs = [];
+  if (fillInputs !== false) { $('auto_enabled').checked = A.enabled; $('auto_dry').checked = A.dry_run; renderFine(); }
+  else { $('auto_enabled').checked = A.enabled; $('auto_dry').checked = A.dry_run; }
+  $('auto-events').innerHTML = A.events.length ? A.events.slice(0, 8).map(e => `${escH(e.ts.slice(11, 16))} · ${escH(e.text)}`).join('<br>') : 'Noch keine.';
+  renderSurplus(); renderRules();
+}
+load(true);
+setInterval(() => load(false), 10000);
+</script>
+{% endblock %}

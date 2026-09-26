@@ -150,6 +150,7 @@
     body.selecting .chart-scroll canvas { touch-action: none; }
     .sel-btn[aria-pressed="true"] { background: var(--timer); color: #14171c; border-color: var(--timer); }
     .daytab { font-size: 13px; padding: 6px 14px; }
+    input, select, textarea { color-scheme: dark; }      /* native Bedienelemente (Zeit-/Zahlenfelder, Auswahllisten) im dunklen Stil */
     .chip { display:inline-flex; margin:0; font-weight:normal; cursor:pointer; }
     .chip input { display:none; }
     .chip span { border:1px solid var(--border); border-radius:999px; padding:1px 8px; font-size:12px; color:var(--muted); }
@@ -223,6 +224,7 @@
     <h1>{{ app_display_name }}</h1>
     <nav>
       <a href="/">Dashboard</a>
+      <a href="/automation">Automatik</a>
       <a href="/admin">Einstellungen</a>
       <form action="/logout" method="post" style="display:inline;margin:0">
         <button type="submit" class="ghost logout-btn">

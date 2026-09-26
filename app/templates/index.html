@@ -1392,7 +1392,7 @@ async function loadShelly() {
   card.hidden = false;
   $('shelly-grid').innerHTML = list.map(d => {
     const stat = !d.online ? 'nicht erreichbar'
-      : (d.on ? 'an' : 'aus') + (d.power != null && d.switchable !== false ? ` · ${Math.round(d.power)} W` : '') + (d.auto ? ' · Auto' : '') + (d.switchable === false ? ' · Überwachung' : '');
+      : (d.on ? 'an' : 'aus') + (d.power != null && d.switchable !== false ? ` · ${Math.round(d.power)} W` : '') + (d.automated ? ' · Auto' : '') + (d.switchable === false ? ' · Überwachung' : '');
     return `<div class="systile" data-tile-id="${escH(d.id)}" ${d.online ? '' : 'style="opacity:.55"'}>
       <div class="systile-t">${escH(d.name)}</div>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">

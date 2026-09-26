@@ -453,7 +453,7 @@
   <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Geräte (Shelly, Tasmota &amp; Tuya)</h2>
   <div class="muted" style="margin-bottom:12px">Shelly-, Tasmota- und Tuya-/Gosund-Geräte im Heimnetz suchen, benennen und mit einem Symbol versehen.
     Was ein Gerät automatisch tun soll (zum Beispiel bei günstigem Strom oder PV-Überschuss einschalten),
-    legst du darunter bei „Geräte-Regeln“ fest.</div>
+    legst du auf der Seite <a href="/automation" style="color:var(--accent);font-weight:600">Automatik</a> fest.</div>
   <div id="shelly-devs" style="display:flex;flex-direction:column;gap:10px"></div>
   <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
     <button id="shelly-scan" class="ghost">Shellys suchen</button>
@@ -490,43 +490,6 @@
   </div>
   <div class="muted" id="shelly-msg" style="margin-top:8px"></div>
   <div id="shelly-found" style="display:flex;flex-direction:column;gap:2px;margin-top:8px"></div>
-</div>
-
-<div class="card" id="surplus-admin">
-  <h2><svg class="h2i" style="color:var(--timer)" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Geräte-Regeln</h2>
-  <div class="muted" style="margin-bottom:12px">Sag der Steuerung in einfachen Sätzen, wann ein Gerät an sein soll – zum Beispiel
-    „Heizung an, wenn der Strom unter 25 ct kostet und der Akku über 50 % hat“. Sind <b>alle</b> Bedingungen einer Regel erfüllt,
-    wird das Gerät eingeschaltet, sonst wieder aus (nur wenn die Regel es selbst eingeschaltet hat). Für dasselbe Gerät
-    kannst du mehrere Regeln anlegen – es läuft, sobald <b>eine</b> davon zutrifft. Bei PV-Überschuss gilt die Reihenfolge:
-    die oberste Regel bekommt den Überschuss zuerst.</div>
-  <div id="surplus-box" style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px">
-    <div style="display:flex;align-items:center;gap:14px">
-      <label class="switch" style="margin:0"><input type="checkbox" id="surplus_enabled"><span class="slider"></span></label>
-      <div><b>Regeln aktiv</b></div>
-    </div>
-    <div style="display:flex;align-items:center;gap:14px;margin-top:10px">
-      <label class="switch" style="margin:0"><input type="checkbox" id="surplus_dry_run"><span class="slider"></span></label>
-      <div><b>Trockenlauf</b><div class="muted">Nur protokollieren (und melden), was geschaltet würde – nichts wird wirklich geschaltet.</div></div>
-    </div>
-    <details style="margin-top:12px">
-      <summary>Einstellungen für PV-Überschuss (Akku-Schwelle, Zeiten, Sicherheits-Timer)</summary>
-      <div class="grid2" style="margin-top:10px">
-        <div><label>Akku mindestens (%)</label><input id="surplus_min_soc" type="number" min="50" max="100">
-          <div class="muted">Erst ab diesem Ladestand gilt Überschuss als vorhanden (bei Ladelimit 90 % z.B. 88 wählen).</div></div>
-      </div>
-      <div class="muted" style="margin:8px 0">Die Standardwerte passen für die meisten Anlagen. Änderungen wirken sofort.</div>
-      <div id="surplus-fine" class="grid2"></div>
-      <div style="margin-top:10px"><button id="surplus-fine-reset" class="ghost">Alle auf Standard</button></div>
-    </details>
-    <div style="margin-top:12px"><b>Letzte Aktionen</b>
-      <div id="surplus-events" class="muted" style="margin-top:4px">–</div></div>
-  </div>
-  <div id="rules-list" style="display:flex;flex-direction:column;gap:12px"></div>
-  <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-    <select id="rule-new-dev" style="width:auto;min-width:220px"></select>
-    <span class="muted">→ neue Regel für dieses Gerät anlegen</span>
-  </div>
-  <div class="muted" id="surplus-msg" style="margin-top:8px"></div>
 </div>
 
 <div class="card">
@@ -904,208 +867,11 @@ async function loadShellyAdmin() {
       </div></div>`;
   }).join('') : '<div class="muted">Noch keine Geräte angelegt.</div>';
 
-  shellyDevs = list;
-  renderRules();
 }
 async function shellyField(id, field, value, msgId = 'shelly-msg') {
   try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { [field]: value }); shellyMsg('', false, msgId); savedToast(); }
   catch (e) { shellyMsg(e.message, true, msgId); }
   loadShellyAdmin();
-}
-async function shellyMove(id, dir) {
-  const ids = [...document.querySelectorAll('#surplus-devs [data-dev]')].map(el => el.dataset.dev);
-  const i = ids.indexOf(id), j = i + dir;
-  if (i < 0 || j < 0 || j >= ids.length) return;
-  [ids[i], ids[j]] = [ids[j], ids[i]];
-  await shellyApi('/api/shelly/auto-order', 'POST', { ids });
-  savedToast();
-  loadShellyAdmin();
-}
-const SURPLUS_FINE = [
-  { k: 'on_delay_min', label: 'Zuschalten nach … Min Überschuss', unit: 'min', hint: 'So lange muss der Überschuss am Stück da sein, bevor ein Gerät zugeschaltet wird.' },
-  { k: 'off_delay_min', label: 'Abschalten nach … Min Bezug/Entladung', unit: 'min', hint: 'So lange am Stück, bevor das letzte Gerät wieder abgeschaltet wird.' },
-  { k: 'off_import_w', label: 'Netzbezug-Schwelle', unit: 'W', hint: 'Ab diesem Bezug aus dem Netz gilt der Überschuss als weg.' },
-  { k: 'off_discharge_w', label: 'Batterie-Entladung-Schwelle', unit: 'W', hint: 'Ab dieser Entladung gilt der Überschuss als weg.' },
-  { k: 'soc_hyst', label: 'Akku-Hysterese', unit: '%', hint: 'Abgeschaltet wird erst, wenn der Akku so viel unter „Akku mindestens" fällt.' },
-  { k: 'manual_hold_min', label: 'Pause nach Handschaltung', unit: 'min', hint: 'So lange lässt die Automatik ein von Hand geschaltetes Gerät in Ruhe.' },
-  { k: 'failsafe_min', label: 'Sicherheits-Timer (Shelly)', unit: 'min', hint: 'Eingebauter Rückschalt-Timer im Shelly: stürzt die App ab, geht das Gerät nach dieser Zeit von selbst aus. 0 = aus (Tuya-Geräte nicht unterstützt).' },
-];
-function renderSurplusFine(a) {
-  const box = document.getElementById('surplus-fine');
-  box.innerHTML = SURPLUS_FINE.map(f => {
-    const [lo, hi] = a.bounds[f.k];
-    return `<div><label>${f.label} (${f.unit})</label>
-      <input type="number" min="${lo}" max="${hi}" step="any" data-k="${f.k}" value="${a.settings[f.k]}" placeholder="${a.defaults[f.k]}">
-      <div class="muted">${f.hint} Standard: ${a.defaults[f.k]}</div></div>`;
-  }).join('');
-  box.onchange = async e => {
-    const inp = e.target.closest('input[data-k]'); if (!inp) return;
-    const v = inp.value === '' ? a.defaults[inp.dataset.k] : Number(inp.value);
-    await saveSurplusFine({ ['surplus_' + inp.dataset.k]: v });
-  };
-  document.getElementById('surplus-fine-reset').onclick = () =>
-    saveSurplusFine(Object.fromEntries(SURPLUS_FINE.map(f => ['surplus_' + f.k, a.defaults[f.k]])), true);
-}
-async function saveSurplusFine(body, reload) {
-  try {
-    const r = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!r.ok) throw new Error();
-    savedToast(); loadSurplus(true);
-  } catch (e) { shellyMsg('Speichern fehlgeschlagen', true, 'surplus-msg'); }
-}
-async function loadSurplus(fillInputs) {
-  let a; try { a = await (await fetch('/api/shelly/auto')).json(); } catch (e) { return; }
-  rulesData = { rules: a.rules || [], status: a.status || {}, tariff_mode: a.tariff_mode };
-  renderRules();
-  if (fillInputs) {
-    document.getElementById('surplus_enabled').checked = a.enabled;
-    document.getElementById('surplus_dry_run').checked = a.dry_run;
-    document.getElementById('surplus_min_soc').value = a.min_soc;
-    renderSurplusFine(a);
-  }
-  document.getElementById('surplus-events').innerHTML = a.events.length
-    ? a.events.slice(0, 8).map(e => `${escH(e.ts.slice(11, 16))} · ${escH(e.text)}`).join('<br>') : 'Noch keine.';
-}
-async function saveSurplus() {
-  const v = parseInt(document.getElementById('surplus_min_soc').value);
-  await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-    rules_enabled: document.getElementById('surplus_enabled').checked,
-    rules_dry_run: document.getElementById('surplus_dry_run').checked,
-    ...(v >= 50 && v <= 100 ? { surplus_min_soc: v } : {}) }) })
-    .then(r => { if (r.ok) savedToast(); else shellyMsg('Speichern fehlgeschlagen', true, 'surplus-msg'); })
-    .catch(() => shellyMsg('Speichern fehlgeschlagen', true, 'surplus-msg'));
-  loadSurplus(false);
-}
-['surplus_enabled', 'surplus_dry_run', 'surplus_min_soc'].forEach(id =>
-  document.getElementById(id).addEventListener('change', saveSurplus));
-
-/* --- Geraete-Regeln: Bedingungen in einfachen Saetzen --- */
-let shellyDevs = [], rulesData = { rules: [], status: {}, tariff_mode: 'tibber' };
-const COND_ADD = [
-  ['time', 'Uhrzeit / Wochentage'], ['price', 'Strompreis unter/über …'], ['cheapest', 'In den günstigsten Stunden'],
-  ['budget', 'Tagesziel: Laufzeit pro Tag'], ['soc', 'Akkustand'], ['surplus', 'PV-Überschuss'], ['sun_tomorrow', 'Sonne morgen (Prognose)'],
-];
-const COND_DEFAULT = {
-  time: { type: 'time', from: '09:00', to: '16:00', days: [] }, price: { type: 'price', op: 'below', ct: 25 }, cheapest: { type: 'cheapest', hours: 3 },
-  budget: { type: 'budget', minutes: 120, from: '06:00', to: '22:00' }, soc: { type: 'soc', op: 'above', pct: 50 }, surplus: { type: 'surplus' },
-  sun_tomorrow: { type: 'sun_tomorrow', op: 'above', kwh: 15 },
-};
-const WD = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
-function condHtml(c, fixed) {
-  const sel = (cls, val, opts) => `<select class="${cls}" style="width:auto" onchange="ruleEdited(this)">${opts.map(([v, t]) => `<option value="${v}" ${val === v ? 'selected' : ''}>${t}</option>`).join('')}</select>`;
-  const num = (cls, val, w) => `<input class="${cls}" type="number" step="any" value="${escH(val)}" style="width:${w}px" onchange="ruleEdited(this)">`;
-  const tm = (cls, val) => `<input class="${cls}" type="time" value="${val === '24:00' ? '23:59' : escH(val)}" style="width:auto" onchange="ruleEdited(this)">`;
-  const cmp = (cls, v) => sel(cls, v, [['below', 'unter'], ['above', 'über']]);
-  let body = '';
-  if (c.type === 'time') {
-    body = `Zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to)} Uhr
-      <span style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-left:6px" title="Keine Auswahl = jeden Tag">${WD.map((n, i) => `<label class="chip"><input type="checkbox" class="c-day" value="${i}" ${(c.days || []).includes(i) ? 'checked' : ''} onchange="ruleEdited(this)"><span>${n}</span></label>`).join('')}</span>`;
-  } else if (c.type === 'price') body = `Strompreis ${cmp('c-op', c.op)} ${num('c-ct', c.ct, 70)} ct/kWh`;
-  else if (c.type === 'cheapest') body = `In den ${num('c-hours', c.hours, 60)} günstigsten Stunden des Tages`;
-  else if (c.type === 'budget') body = `Tagesziel: ${num('c-min', c.minutes, 70)} Minuten pro Tag, ${fixed ? 'so früh wie möglich' : 'zu den günstigsten Zeiten'}, zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to)} Uhr`;
-  else if (c.type === 'soc') body = `Akku ${cmp('c-op', c.op)} ${num('c-pct', c.pct, 70)} %`;
-  else if (c.type === 'sun_tomorrow') body = `Sonne morgen ${cmp('c-op', c.op)} ${num('c-kwh', c.kwh, 70)} kWh`;
-  else if (c.type === 'surplus') body = 'PV-Überschuss ist da <span class="muted">(Akku voll, es wird eingespeist)</span>';
-  return `<div class="cond" data-type="${c.type}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border)">
-    <span style="flex:1;min-width:200px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${body}</span>
-    <button class="ghost" style="padding:2px 9px" title="Bedingung entfernen" onclick="ruleCondDel(this)">✕</button></div>`;
-}
-function collectRule(box) {
-  const conds = [...box.querySelectorAll('.cond')].map(row => {
-    const t = row.dataset.type, v = c => { const e = row.querySelector('.' + c); return e ? e.value : ''; };
-    if (t === 'time') return { type: t, from: v('c-from'), to: v('c-to'), days: [...row.querySelectorAll('.c-day:checked')].map(x => +x.value) };
-    if (t === 'price') return { type: t, op: v('c-op'), ct: v('c-ct') };
-    if (t === 'cheapest') return { type: t, hours: v('c-hours') };
-    if (t === 'budget') return { type: t, minutes: v('c-min'), from: v('c-from'), to: v('c-to') };
-    if (t === 'soc') return { type: t, op: v('c-op'), pct: v('c-pct') };
-    if (t === 'sun_tomorrow') return { type: t, op: v('c-op'), kwh: v('c-kwh') };
-    return { type: 'surplus' };
-  });
-  return { device_id: box.querySelector('.r-dev').value, enabled: box.querySelector('.r-en').checked, conditions: conds };
-}
-async function ruleSave(box, extra, structural) {
-  try {
-    await shellyApi('/api/rules/' + encodeURIComponent(box.dataset.rule), 'PATCH', { ...collectRule(box), ...(extra || {}) });
-    shellyMsg('', false, 'surplus-msg'); savedToast();
-  } catch (e) { shellyMsg(e.message, true, 'surplus-msg'); structural = true; }
-  structural ? rulesReload() : loadSurplus(false);
-}
-function rulesReload() { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); loadSurplus(false); }
-function ruleEdited(el) { ruleSave(el.closest('[data-rule]')); }
-function ruleCondDel(btn) { const box = btn.closest('[data-rule]'); btn.closest('.cond').remove(); ruleSave(box, null, true); }
-async function ruleAddCond(sel) {
-  const t = sel.value; if (!t) return;
-  const box = sel.closest('[data-rule]');
-  const cur = collectRule(box);
-  await ruleSave(box, { conditions: [...cur.conditions, COND_DEFAULT[t]] }, true);
-}
-async function ruleMove(id, dir) {
-  const ids = rulesData.rules.map(r => r.id), i = ids.indexOf(id), j = i + dir;
-  if (i < 0 || j < 0 || j >= ids.length) return;
-  [ids[i], ids[j]] = [ids[j], ids[i]];
-  try { await shellyApi('/api/rules/order', 'POST', { ids }); savedToast(); } catch (e) { shellyMsg(e.message, true, 'surplus-msg'); }
-  rulesReload();
-}
-async function ruleDelete(id) {
-  if (!await uiDialog({ title: 'Regel löschen?', message: 'Das Gerät bleibt in der Liste, nur diese Regel fällt weg.', okText: 'Löschen' })) return;
-  try { await shellyApi('/api/rules/' + encodeURIComponent(id), 'DELETE'); savedToast('Gelöscht ✓'); } catch (e) { shellyMsg(e.message, true, 'surplus-msg'); }
-  rulesReload();
-}
-async function ruleNew(sel) {
-  const dev = sel.value; if (!dev) return;
-  try { await shellyApi('/api/rules', 'POST', { device_id: dev, conditions: [COND_DEFAULT.time] }); savedToast('Regel angelegt ✓'); } catch (e) { shellyMsg(e.message, true, 'surplus-msg'); }
-  sel.value = '';
-  rulesReload();
-}
-function ruleStatusHtml(r) {
-  const st = (rulesData.status || {})[r.id];
-  if (!st) return '<span class="muted">Noch nicht ausgewertet.</span>';
-  const icon = { on: '🟢', wait: '🟡', off: '⚪', paused: '⏸', disabled: '⚪' }[st.state] || '⚪';
-  const lead = { on: 'Läuft: ', wait: '', paused: '' }[st.state] ?? 'Aus: ';
-  return `<span>${icon} ${lead}${escH(st.text)}</span>`;
-}
-function renderRules() {
-  const box = document.getElementById('rules-list'); if (!box) return;
-  const fixed = rulesData.tariff_mode === 'fixed';
-  const devs = shellyDevs.filter(d => d.switchable !== false);
-  const opts = (sel) => devs.map(d => `<option value="${escH(d.id)}" ${d.id === sel ? 'selected' : ''}>${escH(d.icon)} ${escH(d.name)}</option>`).join('');
-  const nd = document.getElementById('rule-new-dev');
-  if (nd) nd.innerHTML = `<option value="">+ Neue Regel für …</option>` + devs.map(d => `<option value="${escH(d.id)}">${escH(d.icon)} ${escH(d.name)}</option>`).join('');
-  if (nd) nd.onchange = () => ruleNew(nd);
-  const active = document.activeElement;
-  if (active && box.contains(active) && ['INPUT', 'SELECT'].includes(active.tagName)) {        // waehrend des Tippens nicht neu zeichnen - nur die Statuszeilen auffrischen
-    box.querySelectorAll('[data-rule]').forEach(el => { const r = rulesData.rules.find(x => x.id === el.dataset.rule), s = el.querySelector('.r-status'); if (r && s) s.innerHTML = ruleStatusHtml(r); });
-    return;
-  }
-  box.innerHTML = rulesData.rules.length ? rulesData.rules.map((r, n) => {
-    const dev = shellyDevs.find(d => d.id === r.device_id);
-    const hasSurplus = r.conditions.some(c => c.type === 'surplus');
-    const add = COND_ADD.filter(([t]) => !(fixed && (t === 'price' || t === 'cheapest')) && !(t === 'surplus' && hasSurplus));
-    return `<div data-rule="${escH(r.id)}" style="border:1px solid var(--border);border-radius:10px;padding:10px">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <b style="min-width:22px;text-align:center;color:var(--timer)" title="Reihenfolge (bei PV-Überschuss: wer zuerst bekommt)">${n + 1}.</b>
-        <select class="r-dev" style="width:auto;min-width:180px;font-weight:600" onchange="ruleEdited(this)">${opts(r.device_id)}${dev ? '' : `<option value="${escH(r.device_id)}" selected>(Gerät fehlt)</option>`}</select>
-        <span>einschalten, wenn <b>alles</b> stimmt:</span>
-        <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
-          <label class="switch" style="margin:0" title="Regel an/aus"><input type="checkbox" class="r-en" ${r.enabled !== false ? 'checked' : ''} onchange="ruleEdited(this)"><span class="slider"></span></label>
-          <button class="ghost" onclick="ruleMove('${escH(r.id)}', -1)" title="Nach oben">▲</button>
-          <button class="ghost" onclick="ruleMove('${escH(r.id)}', 1)" title="Nach unten">▼</button>
-          <button class="ghost" onclick="ruleDelete('${escH(r.id)}')" title="Regel löschen">✕</button>
-        </div>
-      </div>
-      <div style="margin-top:8px">${r.conditions.map(c => condHtml(c, fixed)).join('')}</div>
-      <select style="width:auto;margin-top:6px" onchange="ruleAddCond(this)"><option value="">+ Bedingung hinzufügen …</option>${add.map(([t, l]) => `<option value="${t}">${l}</option>`).join('')}</select>
-      <div class="r-status" style="margin-top:8px">${ruleStatusHtml(r)}</div>
-      ${dev ? `<details style="margin-top:8px"><summary class="muted">Einstellungen für dieses Gerät${hasSurplus && !(dev.power_w > 0) ? ' <span style="color:#e5544a">– Leistung fehlt</span>' : ''}</summary>
-        <div class="grid2" style="margin-top:8px;grid-template-columns:repeat(3,1fr)">
-          <div><label>Leistung des Geräts (W)</label><input type="number" min="0" value="${dev.power_w || ''}" placeholder="z.B. 2000" onchange="shellyField('${escH(dev.id)}', 'power_w', this.value, 'surplus-msg')"></div>
-          <div><label>Mind. an (min)</label><input type="number" min="0" value="${dev.min_on_min}" onchange="shellyField('${escH(dev.id)}', 'min_on_min', this.value, 'surplus-msg')"></div>
-          <div><label>Mind. aus (min)</label><input type="number" min="0" value="${dev.min_off_min}" onchange="shellyField('${escH(dev.id)}', 'min_off_min', this.value, 'surplus-msg')"></div>
-        </div>
-        <div class="muted" style="margin-top:6px">Die Leistung braucht die Steuerung nur für „PV-Überschuss“ (reicht der Überschuss für das Gerät?). Mind. an/aus verhindert ständiges Ein-/Ausschalten.</div>
-      </details>` : ''}
-    </div>`;
-  }).join('') : '<div class="muted">Noch keine Regel. Wähle unten ein Gerät, um eine anzulegen.</div>';
 }
 function shellyPickIcon(id) { const el = document.getElementById('icons-' + id); el.style.display = el.style.display === 'none' ? 'flex' : 'none'; }
 async function shellySetIcon(id, icon) { try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { icon }); savedToast(); } catch (e) { shellyMsg(e.message, true); } loadShellyAdmin(); }
@@ -1391,9 +1157,7 @@ document.getElementById('vrm-restore-apply').addEventListener('click', async () 
 });
 
 loadShellyAdmin();
-loadSurplus(true);
 setInterval(refreshShellyStatus, 5000);
-setInterval(() => loadSurplus(false), 15000);
 
 /* --- Reiter: jede Karte gehoert zu genau einem Reiter (Zuordnung ueber die Ueberschrift) --- */
 const ADMIN_TABS = [
@@ -1403,7 +1167,7 @@ const ADMIN_TABS = [
   { id: 'vrm', label: 'VRM', match: ['Victron VRM'] },
   { id: 'wetter', label: 'Wetter', match: ['Wettervorhersage'] },
   { id: 'meldungen', label: 'Meldungen', match: ['Benachrichtigungen'] },
-  { id: 'geraete', label: 'Geräte & Regeln', match: ['Geräte', 'Shelly', 'Überschuss'] },
+  { id: 'geraete', label: 'Geräte', match: ['Geräte', 'Shelly'] },
   { id: 'anzeige', label: 'Dashboard', match: ['Kacheln', 'Diagramme'] },
   { id: 'system', label: 'System & Konto', match: ['App-Version', 'Betrieb', 'Konto'] },
 ];
