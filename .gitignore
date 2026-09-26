@@ -39,3 +39,4 @@ app/rules.json
 app/rules_state.json
 app/surplus_log.jsonl
 app/rules_log.jsonl
+app/automation_log_read.json

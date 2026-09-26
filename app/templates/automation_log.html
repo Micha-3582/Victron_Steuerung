@@ -34,6 +34,9 @@ async function load() {
     return `<tr><td style="white-space:nowrap">${fmt(r.ts)}</td><td>${escH(r.dev || '–')}</td><td><b style="color:${c}">${t}</b>${r.dry ? ' <span class="muted">🧪</span>' : ''}</td><td>${escH(r.text)}</td></tr>`;
   }).join('') : '<tr><td colspan="4" class="muted">Keine Einträge.</td></tr>');
 }
-$('days').addEventListener('change', load); load(); setInterval(load, 30000);
+window.LOG_OPEN = MODULE;                                   // dieses Logbuch ist offen: sein Zaehler bleibt aus
+async function markRead() { try { await fetch('/api/automation/log/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ module: MODULE }) }); if (window.refreshLogBadges) window.refreshLogBadges(); } catch (e) { /* egal */ } }
+async function loadAndRead() { await load(); markRead(); }
+$('days').addEventListener('change', load); loadAndRead(); setInterval(loadAndRead, 30000);
 </script>
 {% endblock %}

@@ -150,6 +150,10 @@
     body.selecting .chart-scroll canvas { touch-action: none; }
     .sel-btn[aria-pressed="true"] { background: var(--timer); color: #14171c; border-color: var(--timer); }
     .daytab { font-size: 13px; padding: 6px 14px; }
+    /* roter Zaehler wie bei Handy-Apps: ungelesene Logbuch-Eintraege */
+    .log-badge { position: absolute; top: -7px; right: -7px; min-width: 19px; height: 19px; padding: 0 5px; box-sizing: border-box; border-radius: 10px;
+      background: #e5544a; color: #fff; font-size: 11px; font-weight: 700; line-height: 19px; text-align: center; pointer-events: none; box-shadow: 0 0 0 2px var(--bg, #14171c); }
+    .log-badge[hidden] { display: none; }
     input, select, textarea { color-scheme: dark; }      /* native Bedienelemente (Zeit-/Zahlenfelder, Auswahllisten) im dunklen Stil */
     .chip { display:inline-flex; margin:0; font-weight:normal; cursor:pointer; }
     .chip input { display:none; }
@@ -240,6 +244,27 @@
   </header>
   <main>{% block content %}{% endblock %}</main>
   {% block scripts %}{% endblock %}
+  <script>
+    // Ungelesene Logbuch-Eintraege (Automatik / Regeln): roter Zaehler an "Automatik"/"Regeln" in der Kopfleiste und an den Logbuch-Knoepfen
+    (function () {
+      const nav = { surplus: 'header nav a[href="/automation"]', rules: 'header nav a[href="/rules"]' };
+      function put(el, n) {
+        if (!el) return;
+        let b = el.querySelector(':scope > .log-badge');
+        if (!b) { b = document.createElement('span'); b.className = 'log-badge'; el.appendChild(b); if (getComputedStyle(el).position === 'static') el.style.position = 'relative'; }
+        b.hidden = !n; b.textContent = n > 99 ? '99+' : String(n);
+      }
+      async function refresh() {
+        let d; try { const r = await fetch('/api/automation/unread'); if (!r.ok) return; d = await r.json(); } catch (e) { return; }
+        for (const m of ['surplus', 'rules']) {
+          put(document.querySelector(nav[m]), window.LOG_OPEN === m ? 0 : d[m]);
+          document.querySelectorAll('[data-log-badge="' + m + '"]').forEach(el => put(el, window.LOG_OPEN === m ? 0 : d[m]));
+        }
+      }
+      window.refreshLogBadges = refresh;
+      if (document.querySelector('header nav')) { refresh(); setInterval(refresh, 15000); }
+    })();
+  </script>
   <script>
     // Kompakte Feld-Hilfe: Klick auf einen .qhelp-Knopf zeigt sein data-help
     // als kleines Popover neben dem Knopf, Klick woanders schliesst es wieder.

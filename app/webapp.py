@@ -1307,6 +1307,21 @@ def api_automation_log():
     return jsonify({"module": module, "entries": autolog.recent(module, limit, days)})
 
 
+@app.route("/api/automation/unread", methods=["GET"])
+def api_automation_unread():
+    """Ungelesene Logbuch-Eintraege je Baustein (fuer die roten Punkte)."""
+    return jsonify({m: autolog.unread(m) for m in autolog.MODULES})
+
+
+@app.route("/api/automation/log/read", methods=["POST"])
+def api_automation_log_read():
+    module = (request.get_json(silent=True) or {}).get("module", "")
+    if module not in autolog.MODULES:
+        return jsonify(error="module: surplus oder rules"), 400
+    autolog.mark_read(module)
+    return jsonify(ok=True)
+
+
 @app.route("/automation-log")
 def automation_log_page():
     """Logbuch der Ueberschuss-Automatik (eigene Seite)."""

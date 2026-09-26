@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 _DIR = os.path.dirname(os.path.abspath(__file__))
 MODULES = ("surplus", "rules")
 PATHS = {m: os.path.join(_DIR, f"{m}_log.jsonl") for m in MODULES}
+READ_PATH = os.path.join(_DIR, "automation_log_read.json")      # {"surplus": ISO-Zeit, "rules": ISO-Zeit} - bis wann das Logbuch gelesen wurde
 MAX_BYTES = 1_500_000
 _lock = threading.Lock()
 
@@ -66,3 +67,38 @@ def counts(module: str, days: int = 7, now: datetime | None = None) -> dict:
     """Kurzstatistik fuer den Betriebsbericht: Aktionen gesamt und davon echt (nicht Trockenlauf)."""
     rows = recent(module, 5000, days, now)
     return {"total": len(rows), "real": sum(1 for r in rows if not r.get("dry")), "failed": sum(1 for r in rows if r.get("action") == "fail")}
+
+
+def _read_marks() -> dict:
+    try:
+        with open(READ_PATH, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def mark_read(module: str, now: datetime | None = None):
+    """Logbuch gilt als gelesen (alles bis jetzt)."""
+    if module not in PATHS:
+        raise ValueError(module)
+    with _lock:
+        d = _read_marks()
+        d[module] = (now or datetime.now()).isoformat(timespec="seconds")
+        try:
+            with open(READ_PATH, "w", encoding="utf-8") as f:
+                json.dump(d, f)
+        except OSError:
+            pass
+
+
+def unread(module: str, now: datetime | None = None) -> int:
+    """Anzahl Eintraege, die neuer sind als die letzte Lesemarke (ohne Marke: alle)."""
+    since = _read_marks().get(module, "")
+    n = 0
+    for e in recent(module, 1000, None, now):
+        if e.get("ts", "") > since:
+            n += 1
+        else:
+            break
+    return n
