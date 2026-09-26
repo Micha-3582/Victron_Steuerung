@@ -1309,7 +1309,16 @@ def api_automation_log():
 
 @app.route("/automation-log")
 def automation_log_page():
-    return render_template("automation_log.html")
+    """Logbuch der Ueberschuss-Automatik (eigene Seite)."""
+    return render_template("automation_log.html", module="surplus", log_title="Logbuch – Überschuss-Automatik",
+                           log_hint="Jede Schalt-Aktion der Überschuss-Automatik.", back_url="/automation", back_label="zur Überschuss-Automatik")
+
+
+@app.route("/rules-log")
+def rules_log_page():
+    """Logbuch der Regeln (eigene Seite)."""
+    return render_template("automation_log.html", module="rules", log_title="Logbuch – Regeln",
+                           log_hint="Jede Schalt-Aktion der Regeln.", back_url="/rules", back_label="zu den Regeln")
 
 
 @app.route("/api/automation", methods=["POST"])
