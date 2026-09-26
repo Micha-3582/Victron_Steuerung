@@ -45,11 +45,11 @@
   <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Regeln</h2>
   <div class="muted" style="margin-bottom:12px">Sag der Steuerung in einfachen Sätzen, wann ein Gerät ein- und ausgeschaltet werden soll – zum Beispiel
     „Heizung einschalten, wenn der Strom unter 25 ct kostet und der Akku über 50 % hat; ausschalten, sobald der Akku unter 30 % fällt“.
-    Ohne eigene Ausschalt-Bedingung schaltet das Gerät aus, sobald die Einschalt-Bedingungen nicht mehr stimmen. Läuft ein Gerät schon, während die Einschalt-Bedingungen stimmen, übernimmt die Regel es und schaltet es später auch wieder aus (wie ein Timer). Schaltest du ein Gerät von Hand aus, bleibt es aus, bis die Regel das nächste Mal neu beginnt (bei einem Zeitfenster also bis zum nächsten Start). Geräte, die zu keiner Zeit unter eine Regel fallen, bleiben unberührt.</div>
+    Ohne eigene Ausschalt-Bedingung schaltet das Gerät aus, sobald die Einschalt-Bedingungen nicht mehr stimmen. Ein <b>Ausschalt-Timer</b> (ohne Einschalt-Bedingung) schaltet ein Gerät nur aus, zum Beispiel jeden Abend um 23:30, und nie von selbst ein. Läuft ein Gerät schon, während die Einschalt-Bedingungen stimmen, übernimmt die Regel es und schaltet es später auch wieder aus (wie ein Timer). Schaltest du ein Gerät von Hand aus, bleibt es aus, bis die Regel das nächste Mal neu beginnt (bei einem Zeitfenster also bis zum nächsten Start). Geräte, die zu keiner Zeit unter eine Regel fallen, bleiben unberührt.</div>
   <div id="rules-list" style="display:flex;flex-direction:column;gap:12px"></div>
   <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
     <select id="rule-new-dev" style="width:auto;min-width:220px"></select>
-    <span class="muted">→ neue Regel für dieses Gerät anlegen</span>
+    <select id="rule-new-timer" style="width:auto;min-width:220px" title="Schaltet ein Gerät zu einer Uhrzeit aus, das du selbst eingeschaltet hast"></select>
   </div>
   <div class="muted" id="rules-msg" style="margin-top:8px"></div>
 </div>
@@ -178,9 +178,9 @@ $('surplus_min_soc').addEventListener('change', () => { const v = parseInt($('su
 
 /* ---------------------------------------------------------------- Regeln */
 const ADD_ON = [['time', 'Uhrzeit / Wochentage'], ['price', 'Strompreis unter/über …'], ['cheapest', 'In den günstigsten Stunden'], ['budget', 'Tagesziel: Laufzeit pro Tag'], ['soc', 'Akkustand'], ['sun_tomorrow', 'Sonne morgen (Prognose)']];
-const ADD_OFF = ADD_ON.filter(([t]) => t !== 'budget');
+const ADD_OFF = [['at', 'Um eine Uhrzeit (einmal pro Tag)'], ...ADD_ON.filter(([t]) => t !== 'budget')];
 const COND_DEFAULT = {
-  time: { type: 'time', from: '09:00', to: '16:00', days: [] }, price: { type: 'price', op: 'below', ct: 25 }, cheapest: { type: 'cheapest', hours: 3 },
+  at: { type: 'at', time: '23:30', days: [] }, time: { type: 'time', from: '09:00', to: '16:00', days: [] }, price: { type: 'price', op: 'below', ct: 25 }, cheapest: { type: 'cheapest', hours: 3 },
   budget: { type: 'budget', minutes: 120, from: '06:00', to: '22:00' }, soc: { type: 'soc', op: 'above', pct: 50 }, sun_tomorrow: { type: 'sun_tomorrow', op: 'above', kwh: 15 },
 };
 const WD = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
@@ -198,6 +198,9 @@ function condHtml(c, fixed) {
   if (c.type === 'time') {
     body = `Zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to, true)} Uhr
       <span style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-left:6px" title="Keine Auswahl = jeden Tag">${WD.map((n, i) => `<label class="chip"><input type="checkbox" class="c-day" value="${i}" ${(c.days || []).includes(i) ? 'checked' : ''} onchange="ruleEdited(this)"><span>${n}</span></label>`).join('')}</span>`;
+  } else if (c.type === 'at') {
+    body = `Um ${tm('c-at', c.time)} Uhr <span class="muted">(einmal pro Tag)</span>
+      <span style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-left:6px" title="Keine Auswahl = jeden Tag">${WD.map((n, i) => `<label class="chip"><input type="checkbox" class="c-day" value="${i}" ${(c.days || []).includes(i) ? 'checked' : ''} onchange="ruleEdited(this)"><span>${n}</span></label>`).join('')}</span>`;
   } else if (c.type === 'price') body = `Strompreis ${cmp('c-op', c.op)} ${num('c-ct', c.ct, 70)} ct/kWh`;
   else if (c.type === 'cheapest') body = `In den ${num('c-hours', c.hours, 60)} günstigsten Stunden des Tages`;
   else if (c.type === 'budget') body = `Tagesziel: ${num('c-min', c.minutes, 70)} Minuten pro Tag, ${fixed ? 'so früh wie möglich' : 'zu den günstigsten Zeiten'}, zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to, true)} Uhr`;
@@ -214,6 +217,7 @@ function collectConds(list) {
       const ts = row.querySelector('.tsel[data-t="' + c + '"]'); return ts ? ts.querySelector('.t-h').value + ':' + (ts.querySelector('.t-h').value === '24' ? '00' : ts.querySelector('.t-m').value) : '';
     };
     if (t === 'time') return { type: t, from: v('c-from'), to: v('c-to'), days: [...row.querySelectorAll('.c-day:checked')].map(x => +x.value) };
+    if (t === 'at') return { type: t, time: v('c-at'), days: [...row.querySelectorAll('.c-day:checked')].map(x => +x.value) };
     if (t === 'price') return { type: t, op: v('c-op'), ct: v('c-ct') };
     if (t === 'cheapest') return { type: t, hours: v('c-hours') };
     if (t === 'budget') return { type: t, minutes: v('c-min'), from: v('c-from'), to: v('c-to') };
@@ -239,9 +243,9 @@ async function ruleDelete(id) {
   try { await api('/api/rules/' + encodeURIComponent(id), 'DELETE'); savedToast('Gelöscht ✓'); } catch (e) { msg('rules-msg', e.message, true); }
   rerenderNow();
 }
-async function ruleNew(sel) {
+async function ruleNew(sel, timer) {
   const dev = sel.value; if (!dev) return;
-  try { await api('/api/rules', 'POST', { device_id: dev, on: [COND_DEFAULT.time] }); savedToast('Regel angelegt ✓'); } catch (e) { msg('rules-msg', e.message, true); }
+  try { await api('/api/rules', 'POST', timer ? { device_id: dev, on: [], off: [COND_DEFAULT.at] } : { device_id: dev, on: [COND_DEFAULT.time] }); savedToast('Regel angelegt ✓'); } catch (e) { msg('rules-msg', e.message, true); }
   sel.value = ''; rerenderNow();
 }
 function statusHtml(r) {
@@ -256,6 +260,9 @@ function renderRules() {
   const nd = $('rule-new-dev');
   nd.innerHTML = `<option value="">+ Neue Regel für …</option>` + sw.map(d => `<option value="${escH(d.id)}">${escH(d.icon)} ${escH(d.name)}</option>`).join('');
   nd.onchange = () => ruleNew(nd);
+  const nt = $('rule-new-timer');
+  nt.innerHTML = `<option value="">+ Ausschalt-Timer für …</option>` + sw.map(d => `<option value="${escH(d.id)}">${escH(d.icon)} ${escH(d.name)}</option>`).join('');
+  nt.onchange = () => ruleNew(nt, true);
   if (focusInside(box)) { box.querySelectorAll('[data-rule]').forEach(el => { const r = A.rules.find(x => x.id === el.dataset.rule), s = el.querySelector('.r-status'); if (r && s) s.innerHTML = statusHtml(r); }); return; }
   const addSel = (opts, which) => `<select style="width:auto;margin-top:4px" onchange="ruleAddCond(this, '${which}')"><option value="">+ Bedingung hinzufügen …</option>${opts.filter(([t]) => !(fixed && (t === 'price' || t === 'cheapest'))).map(([t, l]) => `<option value="${t}">${l}</option>`).join('')}</select>`;
   box.innerHTML = A.rules.length ? A.rules.map(r => {
@@ -269,7 +276,8 @@ function renderRules() {
         </div>
       </div>
       <div style="margin-top:10px"><b style="color:var(--cheap)">Einschalten, wenn alles stimmt:</b>
-        <div class="list-on">${r.on.map(c => condHtml(c, fixed)).join('')}</div>${addSel(ADD_ON, 'on')}</div>
+        <div class="list-on">${r.on.map(c => condHtml(c, fixed)).join('')}</div>
+        ${r.on.length ? '' : '<div class="muted" style="margin:2px 0 4px">Keine – das Gerät wird nicht automatisch eingeschaltet (du schaltest es selbst ein).</div>'}${addSel(ADD_ON, 'on')}</div>
       <div style="margin-top:12px"><b style="color:var(--exp)">Ausschalten, sobald eines davon zutrifft:</b>
         <div class="list-off">${(r.off || []).map(c => condHtml(c, fixed)).join('')}</div>
         ${(r.off || []).length ? '' : '<div class="muted" style="margin:2px 0 4px">Keine – das Gerät wird ausgeschaltet, sobald die Einschalt-Bedingungen nicht mehr stimmen.</div>'}${addSel(ADD_OFF, 'off')}</div>

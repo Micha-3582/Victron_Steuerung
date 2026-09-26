@@ -5,6 +5,8 @@ Eine Regel gehoert zu EINEM Geraet und hat zwei Teile:
   "Einschalten, wenn"   Bedingungen (UND): Sind alle erfuellt, wird das Geraet eingeschaltet.
   "Ausschalten, wenn"   Bedingungen (ODER, optional): Trifft eine zu, wird es ausgeschaltet.
                         Ohne Ausschalt-Bedingung schaltet das Geraet aus, sobald die Einschalt-Bedingungen nicht mehr stimmen.
+Eine Regel ohne Einschalt-Bedingung ist ein reiner Ausschalt-Timer: sie schaltet das Geraet aus, wenn eine Ausschalt-Bedingung zutrifft
+(auch wenn es von Hand eingeschaltet wurde) und schaltet nie von selbst ein.
 Nach einem Ausschalten durch eine Ausschalt-Bedingung ist die Regel gesperrt, bis ihre Einschalt-Bedingungen einmal nicht mehr galten
 (sonst wuerde sie sofort wieder einschalten). Mehrere Regeln pro Geraet sind moeglich (eine reicht zum Einschalten).
 
@@ -14,6 +16,7 @@ Bedingungen:
   cheapest      In den N guenstigsten Stunden des Tages
   budget        Tagesziel: X Minuten pro Tag, zu den guenstigsten Zeiten (nur bei "Einschalten"; beim Erreichen schaltet die Regel aus)
   soc           Akku ueber/unter X %
+  at            Um HH:MM Uhr, einmal pro Tag (nur bei "Ausschalten"; loest innerhalb von 30 Min nach der Uhrzeit aus)
   sun_tomorrow  Sonne morgen (VRM-Prognose) ueber/unter X kWh
 
 Die PV-Ueberschuss-Automatik ist ein eigener Baustein (surplus.py): Geraete mit Flag "auto" (Reihenfolge = Prioritaet) bekommen ueberschuessigen Strom.
@@ -37,7 +40,7 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 RULES_PATH = os.path.join(_DIR, "rules.json")
 STATE_PATH = os.path.join(_DIR, "rules_state.json")
 
-TYPES = ("time", "price", "cheapest", "budget", "soc", "sun_tomorrow")
+TYPES = ("time", "price", "cheapest", "budget", "soc", "sun_tomorrow", "at")
 WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 VERSION = 2
 
@@ -130,10 +133,13 @@ def _num(v, lo, hi, what):
     return x
 
 
-def normalize_condition(c: dict, allow_budget: bool = True) -> dict:
+def normalize_condition(c: dict, allow_budget: bool = True, allow_at: bool = False) -> dict:
     t = c.get("type")
-    if t not in TYPES or (t == "budget" and not allow_budget):
+    if t not in TYPES or (t == "budget" and not allow_budget) or (t == "at" and not allow_at):
         raise RuleError("Unbekannte Bedingung")
+    if t == "at":
+        days = sorted({int(x) for x in (c.get("days") or []) if str(x).isdigit() and 0 <= int(x) <= 6})
+        return {"type": t, "time": _hhmm(c.get("time", "23:30"), "Uhrzeit"), "days": days if len(days) < 7 else []}
     if t == "time":
         days = sorted({int(x) for x in (c.get("days") or []) if str(x).isdigit() and 0 <= int(x) <= 6})
         return {"type": t, "from": _hhmm(c.get("from", "00:00"), "Von"), "to": _hhmm(c.get("to", "24:00"), "Bis"), "days": days if len(days) < 7 else []}
@@ -154,9 +160,9 @@ def normalize_condition(c: dict, allow_budget: bool = True) -> dict:
 
 def normalize_rule(body: dict, rule_id: str | None = None) -> dict:
     on = [normalize_condition(c) for c in (body.get("on") if body.get("on") is not None else body.get("conditions") or [])]
-    off = [normalize_condition(c, allow_budget=False) for c in (body.get("off") or [])]
-    if not on:
-        raise RuleError("Mindestens eine Einschalt-Bedingung angeben")
+    off = [normalize_condition(c, allow_budget=False, allow_at=True) for c in (body.get("off") or [])]
+    if not on and not off:
+        raise RuleError("Mindestens eine Bedingung angeben")
     if not body.get("device_id"):
         raise RuleError("Gerät wählen")
     name = str(body.get("name") or "").strip()[:60]
@@ -227,12 +233,18 @@ def _cheapest_slots(prices: list, lo: int, hi: int, n: int, first: int) -> list[
 
 
 BUDGET_DONE = " – Tagesziel erreicht"
+AT_GRACE_MIN = 30          # "Um HH:MM" loest bis zu 30 Minuten nach der Uhrzeit aus (App-Neustart, kurze Aussetzer)
 
 
-def eval_condition(c: dict, ctx: dict, ran_min: float = 0.0) -> tuple[bool | None, str]:
+def eval_condition(c: dict, ctx: dict, ran_min: float = 0.0, fired_today: bool = False) -> tuple[bool | None, str]:
     """(erfuellt?, Klartext). None = fehlende Daten (zaehlt als nicht erfuellt)."""
     now = ctx["now"]
     t = c["type"]
+    if t == "at":
+        days = c.get("days") or []
+        since = now.hour * 60 + now.minute - _minutes(c["time"])
+        txt = f"um {c['time']} Uhr" + (" (" + ", ".join(WEEKDAYS[i] for i in days) + ")" if days else "")
+        return (0 <= since < AT_GRACE_MIN and not fired_today and (not days or now.weekday() in days)), txt
     if t == "time":
         days = c.get("days") or []
         txt = f"{c['from']}–{c['to']} Uhr" + (" (" + ", ".join(WEEKDAYS[i] for i in days) + ")" if days else "")
@@ -278,6 +290,7 @@ class RuleEngine:
         self.ran: dict[str, dict] = {}                   # regel -> {"day": iso, "min": Minuten (Tagesziel)}
         self.blocked: set[str] = set()                   # Regeln, die nach einem Ausschalten erst neu 'scharf' werden muessen
         self.block_reason: dict[str, str] = {}           # regel -> 'manual' (von Hand ausgeschaltet) | 'off' (Ausschalt-Bedingung)
+        self.fired: dict[str, str] = {}                  # regel -> Tag, an dem ein 'Um HH:MM'-Ausloeser schon gefeuert hat
         self._prev_on: dict[str, bool] = {}              # geraet -> Zustand beim letzten Schritt (Erkennung von Handschaltungen am Geraet)
         self._last_change: dict[str, datetime] = {}
         self._hold_until: dict[str, datetime] = {}
@@ -299,13 +312,14 @@ class RuleEngine:
                 self.ran = {k: v for k, v in (d.get("ran") or {}).items() if isinstance(v, dict)}
                 self.block_reason = {k: v for k, v in (d.get("blocked") or {}).items() if isinstance(v, str)}
                 self.blocked = set(self.block_reason)
+                self.fired = {k: v for k, v in (d.get("fired") or {}).items() if isinstance(v, str)}
         except Exception:                                # noqa: BLE001
             pass
 
     def _save_state(self):
         try:
             _store()._dump_json(STATE_PATH, {"owner": self.owner, "owner_rule": self.owner_rule, "ran": self.ran,
-                                             "blocked": {r: self.block_reason.get(r, "off") for r in self.blocked}}, indent=None)
+                                             "blocked": {r: self.block_reason.get(r, "off") for r in self.blocked}, "fired": self.fired}, indent=None)
         except Exception:                                # noqa: BLE001
             pass
 
@@ -386,6 +400,7 @@ class RuleEngine:
         status: dict[str, dict] = {}
         info: dict[str, dict] = {}                       # regel -> Auswertung
         wants: dict[str, tuple[str, str]] = {}           # geraet -> (regel-id, Begruendung): soll jetzt eingeschaltet werden
+        pure_off_acts: list[tuple] = []
         rule_ids = {r["id"] for r in rules}
         for gone in self.blocked - rule_ids:
             self.blocked.discard(gone)
@@ -413,13 +428,23 @@ class RuleEngine:
             ran = self.ran.get(r["id"], {})
             ran_min = float(ran.get("min", 0.0)) if ran.get("day") == today else 0.0
             on_res = [(c, *eval_condition(c, ctx, ran_min)) for c in r["on"]]
-            off_res = [(c, *eval_condition(c, ctx)) for c in r.get("off", [])]
-            base_on = all(ok for _, ok, _ in on_res)
+            off_res = [(c, *eval_condition(c, ctx, 0.0, self.fired.get(r["id"]) == today)) for c in r.get("off", [])]
+            if any(c["type"] == "at" and ok for c, ok, _ in off_res):
+                self.fired[r["id"]] = today                     # einmal pro Tag
+            pure_off = not r["on"]                              # reiner Ausschalt-Timer
+            base_on = bool(r["on"]) and all(ok for _, ok, _ in on_res)
             off_hit = [txt for _, ok, txt in off_res if ok]
             budget_done = any(c["type"] == "budget" and txt.endswith(BUDGET_DONE) for c, _, txt in on_res)
             missing = [txt for _, ok, txt in on_res if ok is None]
             conds = [{"ok": ok, "text": txt} for _, ok, txt in on_res]
             info[r["id"]] = {"base_on": base_on, "off_hit": off_hit, "budget_done": budget_done, "has_off": bool(off_res)}
+            if pure_off:                                        # schaltet nie ein; schaltet jedes laufende Geraet aus, wenn eine Ausschalt-Bedingung zutrifft
+                dvc = by_dev.get(r["device_id"])
+                if dvc and dvc.get("switchable", True) and dvc.get("online") and dvc.get("on") and off_hit and hold.get(dvc["id"], now) <= now:
+                    pure_off_acts.append(("off", dvc, "Ausschalt-Regel: " + ", ".join(off_hit), "rule", r["id"]))
+                status[r["id"]] = {"state": "off", "text": ("schaltet aus: " + ", ".join(off_hit)) if off_hit else "schaltet nur aus (nie automatisch ein) – wartet auf: " + ", ".join(t for _, _, t in off_res),
+                                   "conds": [{"ok": ok, "text": txt} for _, ok, txt in off_res]}
+                continue
             if not base_on:
                 self.blocked.discard(r["id"])            # Einschalt-Bedingungen galten nicht mehr -> Regel wieder scharf
                 self.block_reason.pop(r["id"], None)
@@ -453,7 +478,7 @@ class RuleEngine:
                 why = ("keine Daten für: " + ", ".join(missing)) if missing else "nicht erfüllt: " + ", ".join(x["text"] for x in conds if x["ok"] is False)
                 status[r["id"]] = {"state": "off", "text": why, "conds": conds}
 
-        actions: list[tuple] = []
+        actions: list[tuple] = list(pure_off_acts)
         # ---- 1. Einschalten
         for dev_id, (rid, name) in wants.items():
             d = by_dev[dev_id]
