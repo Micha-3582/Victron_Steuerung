@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Automatik-Logbuch · {{ app_display_name }}{% endblock %}
+{% block content %}
+
+<div class="card" id="surplus">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <h2 style="margin:0">Logbuch – Überschuss-Automatik</h2>
+    <select id="days-surplus" class="ghost" style="width:auto"><option value="7">7 Tage</option><option value="30" selected>30 Tage</option><option value="">Alles</option></select>
+    <a href="/automation" style="margin-left:auto;color:var(--accent)">→ zur Überschuss-Automatik</a>
+  </div>
+  <div class="muted" style="margin:6px 0 10px">Jede Schalt-Aktion der Überschuss-Automatik – auch die des Trockenlaufs (dort steht „würde …“), neueste zuerst.</div>
+  <div id="sum-surplus" class="muted" style="margin-bottom:8px"></div>
+  <div class="table-scroll"><table id="tbl-surplus"></table></div>
+</div>
+
+<div class="card" id="rules">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <h2 style="margin:0">Logbuch – Regeln</h2>
+    <select id="days-rules" class="ghost" style="width:auto"><option value="7">7 Tage</option><option value="30" selected>30 Tage</option><option value="">Alles</option></select>
+    <a href="/rules" style="margin-left:auto;color:var(--accent)">→ zu den Regeln</a>
+  </div>
+  <div class="muted" style="margin:6px 0 10px">Jede Schalt-Aktion der Regeln – auch die des Trockenlaufs (dort steht „würde …“), neueste zuerst.</div>
+  <div id="sum-rules" class="muted" style="margin-bottom:8px"></div>
+  <div class="table-scroll"><table id="tbl-rules"></table></div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = id => document.getElementById(id);
+const escH = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = ts => `${ts.slice(8, 10)}.${ts.slice(5, 7)}. ${ts.slice(11, 16)}`;
+const BADGE = { on: ['an', 'var(--cheap)'], off: ['aus', 'var(--exp)'], fail: ['Fehler', '#e5544a'] };
+async function load(module) {
+  const days = $('days-' + module).value;
+  let d;
+  try { d = await (await fetch(`/api/automation/log?module=${module}&limit=500` + (days ? '&days=' + days : ''))).json(); }
+  catch (e) { $('tbl-' + module).innerHTML = '<tr><td class="muted">Fehler beim Laden.</td></tr>'; return; }
+  const rows = d.entries || [];
+  const real = rows.filter(r => !r.dry).length, fail = rows.filter(r => r.action === 'fail').length;
+  $('sum-' + module).textContent = rows.length ? `${rows.length} Einträge · davon ${real} echt geschaltet, ${rows.length - real} im Trockenlauf${fail ? ` · ${fail} Fehler` : ''}` : '';
+  $('tbl-' + module).innerHTML = `<tr class="thead"><td>Zeit</td><td>Gerät</td><td>Aktion</td><td>Meldung</td></tr>` + (rows.length ? rows.map(r => {
+    const [t, c] = BADGE[r.action] || [r.action || '–', 'var(--muted)'];
+    return `<tr><td style="white-space:nowrap">${fmt(r.ts)}</td><td>${escH(r.dev || '–')}</td><td><b style="color:${c}">${t}</b>${r.dry ? ' <span class="muted">🧪</span>' : ''}</td><td>${escH(r.text)}</td></tr>`;
+  }).join('') : '<tr><td colspan="4" class="muted">Keine Einträge.</td></tr>');
+}
+['surplus', 'rules'].forEach(m => { $('days-' + m).addEventListener('change', () => load(m)); load(m); });
+setInterval(() => ['surplus', 'rules'].forEach(load), 30000);
+if (location.hash) { const el = document.getElementById(location.hash.slice(1)); if (el) setTimeout(() => el.scrollIntoView(), 300); }
+</script>
+{% endblock %}

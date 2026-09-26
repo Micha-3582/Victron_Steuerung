@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+{% block title %}Regeln · {{ app_display_name }}{% endblock %}
+{% block content %}
+<style>
+  .card h2 { display: flex; align-items: center; gap: 8px; }
+  .card h2 svg.h2i { width: 16px; height: 16px; flex: 0 0 auto; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+</style>
+
+<div class="card" id="rules-card">
+  <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Regeln</h2>
+  <div class="muted" style="margin-bottom:12px">Sag der Steuerung in einfachen Sätzen, wann ein Gerät ein- und ausgeschaltet werden soll – zum Beispiel
+    „Heizung einschalten, wenn der Strom unter 25 ct kostet und der Akku über 50 % hat; ausschalten, sobald der Akku unter 30 % fällt“.
+    Ohne eigene Ausschalt-Bedingung schaltet das Gerät aus, sobald die Einschalt-Bedingungen nicht mehr stimmen. Ein <b>Ausschalt-Timer</b> (ohne Einschalt-Bedingung)
+    schaltet ein Gerät nur aus, zum Beispiel jeden Abend um 23:30, und nie von selbst ein. Läuft ein Gerät schon, während die Einschalt-Bedingungen stimmen, übernimmt die Regel es
+    und schaltet es später auch wieder aus (wie ein Timer). Schaltest du ein Gerät von Hand aus, bleibt es aus, bis die Regel das nächste Mal neu beginnt.
+    Die Geräte richtest du unter <a href="/admin#geraete" style="color:var(--accent);font-weight:600">Einstellungen → Geräte</a> ein.
+    <b>Änderungen werden erst mit „Speichern“ (Leiste unten) übernommen.</b></div>
+  <div style="display:flex;align-items:center;gap:14px">
+    <label class="switch" style="margin:0"><input type="checkbox" id="rules_enabled"><span class="slider"></span></label>
+    <div><b>Regeln aktiv</b><div class="muted">Hauptschalter für alle Regeln auf dieser Seite.</div></div>
+  </div>
+  <div style="display:flex;align-items:center;gap:14px;margin-top:10px">
+    <label class="switch" style="margin:0"><input type="checkbox" id="rules_dry"><span class="slider"></span></label>
+    <div><b>Trockenlauf</b><div class="muted">Nur protokollieren (und melden), was geschaltet würde – nichts wird wirklich geschaltet.</div></div>
+  </div>
+  <div style="margin-top:12px"><b>Letzte Aktionen</b> <a href="/automation-log#rules" style="margin-left:8px;color:var(--accent)">📒 Logbuch öffnen</a>
+    <div id="rules-events" class="muted" style="margin-top:4px">–</div></div>
+</div>
+
+<div class="card">
+  <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Deine Regeln</h2>
+  <div id="rules-list" style="display:flex;flex-direction:column;gap:12px"></div>
+  <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <select id="rule-new-dev" style="width:auto;min-width:220px"></select>
+    <select id="rule-new-timer" style="width:auto;min-width:220px" title="Schaltet ein Gerät zu einer Uhrzeit aus, das du selbst eingeschaltet hast"></select>
+  </div>
+  <div class="muted" id="rules-msg" style="margin-top:8px"></div>
+  <details style="margin-top:14px">
+    <summary>Einstellungen für Regeln (Pause nach Handschaltung, Sicherheits-Timer)</summary>
+    <div id="rules-settings" class="grid2" style="margin-top:10px"></div>
+    <div style="margin-top:10px"><button id="rules-settings-reset" class="ghost" type="button">Alle auf Standard</button></div>
+  </details>
+</div>
+
+<div id="savebar" style="display:none;position:fixed;left:0;right:0;bottom:0;z-index:900;background:var(--card);border-top:1px solid var(--border);padding:10px 16px;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;box-shadow:0 -6px 20px rgba(0,0,0,.35)">
+  <span id="savebar-msg">● Ungespeicherte Änderungen – die Steuerung nutzt noch die bisherigen Regeln</span>
+  <button class="ghost" id="btn-discard" type="button">Verwerfen</button><button id="btn-save" type="button">Speichern</button>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = id => document.getElementById(id);
+const escH = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function api(url, method, body) {
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || (r.status >= 500 ? `Der Server antwortet nicht richtig (HTTP ${r.status}) – wurde die App gerade neu gestartet?` : 'Fehler ' + r.status));
+  return j;
+}
+let toastTimer = null;
+function savedToast(text = 'Gespeichert ✓') {
+  let el = $('save-toast');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'save-toast';
+    el.style.cssText = 'position:fixed;left:50%;bottom:80px;transform:translateX(-50%);z-index:1100;background:var(--green);color:#0b1f14;font-weight:600;padding:9px 18px;border-radius:999px;box-shadow:0 6px 22px rgba(0,0,0,.45);transition:opacity .3s;pointer-events:none';
+    document.body.appendChild(el);
+  }
+  el.textContent = text; el.style.opacity = '1';
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 1800);
+}
+function uiConfirm(title, message, okText) {
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px';
+    ov.innerHTML = `<div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;width:100%;max-width:400px;box-shadow:0 12px 40px rgba(0,0,0,.5)">
+      <h3 style="margin:0 0 10px;font-size:17px"></h3><div class="muted dlg-msg"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px"><button class="ghost dlg-no">Abbrechen</button><button class="dlg-ok"></button></div></div>`;
+    ov.querySelector('h3').textContent = title; ov.querySelector('.dlg-msg').textContent = message; ov.querySelector('.dlg-ok').textContent = okText || 'OK';
+    const close = v => { document.removeEventListener('keydown', onKey); ov.remove(); resolve(v); };
+    const onKey = e => { if (e.key === 'Escape') close(false); else if (e.key === 'Enter') close(true); };
+    ov.querySelector('.dlg-ok').onclick = () => close(true); ov.querySelector('.dlg-no').onclick = () => close(false);
+    ov.addEventListener('mousedown', e => { if (e.target === ov) close(false); });
+    document.addEventListener('keydown', onKey); document.body.appendChild(ov); ov.querySelector('.dlg-ok').focus();
+  });
+}
+
+/* Entwurf: Alle Aenderungen bleiben lokal, bis "Speichern" gedrueckt wird. S = Serverstand, R/CFG = Entwurf. */
+let S = { devs: [], A: { rules: [], status: {}, tariff_mode: 'tibber', events: [], settings: {}, defaults: {}, bounds: {} } };
+let R = [], CFG = { enabled: false, dry: true, settings: {} };
+let dirty = false, newId = 0;
+const clone = o => JSON.parse(JSON.stringify(o));
+const dev = id => S.devs.find(d => d.id === id);
+function resetDraft() { R = clone(S.A.rules || []); CFG = { enabled: !!S.A.enabled, dry: !!S.A.dry_run, settings: { ...S.A.settings } }; setDirty(false); }
+function setDirty(v) {
+  dirty = v; $('savebar').style.display = v ? 'flex' : 'none'; document.body.style.paddingBottom = v ? '76px' : '';
+  if (!v) $('savebar-msg').textContent = '● Ungespeicherte Änderungen – die Steuerung nutzt noch die bisherigen Regeln';
+}
+const touch = () => setDirty(true);
+window.addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+async function saveAll() {
+  const btn = $('btn-save'); btn.disabled = true;
+  const cfg = { rules_enabled: CFG.enabled, rules_dry_run: CFG.dry };
+  for (const [k, v] of Object.entries(CFG.settings)) cfg['rules_' + k] = v;
+  const body = { config: cfg, rules: R.map(r => ({ id: String(r.id).startsWith('new-') ? undefined : r.id, name: r.name || '', device_id: r.device_id, enabled: r.enabled !== false, on: r.on, off: r.off, min_on_min: r.min_on_min, min_off_min: r.min_off_min })) };
+  try { await api('/api/automation', 'POST', body); savedToast('Gespeichert ✓'); await loadServer(); resetDraft(); renderAll(); }
+  catch (e) { $('savebar-msg').textContent = '⚠ ' + e.message; $('savebar-msg').style.color = '#e5544a'; setTimeout(() => { $('savebar-msg').style.color = ''; }, 8000); }
+  btn.disabled = false;
+}
+$('btn-save').addEventListener('click', saveAll);
+$('btn-discard').addEventListener('click', async () => {
+  if (!await uiConfirm('Änderungen verwerfen?', 'Alle noch nicht gespeicherten Änderungen dieser Seite gehen verloren.', 'Verwerfen')) return;
+  resetDraft(); renderAll();
+});
+$('rules_enabled').addEventListener('change', () => { CFG.enabled = $('rules_enabled').checked; touch(); });
+$('rules_dry').addEventListener('change', () => { CFG.dry = $('rules_dry').checked; touch(); });
+
+const SET_FIELDS = [
+  { k: 'manual_hold_min', label: 'Pause nach Handschaltung', unit: 'min', hint: 'So lange lässt eine Regel ein Gerät in Ruhe, das du in der App von Hand geschaltet hast.' },
+  { k: 'failsafe_min', label: 'Sicherheits-Timer (Shelly)', unit: 'min', hint: 'Eingebauter Rückschalt-Timer im Shelly: stürzt die App ab, geht das Gerät nach dieser Zeit von selbst aus. 0 = aus (Tuya-Geräte nicht unterstützt).' },
+];
+function renderSettings() {
+  const A = S.A, box = $('rules-settings');
+  box.innerHTML = SET_FIELDS.map(f => { const [lo, hi] = A.bounds[f.k];
+    return `<div><label>${f.label} (${f.unit})</label><input type="number" min="${lo}" max="${hi}" step="any" data-k="${f.k}" value="${escH(CFG.settings[f.k])}" placeholder="${A.defaults[f.k]}">
+      <div class="muted">${f.hint} Standard: ${A.defaults[f.k]}</div></div>`; }).join('');
+  box.oninput = e => { const inp = e.target.closest('input[data-k]'); if (inp) { CFG.settings[inp.dataset.k] = inp.value === '' ? A.defaults[inp.dataset.k] : Number(inp.value); touch(); } };
+  $('rules-settings-reset').onclick = () => { CFG.settings = { ...A.defaults }; touch(); renderSettings(); };
+}
+
+const ADD_ON = [['time', 'Uhrzeit / Wochentage'], ['price', 'Strompreis unter/über …'], ['cheapest', 'In den günstigsten Stunden'], ['budget', 'Tagesziel: Laufzeit pro Tag'], ['soc', 'Akkustand'], ['sun_tomorrow', 'Sonne morgen (Prognose)']];
+const ADD_OFF = [['at', 'Um eine Uhrzeit (einmal pro Tag)'], ...ADD_ON.filter(([t]) => t !== 'budget')];
+const COND_DEFAULT = {
+  at: { type: 'at', time: '23:30', days: [] }, time: { type: 'time', from: '09:00', to: '16:00', days: [] }, price: { type: 'price', op: 'below', ct: 25 }, cheapest: { type: 'cheapest', hours: 3 },
+  budget: { type: 'budget', minutes: 120, from: '06:00', to: '22:00' }, soc: { type: 'soc', op: 'above', pct: 50 }, sun_tomorrow: { type: 'sun_tomorrow', op: 'above', kwh: 15 },
+};
+const WD = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+function condHtml(c, fixed) {
+  const sel = (cls, val, opts) => `<select class="${cls}" style="width:auto" onchange="ruleEdited(this)">${opts.map(([v, t]) => `<option value="${v}" ${val === v ? 'selected' : ''}>${t}</option>`).join('')}</select>`;
+  const num = (cls, val, w) => `<input class="${cls}" type="number" step="any" value="${escH(val)}" style="width:${w}px" oninput="ruleEdited(this)">`;
+  const tm = (cls, val, end) => {
+    const [h, m] = String(val).split(':').map(Number), pad2 = n => String(n).padStart(2, '0');
+    const hours = Array.from({ length: end ? 25 : 24 }, (_, i) => i), mins = [...new Set([0, 15, 30, 45, m])].sort((a, b) => a - b);
+    return `<span class="tsel" data-t="${cls}" style="display:inline-flex;align-items:center;gap:3px"><select class="t-h" style="width:auto" onchange="ruleEdited(this)">${hours.map(i => `<option value="${pad2(i)}" ${i === h ? 'selected' : ''}>${pad2(i)}</option>`).join('')}</select>:`
+      + `<select class="t-m" style="width:auto" onchange="ruleEdited(this)">${mins.map(i => `<option value="${pad2(i)}" ${i === m ? 'selected' : ''}>${pad2(i)}</option>`).join('')}</select></span>`;
+  };
+  const cmp = (cls, v) => sel(cls, v, [['below', 'unter'], ['above', 'über']]);
+  const chips = days => `<span style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-left:6px" title="Keine Auswahl = jeden Tag">${WD.map((n, i) => `<label class="chip"><input type="checkbox" class="c-day" value="${i}" ${(days || []).includes(i) ? 'checked' : ''} onchange="ruleEdited(this)"><span>${n}</span></label>`).join('')}</span>`;
+  let body = '';
+  if (c.type === 'time') body = `Zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to, true)} Uhr ${chips(c.days)}`;
+  else if (c.type === 'at') body = `Um ${tm('c-at', c.time)} Uhr <span class="muted">(einmal pro Tag)</span> ${chips(c.days)}`;
+  else if (c.type === 'price') body = `Strompreis ${cmp('c-op', c.op)} ${num('c-ct', c.ct, 70)} ct/kWh`;
+  else if (c.type === 'cheapest') body = `In den ${num('c-hours', c.hours, 60)} günstigsten Stunden des Tages`;
+  else if (c.type === 'budget') body = `Tagesziel: ${num('c-min', c.minutes, 70)} Minuten pro Tag, ${fixed ? 'so früh wie möglich' : 'zu den günstigsten Zeiten'}, zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to, true)} Uhr`;
+  else if (c.type === 'soc') body = `Akku ${cmp('c-op', c.op)} ${num('c-pct', c.pct, 70)} %`;
+  else if (c.type === 'sun_tomorrow') body = `Sonne morgen ${cmp('c-op', c.op)} ${num('c-kwh', c.kwh, 70)} kWh`;
+  return `<div class="cond" data-type="${c.type}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border)">
+    <span style="flex:1;min-width:200px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${body}</span>
+    <button class="ghost" style="padding:2px 9px" title="Bedingung entfernen" onclick="ruleCondDel(this)">✕</button></div>`;
+}
+function collectConds(list) {
+  return [...list.querySelectorAll('.cond')].map(row => {
+    const t = row.dataset.type, v = c => {
+      const e = row.querySelector('.' + c); if (e) return e.value;
+      const ts = row.querySelector('.tsel[data-t="' + c + '"]'); return ts ? ts.querySelector('.t-h').value + ':' + (ts.querySelector('.t-h').value === '24' ? '00' : ts.querySelector('.t-m').value) : '';
+    };
+    const days = () => [...row.querySelectorAll('.c-day:checked')].map(x => +x.value);
+    if (t === 'time') return { type: t, from: v('c-from'), to: v('c-to'), days: days() };
+    if (t === 'at') return { type: t, time: v('c-at'), days: days() };
+    if (t === 'price') return { type: t, op: v('c-op'), ct: v('c-ct') };
+    if (t === 'cheapest') return { type: t, hours: v('c-hours') };
+    if (t === 'budget') return { type: t, minutes: v('c-min'), from: v('c-from'), to: v('c-to') };
+    if (t === 'soc') return { type: t, op: v('c-op'), pct: v('c-pct') };
+    return { type: 'sun_tomorrow', op: v('c-op'), kwh: v('c-kwh') };
+  });
+}
+const ruleOf = el => R.find(r => r.id === el.closest('[data-rule]').dataset.rule);
+function ruleEdited(el) {
+  const box = el.closest('[data-rule]'), r = ruleOf(el);
+  r.device_id = box.querySelector('.r-dev').value; r.enabled = box.querySelector('.r-en').checked;
+  r.on = collectConds(box.querySelector('.list-on')); r.off = collectConds(box.querySelector('.list-off'));
+  r.min_on_min = box.querySelector('.r-minon').value; r.min_off_min = box.querySelector('.r-minoff').value;
+  touch();
+}
+function ruleCondDel(btn) { const box = btn.closest('[data-rule]'); btn.closest('.cond').remove(); ruleEdited(box.querySelector('.r-dev')); renderRules(); }
+function ruleAddCond(sel, which) { const t = sel.value; if (!t) return; const r = ruleOf(sel); r[which] = [...r[which], clone(COND_DEFAULT[t])]; touch(); renderRules(); }
+async function ruleDelete(id) {
+  if (!await uiConfirm('Regel löschen?', 'Die Regel wird entfernt, sobald du „Speichern“ drückst. Das Gerät bleibt in der Liste.', 'Löschen')) return;
+  R = R.filter(r => r.id !== id); touch(); renderRules();
+}
+function ruleNew(sel, timer) {
+  const d = sel.value; if (!d) return;
+  R.push({ id: 'new-' + (++newId), name: '', device_id: d, enabled: true, min_on_min: 5, min_off_min: 5, on: timer ? [] : [clone(COND_DEFAULT.time)], off: timer ? [clone(COND_DEFAULT.at)] : [] });
+  sel.value = ''; touch(); renderRules();
+}
+function statusHtml(r) {
+  if (String(r.id).startsWith('new-')) return '<span class="muted">Noch nicht gespeichert – die Regel wirkt erst nach „Speichern“.</span>';
+  const st = (S.A.status || {})[r.id];
+  if (!st) return '<span class="muted">Noch nicht ausgewertet.</span>';
+  const icon = { on: '🟢', wait: '🟡', off: '⚪', paused: '⏸', disabled: '⚪' }[st.state] || '⚪';
+  return `<span>${icon} ${escH(st.text)}</span> ${dirty ? '<span class="muted">(Stand der gespeicherten Regel)</span>' : ''}`;
+}
+function renderRules() {
+  const box = $('rules-list'), fixed = S.A.tariff_mode === 'fixed';
+  const sw = S.devs.filter(d => d.switchable !== false && !d.auto);          // Geraete der Ueberschuss-Automatik gehoeren dieser (getrennt), nicht den Regeln
+  const nd = $('rule-new-dev'), nt = $('rule-new-timer');
+  const opts = sw.map(d => `<option value="${escH(d.id)}">${escH(d.icon)} ${escH(d.name)}</option>`).join('');
+  nd.innerHTML = `<option value="">+ Neue Regel für …</option>` + opts; nt.innerHTML = `<option value="">+ Ausschalt-Timer für …</option>` + opts;
+  nd.onchange = () => ruleNew(nd); nt.onchange = () => ruleNew(nt, true);
+  const addSel = (list, which) => `<select style="width:auto;margin-top:4px" onchange="ruleAddCond(this, '${which}')"><option value="">+ Bedingung hinzufügen …</option>${list.filter(([t]) => !(fixed && (t === 'price' || t === 'cheapest'))).map(([t, l]) => `<option value="${t}">${l}</option>`).join('')}</select>`;
+  box.innerHTML = R.length ? R.map(r => {
+    const d = dev(r.device_id);
+    return `<div data-rule="${escH(r.id)}" style="border:1px solid var(--border);border-radius:10px;padding:10px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <select class="r-dev" style="width:auto;min-width:180px;font-weight:600" onchange="ruleEdited(this)">${sw.map(x => `<option value="${escH(x.id)}" ${x.id === r.device_id ? 'selected' : ''}>${escH(x.icon)} ${escH(x.name)}</option>`).join('')}${sw.some(x => x.id === r.device_id) ? '' : `<option value="${escH(r.device_id)}" selected>${d ? escH(d.icon + ' ' + d.name) : '(Gerät fehlt)'}</option>`}</select>
+        <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+          <label class="switch" style="margin:0" title="Regel an/aus"><input type="checkbox" class="r-en" ${r.enabled !== false ? 'checked' : ''} onchange="ruleEdited(this)"><span class="slider"></span></label>
+          <button class="ghost" onclick="ruleDelete('${escH(r.id)}')" title="Regel löschen">✕</button>
+        </div>
+      </div>
+      <div style="margin-top:10px"><b style="color:var(--cheap)">Einschalten, wenn alles stimmt:</b>
+        <div class="list-on">${r.on.map(c => condHtml(c, fixed)).join('')}</div>
+        ${r.on.length ? '' : '<div class="muted" style="margin:2px 0 4px">Keine – das Gerät wird nicht automatisch eingeschaltet (du schaltest es selbst ein).</div>'}${addSel(ADD_ON, 'on')}</div>
+      <div style="margin-top:12px"><b style="color:var(--exp)">Ausschalten, sobald eines davon zutrifft:</b>
+        <div class="list-off">${(r.off || []).map(c => condHtml(c, fixed)).join('')}</div>
+        ${(r.off || []).length ? '' : '<div class="muted" style="margin:2px 0 4px">Keine – das Gerät wird ausgeschaltet, sobald die Einschalt-Bedingungen nicht mehr stimmen.</div>'}${addSel(ADD_OFF, 'off')}</div>
+      <div class="r-status" style="margin-top:10px">${statusHtml(r)}</div>
+      <details style="margin-top:8px"><summary class="muted">Einstellungen für diese Regel</summary>
+        <div class="grid2" style="margin-top:8px;grid-template-columns:repeat(2,1fr)">
+          <div><label>Mind. an (min)</label><input class="r-minon" type="number" min="0" value="${escH(r.min_on_min ?? 5)}" oninput="ruleEdited(this)"></div>
+          <div><label>Mind. aus (min)</label><input class="r-minoff" type="number" min="0" value="${escH(r.min_off_min ?? 5)}" oninput="ruleEdited(this)"></div>
+        </div><div class="muted" style="margin-top:6px">Verhindert ständiges Ein-/Ausschalten durch diese Regel.</div></details>
+    </div>`;
+  }).join('') : '<div class="muted">Noch keine Regel. Wähle unten ein Gerät, um eine anzulegen.</div>';
+}
+
+function renderMain() {
+  $('rules_enabled').checked = CFG.enabled; $('rules_dry').checked = CFG.dry;
+  const ev = S.A.events || [];
+  $('rules-events').innerHTML = ev.length ? ev.slice(0, 6).map(e => `${escH(e.ts.slice(5, 16).replace('T', ' '))} · ${escH(e.text)}`).join('<br>') : 'Noch keine.';
+}
+function renderAll() { renderMain(); renderSettings(); renderRules(); }
+async function loadServer() {
+  const devs = await (await fetch('/api/shelly')).json();
+  const A = await (await fetch('/api/rules')).json();
+  S = { devs: Array.isArray(devs) ? devs : [], A };
+}
+async function refresh() {                        // alle 10 s: Status und letzte Aktionen auffrischen, den Entwurf nie anfassen
+  try { await loadServer(); } catch (e) { return; }
+  const ev = S.A.events || [];
+  $('rules-events').innerHTML = ev.length ? ev.slice(0, 6).map(e => `${escH(e.ts.slice(5, 16).replace('T', ' '))} · ${escH(e.text)}`).join('<br>') : 'Noch keine.';
+  document.querySelectorAll('[data-rule]').forEach(el => { const r = R.find(x => x.id === el.dataset.rule), s = el.querySelector('.r-status'); if (r && s) s.innerHTML = statusHtml(r); });
+  if (!dirty) { const a = document.activeElement; if (!(a && ['INPUT', 'SELECT'].includes(a.tagName))) { resetDraft(); renderAll(); } }
+}
+(async () => { await loadServer(); resetDraft(); renderAll(); setInterval(refresh, 10000); })();
+</script>
+{% endblock %}

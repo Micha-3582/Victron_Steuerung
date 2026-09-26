@@ -6,53 +6,40 @@
   .card h2 svg.h2i { width: 16px; height: 16px; flex: 0 0 auto; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; stroke-linejoin: round; }
 </style>
 
-<div class="card" id="auto-main">
-  <h2><svg class="h2i" style="color:var(--timer)" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Automatik</h2>
-  <div class="muted" style="margin-bottom:12px">Hier legst du fest, wann die Steuerung Geräte (Shelly, Tasmota, Tuya) von selbst schaltet – bei PV-Überschuss
-    oder nach eigenen Regeln. Die Geräte selbst richtest du unter <a href="/admin#geraete" style="color:var(--accent);font-weight:600">Einstellungen → Geräte</a> ein.
-    <b>Alle Änderungen auf dieser Seite werden erst mit „Speichern“ (Leiste unten) übernommen</b> – bis dahin arbeitet die Steuerung mit dem bisherigen Stand.</div>
-  <div style="display:flex;align-items:center;gap:14px">
-    <label class="switch" style="margin:0"><input type="checkbox" id="auto_enabled"><span class="slider"></span></label>
-    <div><b>Automatik aktiv</b><div class="muted">Hauptschalter für Überschuss-Automatik und Regeln.</div></div>
-  </div>
-  <div style="display:flex;align-items:center;gap:14px;margin-top:10px">
-    <label class="switch" style="margin:0"><input type="checkbox" id="auto_dry"><span class="slider"></span></label>
-    <div><b>Trockenlauf</b><div class="muted">Nur protokollieren (und melden), was geschaltet würde – nichts wird wirklich geschaltet.</div></div>
-  </div>
-  <div style="margin-top:12px"><b>Letzte Aktionen</b>
-    <div id="auto-events" class="muted" style="margin-top:4px">–</div></div>
-
-  <div id="surplus-card" style="margin-top:18px;border-top:1px solid var(--border);padding-top:16px">
+<div class="card" id="surplus-card">
   <h2><svg class="h2i" style="color:var(--timer)" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg>Überschuss-Automatik</h2>
   <div class="muted" style="margin-bottom:12px">Ist der Akku voll und wird eingespeist, schaltet die Steuerung die Geräte dieser Liste nacheinander zu (oberstes zuerst).
-    Bei Netzbezug oder Batterie-Entladung werden sie in umgekehrter Reihenfolge wieder abgeschaltet. Ein Gerät, das gerade nach einer Regel läuft, lässt die Überschuss-Automatik in Ruhe.</div>
+    Bei Netzbezug oder Batterie-Entladung werden sie in umgekehrter Reihenfolge wieder abgeschaltet.
+    Die Geräte richtest du unter <a href="/admin#geraete" style="color:var(--accent);font-weight:600">Einstellungen → Geräte</a> ein; eigene Schaltregeln (Uhrzeit, Preis, …) findest du unter
+    <a href="/rules" style="color:var(--accent);font-weight:600">Regeln</a> – ein Gerät gehört entweder hierher oder zu einer Regel.
+    <b>Änderungen werden erst mit „Speichern“ (Leiste unten) übernommen.</b></div>
+  <div style="display:flex;align-items:center;gap:14px">
+    <label class="switch" style="margin:0"><input type="checkbox" id="surplus_enabled"><span class="slider"></span></label>
+    <div><b>Überschuss-Automatik aktiv</b></div>
+  </div>
+  <div style="display:flex;align-items:center;gap:14px;margin-top:10px">
+    <label class="switch" style="margin:0"><input type="checkbox" id="surplus_dry"><span class="slider"></span></label>
+    <div><b>Trockenlauf</b><div class="muted">Nur protokollieren (und melden), was geschaltet würde – nichts wird wirklich geschaltet.</div></div>
+  </div>
+  <div style="margin-top:12px"><b>Letzte Aktionen</b> <a href="/automation-log#surplus" style="margin-left:8px;color:var(--accent)">📒 Logbuch öffnen</a>
+    <div id="surplus-events" class="muted" style="margin-top:4px">–</div></div>
+</div>
+
+<div class="card">
+  <h2><svg class="h2i" style="color:var(--timer)" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg>Geräte im Überschuss</h2>
   <div id="surplus-devs" style="display:flex;flex-direction:column;gap:10px"></div>
   <div style="margin-top:10px"><select id="surplus-add" style="width:auto;min-width:240px"></select></div>
+  <div class="muted" id="surplus-msg" style="margin-top:8px"></div>
   <details style="margin-top:14px">
-    <summary>Einstellungen (Akku-Schwelle, Zeiten, Sicherheits-Timer)</summary>
+    <summary>Einstellungen der Überschuss-Automatik (Akku-Schwelle, Zeiten, Pause nach Handschaltung, Sicherheits-Timer)</summary>
     <div class="grid2" style="margin-top:10px">
       <div><label>Akku mindestens (%)</label><input id="surplus_min_soc" type="number" min="50" max="100">
         <div class="muted">Erst ab diesem Ladestand gilt Überschuss als vorhanden (bei Ladelimit 90 % z.B. 88 wählen).</div></div>
     </div>
-    <div class="muted" style="margin:8px 0">Die Standardwerte passen für die meisten Anlagen. Änderungen gelten erst nach „Speichern“.</div>
+    <div class="muted" style="margin:8px 0">Die Standardwerte passen für die meisten Anlagen.</div>
     <div id="surplus-fine" class="grid2"></div>
-    <div style="margin-top:10px"><button id="surplus-fine-reset" class="ghost">Alle auf Standard</button></div>
+    <div style="margin-top:10px"><button id="surplus-fine-reset" class="ghost" type="button">Alle auf Standard</button></div>
   </details>
-  <div class="muted" id="surplus-msg" style="margin-top:8px"></div>
-  </div>
-</div>
-
-<div class="card" id="rules-card">
-  <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Regeln</h2>
-  <div class="muted" style="margin-bottom:12px">Sag der Steuerung in einfachen Sätzen, wann ein Gerät ein- und ausgeschaltet werden soll – zum Beispiel
-    „Heizung einschalten, wenn der Strom unter 25 ct kostet und der Akku über 50 % hat; ausschalten, sobald der Akku unter 30 % fällt“.
-    Ohne eigene Ausschalt-Bedingung schaltet das Gerät aus, sobald die Einschalt-Bedingungen nicht mehr stimmen. Ein <b>Ausschalt-Timer</b> (ohne Einschalt-Bedingung) schaltet ein Gerät nur aus, zum Beispiel jeden Abend um 23:30, und nie von selbst ein. Läuft ein Gerät schon, während die Einschalt-Bedingungen stimmen, übernimmt die Regel es und schaltet es später auch wieder aus (wie ein Timer). Schaltest du ein Gerät von Hand aus, bleibt es aus, bis die Regel das nächste Mal neu beginnt (bei einem Zeitfenster also bis zum nächsten Start). Geräte, die zu keiner Zeit unter eine Regel fallen, bleiben unberührt.</div>
-  <div id="rules-list" style="display:flex;flex-direction:column;gap:12px"></div>
-  <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-    <select id="rule-new-dev" style="width:auto;min-width:220px"></select>
-    <select id="rule-new-timer" style="width:auto;min-width:220px" title="Schaltet ein Gerät zu einer Uhrzeit aus, das du selbst eingeschaltet hast"></select>
-  </div>
-  <div class="muted" id="rules-msg" style="margin-top:8px"></div>
 </div>
 
 <div id="savebar" style="display:none;position:fixed;left:0;right:0;bottom:0;z-index:900;background:var(--card);border-top:1px solid var(--border);padding:10px 16px;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;box-shadow:0 -6px 20px rgba(0,0,0,.35)">
@@ -98,46 +85,32 @@ function uiConfirm(title, message, okText) {
   });
 }
 
-/* ================================================================================================
-   Entwurf: Alle Aenderungen dieser Seite bleiben lokal, bis "Speichern" gedrueckt wird.
-   S = Serverstand (Geraete + Automatik), R/DV/AUTO/CFG = Entwurf.
-   ================================================================================================ */
-let S = { devs: [], A: { rules: [], status: {}, tariff_mode: 'tibber', events: [], settings: {}, defaults: {}, bounds: {} } };
-let R = [], DV = {}, AUTO = [], CFG = { enabled: false, dry: true, min_soc: 95, fine: {} };
-let dirty = false, newId = 0;
-const clone = o => JSON.parse(JSON.stringify(o));
+/* Entwurf: Alle Aenderungen bleiben lokal, bis "Speichern" gedrueckt wird. S = Serverstand, DV/AUTO/CFG = Entwurf. */
+let S = { devs: [], A: { events: [], settings: {}, defaults: {}, bounds: {} }, ruledDevs: [] };
+let DV = {}, AUTO = [], CFG = { enabled: false, dry: true, min_soc: 95, fine: {} };
+let dirty = false;
 const dev = id => S.devs.find(d => d.id === id);
 const statText = d => !d.online ? 'nicht erreichbar' : (d.on ? 'an' : 'aus') + (d.power != null ? ` · ${Math.round(d.power)} W` : '');
-
 function resetDraft() {
   const A = S.A;
-  R = clone(A.rules || []);
   DV = Object.fromEntries(S.devs.map(d => [d.id, { power_w: d.power_w || '', min_on_min: d.min_on_min ?? 5, min_off_min: d.min_off_min ?? 5 }]));
   AUTO = S.devs.filter(d => d.auto).sort((a, b) => (a.prio || 1e6) - (b.prio || 1e6)).map(d => d.id);
   CFG = { enabled: !!A.enabled, dry: !!A.dry_run, min_soc: A.min_soc, fine: { ...A.settings } };
   setDirty(false);
 }
 function setDirty(v) {
-  dirty = v;
-  $('savebar').style.display = v ? 'flex' : 'none';
-  document.body.style.paddingBottom = v ? '76px' : '';
+  dirty = v; $('savebar').style.display = v ? 'flex' : 'none'; document.body.style.paddingBottom = v ? '76px' : '';
   if (!v) $('savebar-msg').textContent = '● Ungespeicherte Änderungen – die Steuerung nutzt noch die bisherigen Einstellungen';
 }
-const touch = () => { setDirty(true); };
+const touch = () => setDirty(true);
 window.addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
-
 async function saveAll() {
   const btn = $('btn-save'); btn.disabled = true;
-  const cfg = { rules_enabled: CFG.enabled, rules_dry_run: CFG.dry, surplus_min_soc: CFG.min_soc };
+  const cfg = { surplus_enabled: CFG.enabled, surplus_dry_run: CFG.dry, surplus_min_soc: CFG.min_soc };
   for (const [k, v] of Object.entries(CFG.fine)) cfg['surplus_' + k] = v;
-  const body = {
-    config: cfg,
-    rules: R.map(r => ({ id: String(r.id).startsWith('new-') ? undefined : r.id, name: r.name || '', device_id: r.device_id, enabled: r.enabled !== false, on: r.on, off: r.off })),
-    devices: S.devs.map(d => ({ id: d.id, auto: AUTO.includes(d.id), ...DV[d.id] })),
-    auto_order: AUTO,
-  };
+  const body = { config: cfg, devices: S.devs.map(d => ({ id: d.id, auto: AUTO.includes(d.id), ...DV[d.id] })), auto_order: AUTO };
   try { await api('/api/automation', 'POST', body); savedToast('Gespeichert ✓'); await loadServer(); resetDraft(); renderAll(); }
-  catch (e) { $('savebar-msg').textContent = '⚠ ' + e.message; $('savebar-msg').style.color = '#e5544a'; setTimeout(() => { $('savebar-msg').style.color = ''; }, 6000); }
+  catch (e) { $('savebar-msg').textContent = '⚠ ' + e.message; $('savebar-msg').style.color = '#e5544a'; setTimeout(() => { $('savebar-msg').style.color = ''; }, 8000); }
   btn.disabled = false;
 }
 $('btn-save').addEventListener('click', saveAll);
@@ -145,26 +118,15 @@ $('btn-discard').addEventListener('click', async () => {
   if (!await uiConfirm('Änderungen verwerfen?', 'Alle noch nicht gespeicherten Änderungen dieser Seite gehen verloren.', 'Verwerfen')) return;
   resetDraft(); renderAll();
 });
+$('surplus_enabled').addEventListener('change', () => { CFG.enabled = $('surplus_enabled').checked; touch(); });
+$('surplus_dry').addEventListener('change', () => { CFG.dry = $('surplus_dry').checked; touch(); });
 
-/* ---------------------------------------------------------------- Hauptschalter */
-$('auto_enabled').addEventListener('change', () => { CFG.enabled = $('auto_enabled').checked; touch(); });
-$('auto_dry').addEventListener('change', () => { CFG.dry = $('auto_dry').checked; touch(); });
-function renderMain() {
-  $('auto_enabled').checked = CFG.enabled; $('auto_dry').checked = CFG.dry;
-  const ev = S.A.events || [];
-  $('auto-events').innerHTML = ev.length ? ev.slice(0, 8).map(e => `${escH(e.ts.slice(11, 16))} · ${escH(e.text)}`).join('<br>') : 'Noch keine.';
-}
-
-/* ---------------------------------------------------------------- Ueberschuss-Automatik */
 function devField(id, field, value) { DV[id][field] = value; touch(); }
-function autoRemove(id) { AUTO = AUTO.filter(x => x !== id); touch(); renderSurplus(); renderRules(); }
-function autoMove(id, dir) {
-  const i = AUTO.indexOf(id), j = i + dir; if (i < 0 || j < 0 || j >= AUTO.length) return;
-  [AUTO[i], AUTO[j]] = [AUTO[j], AUTO[i]]; touch(); renderSurplus();
-}
+function autoRemove(id) { AUTO = AUTO.filter(x => x !== id); touch(); renderSurplus(); }
+function autoMove(id, dir) { const i = AUTO.indexOf(id), j = i + dir; if (i < 0 || j < 0 || j >= AUTO.length) return; [AUTO[i], AUTO[j]] = [AUTO[j], AUTO[i]]; touch(); renderSurplus(); }
 function renderSurplus() {
   const box = $('surplus-devs');
-  const addable = S.devs.filter(d => !AUTO.includes(d.id) && d.switchable !== false);
+  const addable = S.devs.filter(d => !AUTO.includes(d.id) && d.switchable !== false && !S.ruledDevs.includes(d.id));     // Geraete mit Regeln gehoeren den Regeln
   const sel = $('surplus-add');
   sel.innerHTML = `<option value="">+ Gerät zur Überschuss-Automatik hinzufügen …</option>` + addable.map(d => `<option value="${escH(d.id)}">${escH(d.icon)} ${escH(d.name)}</option>`).join('');
   sel.onchange = () => { if (sel.value) { AUTO.push(sel.value); touch(); renderSurplus(); } };
@@ -197,144 +159,33 @@ const SURPLUS_FINE = [
   { k: 'off_import_w', label: 'Netzbezug-Schwelle', unit: 'W', hint: 'Ab diesem Bezug aus dem Netz gilt der Überschuss als weg.' },
   { k: 'off_discharge_w', label: 'Batterie-Entladung-Schwelle', unit: 'W', hint: 'Ab dieser Entladung gilt der Überschuss als weg.' },
   { k: 'soc_hyst', label: 'Akku-Hysterese', unit: '%', hint: 'Abgeschaltet wird erst, wenn der Akku so viel unter „Akku mindestens" fällt.' },
-  { k: 'manual_hold_min', label: 'Pause nach Handschaltung', unit: 'min', hint: 'So lange lässt die Automatik ein von Hand geschaltetes Gerät in Ruhe (gilt auch für Regeln).' },
+  { k: 'manual_hold_min', label: 'Pause nach Handschaltung', unit: 'min', hint: 'So lange lässt die Überschuss-Automatik ein Gerät in Ruhe, das du in der App von Hand geschaltet hast.' },
   { k: 'failsafe_min', label: 'Sicherheits-Timer (Shelly)', unit: 'min', hint: 'Eingebauter Rückschalt-Timer im Shelly: stürzt die App ab, geht das Gerät nach dieser Zeit von selbst aus. 0 = aus (Tuya-Geräte nicht unterstützt).' },
 ];
 function renderFine() {
   const A = S.A, box = $('surplus-fine');
-  box.innerHTML = SURPLUS_FINE.map(f => {
-    const [lo, hi] = A.bounds[f.k];
+  box.innerHTML = SURPLUS_FINE.map(f => { const [lo, hi] = A.bounds[f.k];
     return `<div><label>${f.label} (${f.unit})</label><input type="number" min="${lo}" max="${hi}" step="any" data-k="${f.k}" value="${escH(CFG.fine[f.k])}" placeholder="${A.defaults[f.k]}">
-      <div class="muted">${f.hint} Standard: ${A.defaults[f.k]}</div></div>`;
-  }).join('');
+      <div class="muted">${f.hint} Standard: ${A.defaults[f.k]}</div></div>`; }).join('');
   box.oninput = e => { const inp = e.target.closest('input[data-k]'); if (inp) { CFG.fine[inp.dataset.k] = inp.value === '' ? A.defaults[inp.dataset.k] : Number(inp.value); touch(); } };
   $('surplus-fine-reset').onclick = () => { CFG.fine = { ...A.defaults }; touch(); renderFine(); };
   $('surplus_min_soc').value = CFG.min_soc;
 }
 $('surplus_min_soc').addEventListener('input', () => { const v = parseInt($('surplus_min_soc').value); if (v >= 50 && v <= 100) { CFG.min_soc = v; touch(); } });
 
-/* ---------------------------------------------------------------- Regeln */
-const ADD_ON = [['time', 'Uhrzeit / Wochentage'], ['price', 'Strompreis unter/über …'], ['cheapest', 'In den günstigsten Stunden'], ['budget', 'Tagesziel: Laufzeit pro Tag'], ['soc', 'Akkustand'], ['sun_tomorrow', 'Sonne morgen (Prognose)']];
-const ADD_OFF = [['at', 'Um eine Uhrzeit (einmal pro Tag)'], ...ADD_ON.filter(([t]) => t !== 'budget')];
-const COND_DEFAULT = {
-  at: { type: 'at', time: '23:30', days: [] }, time: { type: 'time', from: '09:00', to: '16:00', days: [] }, price: { type: 'price', op: 'below', ct: 25 }, cheapest: { type: 'cheapest', hours: 3 },
-  budget: { type: 'budget', minutes: 120, from: '06:00', to: '22:00' }, soc: { type: 'soc', op: 'above', pct: 50 }, sun_tomorrow: { type: 'sun_tomorrow', op: 'above', kwh: 15 },
-};
-const WD = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
-function condHtml(c, fixed) {
-  const sel = (cls, val, opts) => `<select class="${cls}" style="width:auto" onchange="ruleEdited(this)">${opts.map(([v, t]) => `<option value="${v}" ${val === v ? 'selected' : ''}>${t}</option>`).join('')}</select>`;
-  const num = (cls, val, w) => `<input class="${cls}" type="number" step="any" value="${escH(val)}" style="width:${w}px" oninput="ruleEdited(this)">`;
-  const tm = (cls, val, end) => {        // Uhrzeit als zwei Auswahlfelder (Stunde : Minute) im App-Stil statt Browser-Zeitwaehler
-    const [h, m] = String(val).split(':').map(Number), pad2 = n => String(n).padStart(2, '0');
-    const hours = Array.from({ length: end ? 25 : 24 }, (_, i) => i), mins = [...new Set([0, 15, 30, 45, m])].sort((a, b) => a - b);
-    return `<span class="tsel" data-t="${cls}" style="display:inline-flex;align-items:center;gap:3px"><select class="t-h" style="width:auto" onchange="ruleEdited(this)">${hours.map(i => `<option value="${pad2(i)}" ${i === h ? 'selected' : ''}>${pad2(i)}</option>`).join('')}</select>:`
-      + `<select class="t-m" style="width:auto" onchange="ruleEdited(this)">${mins.map(i => `<option value="${pad2(i)}" ${i === m ? 'selected' : ''}>${pad2(i)}</option>`).join('')}</select></span>`;
-  };
-  const cmp = (cls, v) => sel(cls, v, [['below', 'unter'], ['above', 'über']]);
-  const chips = days => `<span style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-left:6px" title="Keine Auswahl = jeden Tag">${WD.map((n, i) => `<label class="chip"><input type="checkbox" class="c-day" value="${i}" ${(days || []).includes(i) ? 'checked' : ''} onchange="ruleEdited(this)"><span>${n}</span></label>`).join('')}</span>`;
-  let body = '';
-  if (c.type === 'time') body = `Zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to, true)} Uhr ${chips(c.days)}`;
-  else if (c.type === 'at') body = `Um ${tm('c-at', c.time)} Uhr <span class="muted">(einmal pro Tag)</span> ${chips(c.days)}`;
-  else if (c.type === 'price') body = `Strompreis ${cmp('c-op', c.op)} ${num('c-ct', c.ct, 70)} ct/kWh`;
-  else if (c.type === 'cheapest') body = `In den ${num('c-hours', c.hours, 60)} günstigsten Stunden des Tages`;
-  else if (c.type === 'budget') body = `Tagesziel: ${num('c-min', c.minutes, 70)} Minuten pro Tag, ${fixed ? 'so früh wie möglich' : 'zu den günstigsten Zeiten'}, zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to, true)} Uhr`;
-  else if (c.type === 'soc') body = `Akku ${cmp('c-op', c.op)} ${num('c-pct', c.pct, 70)} %`;
-  else if (c.type === 'sun_tomorrow') body = `Sonne morgen ${cmp('c-op', c.op)} ${num('c-kwh', c.kwh, 70)} kWh`;
-  return `<div class="cond" data-type="${c.type}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border)">
-    <span style="flex:1;min-width:200px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${body}</span>
-    <button class="ghost" style="padding:2px 9px" title="Bedingung entfernen" onclick="ruleCondDel(this)">✕</button></div>`;
-}
-function collectConds(list) {
-  return [...list.querySelectorAll('.cond')].map(row => {
-    const t = row.dataset.type, v = c => {
-      const e = row.querySelector('.' + c); if (e) return e.value;
-      const ts = row.querySelector('.tsel[data-t="' + c + '"]'); return ts ? ts.querySelector('.t-h').value + ':' + (ts.querySelector('.t-h').value === '24' ? '00' : ts.querySelector('.t-m').value) : '';
-    };
-    const days = () => [...row.querySelectorAll('.c-day:checked')].map(x => +x.value);
-    if (t === 'time') return { type: t, from: v('c-from'), to: v('c-to'), days: days() };
-    if (t === 'at') return { type: t, time: v('c-at'), days: days() };
-    if (t === 'price') return { type: t, op: v('c-op'), ct: v('c-ct') };
-    if (t === 'cheapest') return { type: t, hours: v('c-hours') };
-    if (t === 'budget') return { type: t, minutes: v('c-min'), from: v('c-from'), to: v('c-to') };
-    if (t === 'soc') return { type: t, op: v('c-op'), pct: v('c-pct') };
-    return { type: 'sun_tomorrow', op: v('c-op'), kwh: v('c-kwh') };
-  });
-}
-const ruleOf = el => R.find(r => r.id === el.closest('[data-rule]').dataset.rule);
-function ruleEdited(el) {                       // Feld geaendert: nur den Entwurf aktualisieren (kein Speichern, kein Neuzeichnen)
-  const box = el.closest('[data-rule]'), r = ruleOf(el);
-  r.device_id = box.querySelector('.r-dev').value; r.enabled = box.querySelector('.r-en').checked;
-  r.on = collectConds(box.querySelector('.list-on')); r.off = collectConds(box.querySelector('.list-off'));
-  touch();
-}
-function ruleCondDel(btn) { const box = btn.closest('[data-rule]'); btn.closest('.cond').remove(); ruleEdited(box.querySelector('.r-dev')); renderRules(); }
-function ruleAddCond(sel, which) {
-  const t = sel.value; if (!t) return;
-  const r = ruleOf(sel); r[which] = [...r[which], clone(COND_DEFAULT[t])]; touch(); renderRules();
-}
-async function ruleDelete(id) {
-  if (!await uiConfirm('Regel löschen?', 'Die Regel wird entfernt, sobald du „Speichern“ drückst. Das Gerät bleibt in der Liste.', 'Löschen')) return;
-  R = R.filter(r => r.id !== id); touch(); renderRules();
-}
-function ruleNew(sel, timer) {
-  const d = sel.value; if (!d) return;
-  R.push({ id: 'new-' + (++newId), name: '', device_id: d, enabled: true, on: timer ? [] : [clone(COND_DEFAULT.time)], off: timer ? [clone(COND_DEFAULT.at)] : [] });
-  sel.value = ''; touch(); renderRules();
-}
-function statusHtml(r) {
-  if (String(r.id).startsWith('new-')) return '<span class="muted">Noch nicht gespeichert – die Regel wirkt erst nach „Speichern“.</span>';
-  const st = (S.A.status || {})[r.id];
-  if (!st) return '<span class="muted">Noch nicht ausgewertet.</span>';
-  const icon = { on: '🟢', wait: '🟡', off: '⚪', paused: '⏸', disabled: '⚪' }[st.state] || '⚪';
-  return `<span>${icon} ${escH(st.text)}</span> ${dirty ? '<span class="muted">(Stand der gespeicherten Regel)</span>' : ''}`;
-}
-function renderRules() {
-  const box = $('rules-list'), fixed = S.A.tariff_mode === 'fixed';
-  const sw = S.devs.filter(d => d.switchable !== false);
-  const nd = $('rule-new-dev'), nt = $('rule-new-timer');
-  nd.innerHTML = `<option value="">+ Neue Regel für …</option>` + sw.map(d => `<option value="${escH(d.id)}">${escH(d.icon)} ${escH(d.name)}</option>`).join('');
-  nt.innerHTML = `<option value="">+ Ausschalt-Timer für …</option>` + sw.map(d => `<option value="${escH(d.id)}">${escH(d.icon)} ${escH(d.name)}</option>`).join('');
-  nd.onchange = () => ruleNew(nd); nt.onchange = () => ruleNew(nt, true);
-  const addSel = (opts, which) => `<select style="width:auto;margin-top:4px" onchange="ruleAddCond(this, '${which}')"><option value="">+ Bedingung hinzufügen …</option>${opts.filter(([t]) => !(fixed && (t === 'price' || t === 'cheapest'))).map(([t, l]) => `<option value="${t}">${l}</option>`).join('')}</select>`;
-  box.innerHTML = R.length ? R.map(r => {
-    const d = dev(r.device_id), v = DV[r.device_id];
-    return `<div data-rule="${escH(r.id)}" style="border:1px solid var(--border);border-radius:10px;padding:10px">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <select class="r-dev" style="width:auto;min-width:180px;font-weight:600" onchange="ruleEdited(this)">${sw.map(x => `<option value="${escH(x.id)}" ${x.id === r.device_id ? 'selected' : ''}>${escH(x.icon)} ${escH(x.name)}</option>`).join('')}${d ? '' : `<option value="${escH(r.device_id)}" selected>(Gerät fehlt)</option>`}</select>
-        <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
-          <label class="switch" style="margin:0" title="Regel an/aus"><input type="checkbox" class="r-en" ${r.enabled !== false ? 'checked' : ''} onchange="ruleEdited(this)"><span class="slider"></span></label>
-          <button class="ghost" onclick="ruleDelete('${escH(r.id)}')" title="Regel löschen">✕</button>
-        </div>
-      </div>
-      <div style="margin-top:10px"><b style="color:var(--cheap)">Einschalten, wenn alles stimmt:</b>
-        <div class="list-on">${r.on.map(c => condHtml(c, fixed)).join('')}</div>
-        ${r.on.length ? '' : '<div class="muted" style="margin:2px 0 4px">Keine – das Gerät wird nicht automatisch eingeschaltet (du schaltest es selbst ein).</div>'}${addSel(ADD_ON, 'on')}</div>
-      <div style="margin-top:12px"><b style="color:var(--exp)">Ausschalten, sobald eines davon zutrifft:</b>
-        <div class="list-off">${(r.off || []).map(c => condHtml(c, fixed)).join('')}</div>
-        ${(r.off || []).length ? '' : '<div class="muted" style="margin:2px 0 4px">Keine – das Gerät wird ausgeschaltet, sobald die Einschalt-Bedingungen nicht mehr stimmen.</div>'}${addSel(ADD_OFF, 'off')}</div>
-      <div class="r-status" style="margin-top:10px">${statusHtml(r)}</div>
-      ${d && v ? `<details style="margin-top:8px"><summary class="muted">Einstellungen für dieses Gerät</summary>
-        <div class="grid2" style="margin-top:8px;grid-template-columns:repeat(2,1fr)">
-          <div><label>Mind. an (min)</label><input type="number" min="0" value="${escH(v.min_on_min)}" oninput="devField('${escH(d.id)}', 'min_on_min', this.value)"></div>
-          <div><label>Mind. aus (min)</label><input type="number" min="0" value="${escH(v.min_off_min)}" oninput="devField('${escH(d.id)}', 'min_off_min', this.value)"></div>
-        </div><div class="muted" style="margin-top:6px">Verhindert ständiges Ein-/Ausschalten. Gilt auch für die Überschuss-Automatik.</div></details>` : ''}
-    </div>`;
-  }).join('') : '<div class="muted">Noch keine Regel. Wähle unten ein Gerät, um eine anzulegen.</div>';
-}
-
-/* ---------------------------------------------------------------- Laden */
-function renderAll() { renderMain(); renderFine(); renderSurplus(); renderRules(); }
+function eventsHtml() { const ev = S.A.events || []; return ev.length ? ev.slice(0, 6).map(e => `${escH(e.ts.slice(5, 16).replace('T', ' '))} · ${escH(e.text)}`).join('<br>') : 'Noch keine.'; }
+function renderMain() { $('surplus_enabled').checked = CFG.enabled; $('surplus_dry').checked = CFG.dry; $('surplus-events').innerHTML = eventsHtml(); }
+function renderAll() { renderMain(); renderFine(); renderSurplus(); }
 async function loadServer() {
   const devs = await (await fetch('/api/shelly')).json();
   const A = await (await fetch('/api/shelly/auto')).json();
-  S = { devs: Array.isArray(devs) ? devs : [], A };
+  const R = await (await fetch('/api/rules')).json();
+  S = { devs: Array.isArray(devs) ? devs : [], A, ruledDevs: (R.rules || []).map(r => r.device_id) };
 }
-async function refresh() {                        // alle 10 s: Live-Zustand und Status auffrischen, den Entwurf nie anfassen
+async function refresh() {                        // alle 10 s: Live-Zustand und letzte Aktionen auffrischen, den Entwurf nie anfassen
   try { await loadServer(); } catch (e) { return; }
-  const ev = S.A.events || [];
-  $('auto-events').innerHTML = ev.length ? ev.slice(0, 8).map(e => `${escH(e.ts.slice(11, 16))} · ${escH(e.text)}`).join('<br>') : 'Noch keine.';
+  $('surplus-events').innerHTML = eventsHtml();
   document.querySelectorAll('[data-dev]').forEach(el => { const d = dev(el.dataset.dev), s = el.querySelector('.dev-stat'); if (d && s) s.textContent = statText(d); });
-  document.querySelectorAll('[data-rule]').forEach(el => { const r = R.find(x => x.id === el.dataset.rule), s = el.querySelector('.r-status'); if (r && s) s.innerHTML = statusHtml(r); });
   if (!dirty) { const a = document.activeElement; if (!(a && ['INPUT', 'SELECT'].includes(a.tagName))) { resetDraft(); renderAll(); } }
 }
 (async () => { await loadServer(); resetDraft(); renderAll(); setInterval(refresh, 10000); })();

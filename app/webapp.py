@@ -28,6 +28,7 @@ import store
 import surplus
 import tuya
 import planner
+import autolog
 import notify
 import opslog
 import price_cache
@@ -48,7 +49,7 @@ logging.basicConfig(level=logging.INFO,
                     datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger("webapp")
 surplus_ctrl = surplus.SurplusController()
-rule_engine = rules.RuleEngine(surplus_ctrl)
+rule_engine = rules.RuleEngine()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -266,7 +267,8 @@ class Controller:
         self._stop = threading.Event()
         self.last_system = None          # letzte Cerbo-Messung (vom Energie-Sampler)
         self.last_system_ts = 0.0
-        self._surplus_dry_on: dict[str, bool] = {}   # Trockenlauf: gedachter Schaltzustand
+        self._surplus_dry_on: dict[str, bool] = {}   # Trockenlauf Ueberschuss-Automatik: gedachter Schaltzustand
+        self._rules_dry_on: dict[str, bool] = {}     # Trockenlauf Regeln: gedachter Schaltzustand
 
     def tick(self):
         cfg = store.load_config()
@@ -679,48 +681,45 @@ class Controller:
         return {"soc": soc, "price_ct": price_ct, "prices_today": prices, "pv_tomorrow": st.get("pv_tom")}
 
     def run_surplus(self):
-        """Regel-Engine fuer Geraete inkl. Ueberschuss-Automatik (alle 10 s). Nutzt die Messwerte des Energie-Samplers;
-        ohne frische Messwerte wird kein Ueberschuss-Geraet zugeschaltet."""
-        last_flush = 0.0
+        """Ueberschuss-Automatik fuer Shelly-Geraete (alle 10 s) - eigener Baustein, eigener Schalter, eigener Trockenlauf, eigenes Logbuch.
+        Nutzt die Messwerte des Energie-Samplers; ohne frische Werte wird nichts geschaltet."""
         while not self._stop.is_set():
             try:
                 cfg = store.load_config()
-                all_rules = rules.list_rules()
-                rl = all_rules if rules.enabled(cfg) and any(r.get("enabled", True) for r in all_rules) else []   # ausgeschaltete Regeln bleiben drin (Status, Abschalten)
-                if rl:
+                if cfg.get("surplus_enabled"):
                     system = self.last_system if time.time() - self.last_system_ts < 45 else None
-                    dry = rules.dry_run(cfg)
-                    devs = shelly.list_with_status()
-                    if dry:      # Trockenlauf: mit gedachtem statt echtem Zustand rechnen
-                        for d in devs:
-                            if d["id"] in self._surplus_dry_on:
-                                d["on"] = self._surplus_dry_on[d["id"]]
-                    now = datetime.now()
-                    if dry:
-                        rule_engine.disarm_all()
-                    else:        # Sicherheits-Timer der eingeschalteten Geraete verlaengern
-                        fs = surplus.settings(cfg)["failsafe_min"]
-                        for d in rule_engine.due_rearm(now, devs, fs):
-                            try:
-                                shelly.set_state(d["id"], True, timer_s=int(fs * 60))
-                                rule_engine.mark_armed(d["id"], now)
-                            except shelly.ShellyError as e:
-                                log.warning("Sicherheits-Timer %s: %s", d["name"], e)
-                    for act in rule_engine.step(now, self._rules_ctx(cfg, system, now), system, cfg, devs, rl):
-                        self._apply_surplus(act, dry, cfg)
-                    if time.time() - last_flush > 60:
-                        rule_engine.flush()
-                        last_flush = time.time()
+                    if system:
+                        dry = bool(cfg.get("surplus_dry_run", True))
+                        ruled = {r["device_id"] for r in rules.list_rules()}         # Geraete mit Regeln gehoeren den Regeln (Schutz vor Doppelschaltung)
+                        devs = sorted((d for d in shelly.list_with_status() if d["id"] not in ruled), key=lambda d: d.get("prio") or 10 ** 6)   # Prioritaet
+                        if dry:      # Trockenlauf: mit gedachtem statt echtem Zustand rechnen
+                            for d in devs:
+                                if d["id"] in self._surplus_dry_on:
+                                    d["on"] = self._surplus_dry_on[d["id"]]
+                        now = datetime.now()
+                        if dry:
+                            surplus_ctrl.disarm_all()
+                        else:        # Sicherheits-Timer der zugeschalteten Geraete verlaengern (nur bei frischen Messwerten)
+                            fs = surplus.settings(cfg)["failsafe_min"]
+                            for d in surplus_ctrl.due_rearm(now, cfg, devs):
+                                try:
+                                    shelly.set_state(d["id"], True, timer_s=int(fs * 60))
+                                    surplus_ctrl.mark_armed(d["id"], now)
+                                except shelly.ShellyError as e:
+                                    log.warning("Sicherheits-Timer %s: %s", d["name"], e)
+                        act = surplus_ctrl.step(now, system, cfg, devs)
+                        if act:
+                            self._apply_surplus(act, dry, cfg)
                 else:
-                    rule_engine.reset()
-                    rule_engine.disarm_all()    # Timer laufen aus -> Geraete schalten sich selbst ab
+                    surplus_ctrl.reset_timers()
+                    surplus_ctrl.disarm_all()   # Timer laufen aus -> Geraete schalten sich selbst ab
                     self._surplus_dry_on.clear()
             except Exception as e:                       # noqa: BLE001
-                log.warning("Regel-Engine: %s", e)
+                log.warning("Ueberschuss-Automatik: %s", e)
             self._stop.wait(10)
 
     def _apply_surplus(self, act, dry: bool, cfg: dict):
-        action, dev, why, src, rule_id = act
+        action, dev, why = act
         on = action == "on"
         verb = "eingeschaltet" if on else "ausgeschaltet"
         ok = True
@@ -733,6 +732,72 @@ class Controller:
                 timer_s = int(fs * 60) if on and fs > 0 and dev.get("kind") != "tuya" else None
                 shelly.set_state(dev["id"], on, timer_s=timer_s)
                 if timer_s:
+                    surplus_ctrl.mark_armed(dev["id"])
+                elif not on:
+                    surplus_ctrl.disarm(dev["id"])
+                text = f"{dev['name']} {verb} – {why}"
+            except shelly.ShellyError as e:
+                ok = False
+                text = f"{dev['name']}: Schalten fehlgeschlagen ({e})"
+        log.info("Ueberschuss-Automatik: %s", text)
+        opslog.log("surplus", text, dry=dry)
+        autolog.log("surplus", text, dev=dev["name"], action=(action if ok else "fail"), dry=dry)
+        surplus_ctrl.log(text)
+        notify.push("surplus", ("🧪 " if dry else "🔌 ") + text, cfg)      # auch im Trockenlauf (Text beginnt dann mit "(Trockenlauf)")
+
+    def run_rules(self):
+        """Regel-Engine fuer Geraete (alle 10 s) - eigener Baustein, eigener Schalter, eigener Trockenlauf, eigenes Logbuch."""
+        last_flush = 0.0
+        while not self._stop.is_set():
+            try:
+                cfg = store.load_config()
+                all_rules = rules.list_rules()
+                if rules.enabled(cfg) and any(r.get("enabled", True) for r in all_rules):
+                    dry = rules.dry_run(cfg)
+                    devs = shelly.list_with_status()
+                    if dry:      # Trockenlauf: mit gedachtem statt echtem Zustand rechnen
+                        for d in devs:
+                            if d["id"] in self._rules_dry_on:
+                                d["on"] = self._rules_dry_on[d["id"]]
+                    now = datetime.now()
+                    system = self.last_system if time.time() - self.last_system_ts < 45 else None
+                    if dry:
+                        rule_engine.disarm_all()
+                    else:        # Sicherheits-Timer der eingeschalteten Geraete verlaengern
+                        fs = rules.settings(cfg)["failsafe_min"]
+                        for d in rule_engine.due_rearm(now, devs, fs):
+                            try:
+                                shelly.set_state(d["id"], True, timer_s=int(fs * 60))
+                                rule_engine.mark_armed(d["id"], now)
+                            except shelly.ShellyError as e:
+                                log.warning("Sicherheits-Timer %s: %s", d["name"], e)
+                    for act in rule_engine.step(now, self._rules_ctx(cfg, system, now), cfg, devs, all_rules):
+                        self._apply_rule(act, dry, cfg)
+                    if time.time() - last_flush > 60:
+                        rule_engine.flush()
+                        last_flush = time.time()
+                else:
+                    rule_engine.reset()
+                    rule_engine.disarm_all()    # Timer laufen aus -> Geraete schalten sich selbst ab
+                    self._rules_dry_on.clear()
+            except Exception as e:                       # noqa: BLE001
+                log.warning("Regel-Engine: %s", e)
+            self._stop.wait(10)
+
+    def _apply_rule(self, act, dry: bool, cfg: dict):
+        action, dev, why, rule_id = act
+        on = action == "on"
+        verb = "eingeschaltet" if on else "ausgeschaltet"
+        ok = True
+        if dry:
+            self._rules_dry_on[dev["id"]] = on
+            text = f"(Trockenlauf) {dev['name']} würde {verb} – {why}"
+        else:
+            try:
+                fs = rules.settings(cfg)["failsafe_min"]
+                timer_s = int(fs * 60) if on and fs > 0 and dev.get("kind") != "tuya" else None
+                shelly.set_state(dev["id"], on, timer_s=timer_s)
+                if timer_s:
                     rule_engine.mark_armed(dev["id"])
                 elif not on:
                     rule_engine.disarm(dev["id"])
@@ -741,11 +806,11 @@ class Controller:
                 ok = False
                 text = f"{dev['name']}: Schalten fehlgeschlagen ({e})"
         if ok:
-            rule_engine.set_owner(dev["id"], src if on else None, rule_id)
-        log.info("Regel-Engine: %s", text)
-        opslog.log("surplus", text, dry=dry)
-        surplus_ctrl.log(text)
-        notify.push("surplus", ("🧪 " if dry else "🔌 ") + text, cfg)      # auch im Trockenlauf (Text beginnt dann mit "(Trockenlauf)")
+            rule_engine.set_owner(dev["id"], "rule" if on else None, rule_id)
+        log.info("Regeln: %s", text)
+        opslog.log("rules", text, dry=dry)
+        autolog.log("rules", text, dev=dev["name"], action=(action if ok else "fail"), dry=dry, rule=rule_id)
+        notify.push("rules", ("🧪 " if dry else "📐 ") + text, cfg)
 
     def start(self):
         cfg = store.load_config()
@@ -753,6 +818,7 @@ class Controller:
         threading.Thread(target=self.run, args=(interval,), daemon=True).start()
         threading.Thread(target=self.run_energy, daemon=True).start()
         threading.Thread(target=self.run_surplus, daemon=True).start()
+        threading.Thread(target=self.run_rules, daemon=True).start()
 
 
 ctrl = Controller()
@@ -1050,7 +1116,7 @@ def api_config():
                "show_live_values", "show_energy_chart", "show_flow_chart",
                "show_week_overview", "show_month_overview", "show_tibber_card",
                "show_override_card", "show_price_plan", "show_charge_log",
-               "show_ev_card", "show_shelly_card", "show_weather_card", "show_plansim_card", "show_savings_card", "pv_auto_calibration", "surplus_enabled", "surplus_dry_run", "rules_enabled", "rules_dry_run",
+               "show_ev_card", "show_shelly_card", "show_weather_card", "show_plansim_card", "show_savings_card", "pv_auto_calibration", "surplus_enabled", "surplus_dry_run", "rules_enabled", "rules_dry_run", "rules_manual_hold_min", "rules_failsafe_min",
                "surplus_min_soc", "tile_order", "scan_networks",
                "has_pv_inverter", "has_mppt", "tariff_mode",
                "fixed_price_ct", "pv_inverters"] + list(Params().__dict__.keys())
@@ -1206,20 +1272,50 @@ def api_shelly_list():
 
 @app.route("/api/shelly/auto", methods=["GET"])
 def api_shelly_auto():
+    """Ueberschuss-Automatik (eigener Baustein)."""
     cfg = store.load_config()
-    return jsonify({"enabled": rules.enabled(cfg),
-                    "dry_run": rules.dry_run(cfg),
+    return jsonify({"enabled": bool(cfg.get("surplus_enabled")),
+                    "dry_run": bool(cfg.get("surplus_dry_run", True)),
                     "min_soc": cfg.get("surplus_min_soc", surplus.DEFAULT_MIN_SOC),
                     "settings": surplus.settings(cfg), "defaults": surplus.DEFAULTS,
                     "bounds": surplus.BOUNDS,
+                    "events": autolog.recent("surplus", 8)})
+
+
+@app.route("/api/rules", methods=["GET"])
+def api_rules_get():
+    """Regeln (eigener Baustein): Regeln, Status, Einstellungen, letzte Aktionen."""
+    cfg = store.load_config()
+    return jsonify({"enabled": rules.enabled(cfg), "dry_run": rules.dry_run(cfg),
+                    "settings": rules.settings(cfg), "defaults": rules.DEFAULTS, "bounds": rules.BOUNDS,
                     "tariff_mode": cfg.get("tariff_mode", "tibber"),
                     "rules": rules.list_rules(), "status": dict(rule_engine.status), "owner": dict(rule_engine.owner),
-                    "events": surplus_ctrl.recent()})
+                    "events": autolog.recent("rules", 8)})
+
+
+@app.route("/api/automation/log", methods=["GET"])
+def api_automation_log():
+    """Logbuch: ?module=surplus|rules&days=N&limit=N (neueste zuerst)."""
+    module = request.args.get("module", "")
+    if module not in autolog.MODULES:
+        return jsonify(error="module: surplus oder rules"), 400
+    try:
+        days = int(request.args["days"]) if request.args.get("days") else None
+        limit = max(1, min(1000, int(request.args.get("limit", 300))))
+    except ValueError:
+        return jsonify(error="Zahl erwartet"), 400
+    return jsonify({"module": module, "entries": autolog.recent(module, limit, days)})
+
+
+@app.route("/automation-log")
+def automation_log_page():
+    return render_template("automation_log.html")
 
 
 @app.route("/api/automation", methods=["POST"])
 def api_automation_save():
-    """Speichern der Automatik-Seite: Regeln, Ueberschuss-Geraete und Einstellungen auf einmal. Erst wird ALLES geprueft, dann geschrieben."""
+    """Speichern der Automatik-Seite: Regeln, Ueberschuss-Geraete und die Einstellungen BEIDER Bausteine auf einmal.
+    Erst wird ALLES geprueft, dann geschrieben. Ein Geraet darf nur zu einem Baustein gehoeren."""
     body = request.get_json(silent=True) or {}
     try:
         items = body.get("rules")
@@ -1246,9 +1342,17 @@ def api_automation_save():
         order = body.get("auto_order")
         if order is not None and not (isinstance(order, list) and all(isinstance(i, str) for i in order)):
             raise rules.RuleError("Reihenfolge ungültig")
+        # Ein Geraet gehoert entweder zur Ueberschuss-Automatik ODER zu Regeln
+        auto_ids = {d for d, auto, _ in dev_updates if auto} if body.get("devices") is not None else {d["id"] for d in shelly.load_devices() if d.get("auto")}
+        rule_devs = {x.get("device_id") for x in items} if items is not None else {r["device_id"] for r in rules.list_rules()}
+        both = auto_ids & rule_devs
+        if both:
+            names = {d["id"]: d["name"] for d in shelly.load_devices()}
+            raise rules.RuleError("Diese Geräte sind gleichzeitig in der Überschuss-Automatik und in einer Regel – bitte nur eins von beiden: "
+                                  + ", ".join(names.get(i, i) for i in sorted(both)))
         cfg_in = body.get("config") or {}
         upd = {}
-        for k in ("rules_enabled", "rules_dry_run"):
+        for k in ("surplus_enabled", "surplus_dry_run", "rules_enabled", "rules_dry_run"):
             if k in cfg_in:
                 upd[k] = bool(cfg_in[k])
         if "surplus_min_soc" in cfg_in:
@@ -1259,16 +1363,17 @@ def api_automation_save():
             if not 50 <= v <= 100:
                 raise rules.RuleError("Akku mindestens: zwischen 50 und 100 %")
             upd["surplus_min_soc"] = v
-        for k in surplus.DEFAULTS:
-            if "surplus_" + k in cfg_in:
-                try:
-                    v = float(cfg_in["surplus_" + k])
-                except (TypeError, ValueError):
-                    raise rules.RuleError(f"{k}: Zahl erwartet")
-                lo, hi = surplus.BOUNDS[k]
-                if not lo <= v <= hi:
-                    raise rules.RuleError(f"{k}: zwischen {lo} und {hi}")
-                upd["surplus_" + k] = v
+        for prefix, defaults, bounds in (("surplus_", surplus.DEFAULTS, surplus.BOUNDS), ("rules_", rules.DEFAULTS, rules.BOUNDS)):
+            for k in defaults:
+                if prefix + k in cfg_in:
+                    try:
+                        v = float(cfg_in[prefix + k])
+                    except (TypeError, ValueError):
+                        raise rules.RuleError(f"{prefix}{k}: Zahl erwartet")
+                    lo, hi = bounds[k]
+                    if not lo <= v <= hi:
+                        raise rules.RuleError(f"{k}: zwischen {lo} und {hi}")
+                    upd[prefix + k] = v
     except rules.RuleError as e:
         return jsonify(error=str(e)), 400
     try:
@@ -1396,6 +1501,11 @@ def _ctrl_info():
 @app.route("/automation")
 def automation_page():
     return render_template("automation.html")
+
+
+@app.route("/rules")
+def rules_page():
+    return render_template("rules.html")
 
 
 @app.route("/report")
@@ -1607,9 +1717,9 @@ def api_shelly_switch(dev_id):
         result = shelly.set_state(dev_id, on, timer_s=0 if on else None)     # 0 = evtl. laufenden Auto-Timer aufheben
     except shelly.ShellyError as e:
         return jsonify(error=str(e)), 400      # nicht 502/504: Cloudflare ersetzt diese Antworten durch eine eigene Fehlerseite
-    hold_min = surplus.settings(store.load_config())["manual_hold_min"]
-    surplus_ctrl.note_manual(dev_id, hold_min=hold_min)                 # Automatik pausiert fuer dieses Geraet
-    rule_engine.note_manual(dev_id, hold_min=hold_min)
+    cfg_ = store.load_config()
+    surplus_ctrl.note_manual(dev_id, hold_min=surplus.settings(cfg_)["manual_hold_min"])      # Ueberschuss-Automatik pausiert fuer dieses Geraet
+    rule_engine.note_manual(dev_id, hold_min=rules.settings(cfg_)["manual_hold_min"])         # Regeln pausieren ebenfalls (eigene Einstellung)
     return jsonify(result)
 
 
@@ -1650,6 +1760,19 @@ def main():
         log.warning("Preis-Historie-Nachtrag fehlgeschlagen: %s", e)
     notify.push("startup", "🔄 Die Steuerung wurde gestartet.", cfg)
     opslog.count("restarts")
+    try:                                                 # Umstellung: Ueberschuss-Automatik und Regeln haben jetzt getrennte Schalter/Einstellungen
+        c = store.load_config()
+        if not c.get("_automation_split"):
+            if "rules_enabled" in c:                       # vorher galt ein gemeinsamer Schalter (rules_*) fuer beides
+                c["surplus_enabled"] = bool(c["rules_enabled"])
+                c["surplus_dry_run"] = bool(c.get("rules_dry_run", True))
+            for k in ("manual_hold_min", "failsafe_min"):
+                if "surplus_" + k in c and "rules_" + k not in c:
+                    c["rules_" + k] = c["surplus_" + k]
+            c["_automation_split"] = True
+            store.save_config(c)
+    except Exception as e:                               # noqa: BLE001
+        log.warning("Trennung der Automatik-Einstellungen fehlgeschlagen: %s", e)
     try:                                                 # Umstellung alter Regeln: Ueberschuss-Regeln -> Flag "In der Ueberschuss-Automatik"
         for dev_id in rules.pending_auto():
             shelly.update(dev_id, auto=True)

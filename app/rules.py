@@ -19,8 +19,8 @@ Bedingungen:
   at            Um HH:MM Uhr, einmal pro Tag (nur bei "Ausschalten"; loest innerhalb von 30 Min nach der Uhrzeit aus)
   sun_tomorrow  Sonne morgen (VRM-Prognose) ueber/unter X kWh
 
-Die PV-Ueberschuss-Automatik ist ein eigener Baustein (surplus.py): Geraete mit Flag "auto" (Reihenfolge = Prioritaet) bekommen ueberschuessigen Strom.
-Hat eine Regel ein Geraet gerade eingeschaltet oder soll es laufen, laesst die Ueberschuss-Automatik es in Ruhe.
+Regeln sind vollstaendig unabhaengig von der PV-Ueberschuss-Automatik (surplus.py): eigener Hauptschalter, eigener Trockenlauf, eigene Einstellungen,
+eigenes Logbuch. Ein Geraet gehoert entweder zur Ueberschuss-Automatik oder zu Regeln (wird beim Speichern geprueft).
 
 Sicherheit: ausgeschaltet wird nur, was die Engine selbst eingeschaltet oder uebernommen hat (Besitzer-Merkung, ueberlebt Neustarts). Laeuft ein Geraet,
 waehrend die Einschalt-Bedingungen einer Regel stimmen, uebernimmt die Regel es (Timer-Verhalten); von Hand ueber die App geschaltete Geraete
@@ -104,11 +104,31 @@ def pending_auto(clear: bool = True) -> list[str]:
 
 def enabled(cfg: dict) -> bool:
     """Hauptschalter (aus der frueheren Ueberschuss-Automatik uebernommen, solange der neue Schluessel fehlt)."""
-    return bool(cfg.get("rules_enabled", cfg.get("surplus_enabled", False)))
+    return bool(cfg.get("rules_enabled", False))
 
 
 def dry_run(cfg: dict) -> bool:
-    return bool(cfg.get("rules_dry_run", cfg.get("surplus_dry_run", True)))
+    return bool(cfg.get("rules_dry_run", True))
+
+
+# Einstellungen der Regeln (eigene Werte, unabhaengig von der Ueberschuss-Automatik)
+DEFAULTS = {"manual_hold_min": 60, "failsafe_min": 10}
+BOUNDS = {"manual_hold_min": (0, 1440), "failsafe_min": (0, 120)}
+
+
+def settings(cfg: dict) -> dict:
+    """Pause nach Handschaltung und Sicherheits-Timer (Shelly) der Regeln, mit Standard und Grenzen (ungueltig -> Standard)."""
+    out = {}
+    for k, default in DEFAULTS.items():
+        lo, hi = BOUNDS[k]
+        try:
+            v = float(cfg.get("rules_" + k, default))
+        except (TypeError, ValueError):
+            v = default
+        out[k] = min(hi, max(lo, v))
+    if 0 < out["failsafe_min"] < 2:
+        out["failsafe_min"] = 2
+    return out
 
 
 # ------------------------------------------------------------------------------------------ Pruefen
@@ -167,7 +187,9 @@ def normalize_rule(body: dict, rule_id: str | None = None) -> dict:
         raise RuleError("Gerät wählen")
     name = str(body.get("name") or "").strip()[:60]
     return {"id": rule_id or uuid.uuid4().hex[:8], "name": name, "device_id": str(body["device_id"]),
-            "enabled": bool(body.get("enabled", True)), "on": on, "off": off}
+            "enabled": bool(body.get("enabled", True)), "on": on, "off": off,
+            "min_on_min": _num(body.get("min_on_min", 5) if body.get("min_on_min") not in (None, "") else 5, 0, 1440, "Mind. an (min)"),
+            "min_off_min": _num(body.get("min_off_min", 5) if body.get("min_off_min") not in (None, "") else 5, 0, 1440, "Mind. aus (min)")}
 
 
 def add_rule(body: dict) -> dict:
@@ -182,7 +204,7 @@ def update_rule(rule_id: str, body: dict) -> dict | None:
     d = load()
     for i, r in enumerate(d["rules"]):
         if r["id"] == rule_id:
-            merged = {**r, **{k: v for k, v in body.items() if k in ("name", "device_id", "enabled", "on", "off")}}
+            merged = {**r, **{k: v for k, v in body.items() if k in ("name", "device_id", "enabled", "on", "off", "min_on_min", "min_off_min")}}
             d["rules"][i] = normalize_rule(merged, rule_id)
             _save(d)
             return d["rules"][i]
@@ -293,10 +315,9 @@ def eval_condition(c: dict, ctx: dict, ran_min: float = 0.0, fired_today: bool =
 
 # ------------------------------------------------------------------------------------------ Engine
 class RuleEngine:
-    def __init__(self, surplus_ctrl):
-        self.surplus = surplus_ctrl                      # SurplusController (Verzoegerungen/Hysterese der Ueberschuss-Logik)
+    def __init__(self):
         self._lock = threading.RLock()
-        self.owner: dict[str, str] = {}                  # geraet -> 'rule' | 'surplus' (wer es eingeschaltet hat)
+        self.owner: dict[str, str] = {}                  # geraet -> 'rule' (die Engine hat es eingeschaltet oder uebernommen)
         self.owner_rule: dict[str, str] = {}             # geraet -> Regel-ID, die es eingeschaltet hat
         self.ran: dict[str, dict] = {}                   # regel -> {"day": iso, "min": Minuten (Tagesziel)}
         self.blocked: set[str] = set()                   # Regeln, die nach einem Ausschalten erst neu 'scharf' werden muessen
@@ -366,7 +387,6 @@ class RuleEngine:
     def reset(self):
         with self._lock:
             self._last_step = None
-        self.surplus.reset_timers()
 
     def due_rearm(self, now: datetime, devices: list[dict], failsafe_min: float) -> list[dict]:
         by_id = {d["id"]: d for d in devices}
@@ -398,9 +418,9 @@ class RuleEngine:
         self._save_state()
 
     # ---- Kern
-    def step(self, now: datetime, ctx: dict, system: dict, cfg: dict, devices: list[dict], rules: list[dict]) -> list[tuple]:
-        """Ein Regelschritt. devices: Live-Status (online, on, switchable, auto, prio, power_w, min_on_min, min_off_min).
-        Rueckgabe: Liste von (aktion 'on'|'off', geraet, begruendung, quelle 'rule'|'surplus', regel-id|None)."""
+    def step(self, now: datetime, ctx: dict, cfg: dict, devices: list[dict], rules: list[dict]) -> list[tuple]:
+        """Ein Regelschritt. devices: Live-Status (online, on, switchable). Mind. an/aus stehen an der Regel.
+        Rueckgabe: Liste von (aktion 'on'|'off', geraet, begruendung, regel-id)."""
         self._load()
         ctx = {**ctx, "now": now}
         today = now.date().isoformat()
@@ -413,12 +433,13 @@ class RuleEngine:
         wants: dict[str, tuple[str, str]] = {}           # geraet -> (regel-id, Begruendung): soll jetzt eingeschaltet werden
         pure_off_acts: list[tuple] = []
         rule_ids = {r["id"] for r in rules}
+        rule_by_id = {r["id"]: r for r in rules}
         for gone in self.blocked - rule_ids:
             self.blocked.discard(gone)
             self.block_reason.pop(gone, None)
         # Am Geraet selbst (oder in einer anderen App) ausgeschaltet, obwohl es der Regel gehoert: gilt wie Handschaltung
         try:
-            manual_hold = float(cfg.get("surplus_manual_hold_min", 60))
+            manual_hold = settings(cfg)["manual_hold_min"]
         except (TypeError, ValueError):
             manual_hold = 60.0
         for d in devices:
@@ -452,7 +473,7 @@ class RuleEngine:
             if pure_off:                                        # schaltet nie ein; schaltet jedes laufende Geraet aus, wenn eine Ausschalt-Bedingung zutrifft
                 dvc = by_dev.get(r["device_id"])
                 if dvc and dvc.get("switchable", True) and dvc.get("online") and dvc.get("on") and off_hit and hold.get(dvc["id"], now) <= now:
-                    pure_off_acts.append(("off", dvc, "Ausschalt-Regel: " + ", ".join(off_hit), "rule", r["id"]))
+                    pure_off_acts.append(("off", dvc, "Ausschalt-Regel: " + ", ".join(off_hit), r["id"]))
                 status[r["id"]] = {"state": "off", "text": ("schaltet aus: " + ", ".join(off_hit)) if off_hit else "schaltet nur aus (nie automatisch ein) – wartet auf: " + ", ".join(t for _, _, t in off_res),
                                    "conds": [{"ok": ok, "text": txt} for _, ok, txt in off_res]}
                 continue
@@ -493,8 +514,8 @@ class RuleEngine:
         # ---- 1. Einschalten
         for dev_id, (rid, name) in wants.items():
             d = by_dev[dev_id]
-            if d.get("online") and not d.get("on") and self._waited(d, now, "min_off_min"):
-                actions.append(("on", d, "Regel: " + name, "rule", rid))
+            if d.get("online") and not d.get("on") and self._waited(rule_by_id.get(rid), dev_id, now, "min_off_min"):
+                actions.append(("on", d, "Regel: " + name, rid))
         # ---- 2. Ausschalten (nur, was die Engine selbst eingeschaltet hat)
         for dev_id, who in list(self.owner.items()):
             d = by_dev.get(dev_id)
@@ -519,33 +540,16 @@ class RuleEngine:
                     reason = "Bedingungen nicht mehr erfüllt"
                 else:
                     continue
-                if d.get("online") and d.get("switchable", True) and self._waited(d, now, "min_on_min"):
-                    actions.append(("off", d, reason, "rule", rid))
-            elif dev_id in wants:
-                self.set_owner(dev_id, "rule", wants[dev_id][0])       # eine Regel will das Geraet jetzt haben: Regel uebernimmt
-            elif who == "surplus" and not d.get("auto"):
-                if d.get("online") and d.get("switchable", True) and self._waited(d, now, "min_on_min"):
-                    actions.append(("off", d, "aus der Überschuss-Automatik genommen", "surplus", None))
-        # ---- 3. Ueberschuss (eigener Baustein): Geraete mit auto-Flag, ausser die Regeln haben das Geraet gerade in der Hand
-        sdevs = []
-        for d in sorted((x for x in devices if x.get("auto") and x.get("switchable", True)), key=lambda x: x.get("prio") or 10 ** 6):
-            if d["id"] in wants or self.owner.get(d["id"]) == "rule":
-                continue
-            sdevs.append(d)
-        if sdevs and system:
-            act = self.surplus.step(now, system, {**cfg, "surplus_enabled": True}, sdevs)
-            if act:
-                a, d, why = act
-                actions.append((a, by_dev[d["id"]], why if a == "off" else "PV-Überschuss: " + why, "surplus", None))
-        elif not sdevs:
-            self.surplus.reset_timers()
+                if d.get("online") and d.get("switchable", True) and self._waited(r, dev_id, now, "min_on_min"):
+                    actions.append(("off", d, reason, rid))
         with self._lock:
             self.status = status
         return actions
 
-    def _waited(self, d: dict, now: datetime, key: str) -> bool:
-        t = self._last_change.get(d["id"])
-        need = float(d.get(key) if d.get(key) is not None else 5) * 60
+    def _waited(self, rule: dict | None, dev_id: str, now: datetime, key: str) -> bool:
+        """Mindest-Ein-/Ausschaltdauer (an der Regel) seit der letzten Aenderung eingehalten?"""
+        t = self._last_change.get(dev_id)
+        need = float((rule or {}).get(key, 5)) * 60
         return t is None or (now - t).total_seconds() >= need
 
     def flush(self):
