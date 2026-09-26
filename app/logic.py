@@ -61,6 +61,7 @@ class Params:
     target_safe_soc: float = TARGET_SAFE_SOC
     max_charge_soc: float = MAX_CHARGE_SOC
     absolute_cheap_price: float = ABSOLUTE_CHEAP_PRICE
+    soc_floor_pct: float = 0.0     # 'Minimaler SOC' am Cerbo (wird je Durchlauf gelesen): darunter liefert der Akku nichts mehr
     dynamic_pricing: bool = True   # False = fester Tarif: keine preisbasierten Strategien
 
     @classmethod
@@ -190,7 +191,7 @@ def merge_into_windows(picked: list) -> str:
 
 def calc_peak_protection(soc, hour_now, solar_today, solar_tom, p: Params):
     current_kwh = (soc / 100) * p.battery_usable_kwh
-    min_peak_kwh = (p.min_peak_soc / 100) * p.battery_usable_kwh
+    min_peak_kwh = (max(p.min_peak_soc, p.soc_floor_pct) / 100) * p.battery_usable_kwh      # nie unter der Cerbo-Untergrenze
     hours_to_peak = None
     peak_label = ""
     pv_until_peak = 0.0
@@ -302,7 +303,8 @@ def decide(soc: float, price_entries: list, solar_today_raw: float,
     hours_to_bridge = max(1, (next_noon - now).total_seconds() / 3600)
     current_kwh = (soc / 100) * p.battery_usable_kwh
     total_need_kwh = (p.daily_usage_kwh / 24) * hours_to_bridge
-    balance = (current_kwh + expected_pv_rest) - total_need_kwh
+    usable_now_kwh = max(0.0, soc - p.soc_floor_pct) / 100 * p.battery_usable_kwh            # nur was ueber der Cerbo-Untergrenze liegt, ist entnehmbar
+    balance = (usable_now_kwh + expected_pv_rest) - total_need_kwh
 
     # === SCHRITT 1: BEDARF ===
     # Bei festem Tarif (kein Preisunterschied über den Tag) ergeben zeitfenster-

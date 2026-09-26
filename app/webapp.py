@@ -257,6 +257,7 @@ class Controller:
         self.status = {"ok": False, "reason": "startet ..."}
         self.prices = []          # aufbereitete Slots für die Kurve
         self.pv_cal = 1.0                                   # gelernter Korrekturfaktor der Prognose fuer morgen (1.0 = aus)
+        self.soc_floor = None                        # letzter gelesener 'Minimaler SOC' des Cerbo (%)
         self.plansim = {"available": False, "reason": "noch nicht berechnet"}   # Ladeplan-Simulation (nur Anzeige)
         self.last_tick = None
         self.last_error = None
@@ -346,6 +347,11 @@ class Controller:
         # Die VRM-Prognose ist schon anlagenkalibriert -> in decide() KEIN weiterer Korrekturfaktor.
         params = Params.from_config(cfg)
         params.pv_korrektur_faktor = 1.0
+        try:                                             # Minimaler SOC am Cerbo (wie im VRM): darunter liefert der Akku nichts
+            self.soc_floor = cerbo.read_min_soc()
+        except Exception as e:                           # noqa: BLE001
+            log.warning("Minimaler SOC nicht lesbar (letzter Wert %s %% bleibt): %s", self.soc_floor, e)
+        params.soc_floor_pct = float(self.soc_floor or 0.0)
         state = store.load_state()
         d = decide(soc=soc, price_entries=prices, solar_today_raw=solar_today_for_control,
                    solar_tom_raw=solar_tom_ctl, state=state, now=now,

@@ -73,6 +73,20 @@ def main():
     if d.allow_now or d.reason != "Keine Preisdaten":
         print("  FAIL: sollte idle sein"); fails += 1
 
+    # 6) Minimaler SOC am Cerbo (Untergrenze): entnehmbar ist nur, was darueber liegt -> Bilanz sinkt um Untergrenze x Kapazitaet
+    from logic import Params
+    now = datetime(2026, 5, 1, 20, 0)
+    prices = make_prices(now, [30] * 40)
+    kw = dict(soc=50, price_entries=prices, solar_today_raw=5, solar_tom_raw=5, now=now)
+    d0 = decide(state=PersistentState(), params=Params(battery_usable_kwh=20.0, soc_floor_pct=0.0), **kw)
+    d15 = decide(state=PersistentState(), params=Params(battery_usable_kwh=20.0, soc_floor_pct=15.0), **kw)
+    print(f"Untergrenze: Bilanz ohne {d0.balance} kWh, mit 15 % Untergrenze {d15.balance} kWh")
+    if abs((d0.balance - d15.balance) - 3.0) > 0.02:
+        print("  FAIL: Untergrenze 15 % x 20 kWh = 3 kWh weniger Bilanz erwartet"); fails += 1
+    dn = decide(state=PersistentState(), params=Params(battery_usable_kwh=20.0, soc_floor_pct=60.0), **kw)
+    if dn.balance > d0.balance:
+        print("  FAIL: Bilanz darf mit Untergrenze nie steigen"); fails += 1
+
     print("\n" + "=" * 40)
     if fails:
         print(f"{fails} Test(s) FEHLGESCHLAGEN")
