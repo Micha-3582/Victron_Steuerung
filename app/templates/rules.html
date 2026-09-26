@@ -130,7 +130,7 @@ function renderSettings() {
 
 const TYPES = [['time', 'Uhrzeit von–bis'], ['at', 'Uhrzeit (einmal pro Tag)'], ['price', 'Strompreis'], ['cheapest', 'Günstigste Stunden des Tages'], ['budget', 'Tagesziel (Minuten pro Tag)'], ['soc', 'Akkustand'], ['sun_tomorrow', 'Sonne morgen (Prognose)']];
 const MODES = [['on', '🟢 Einschalten, wenn'], ['off', '🔴 Ausschalten, sobald']];        // gleiche Symbole im Menue und bei DANN: gruen = ein, rot = aus
-const allowed = (mode, fixed) => TYPES.filter(([t]) => !(fixed && (t === 'price' || t === 'cheapest')) && !(mode === 'on' && t === 'at') && !(mode === 'off' && t === 'budget'));
+const allowed = (mode, fixed) => TYPES.filter(([t]) => !(fixed && (t === 'price' || t === 'cheapest')));        // beim Einschalten und Ausschalten dieselben Bedingungen
 const COND_DEFAULT = {
   at: { type: 'at', time: '23:30', days: [] }, time: { type: 'time', from: '09:00', to: '16:00', days: [] }, price: { type: 'price', op: 'below', ct: 25 }, cheapest: { type: 'cheapest', hours: 3 },
   budget: { type: 'budget', minutes: 120, from: '06:00', to: '22:00' }, soc: { type: 'soc', op: 'above', pct: 50 }, sun_tomorrow: { type: 'sun_tomorrow', op: 'above', kwh: 15 },
@@ -155,6 +155,7 @@ function condRow(c, mode, label) {
   else if (c.type === 'at') body = `um ${tm('c-at', c.time)} Uhr ${chips(c.days)}`;
   else if (c.type === 'price') body = `${cmp('c-op', c.op)} ${num('c-ct', c.ct, 70)} ct/kWh`;
   else if (c.type === 'cheapest') body = `unter den ${num('c-hours', c.hours, 60)} günstigsten Stunden`;
+  else if (c.type === 'budget' && mode === 'off') body = `${num('c-min', c.minutes, 70)} Min Laufzeit heute erreicht`;
   else if (c.type === 'budget') body = `${num('c-min', c.minutes, 70)} Min pro Tag, ${FIXED ? 'so früh wie möglich' : 'zu den günstigsten Zeiten'}, zwischen ${tm('c-from', c.from)} und ${tm('c-to', c.to, true)} Uhr`;
   else if (c.type === 'soc') body = `${cmp('c-op', c.op)} ${num('c-pct', c.pct, 70)} %`;
   else if (c.type === 'sun_tomorrow') body = `${cmp('c-op', c.op)} ${num('c-kwh', c.kwh, 70)} kWh`;
@@ -174,7 +175,7 @@ function collectCond(row) {
   if (t === 'at') return { type: t, time: v('c-at'), days: days() };
   if (t === 'price') return { type: t, op: v('c-op'), ct: v('c-ct') };
   if (t === 'cheapest') return { type: t, hours: v('c-hours') };
-  if (t === 'budget') return { type: t, minutes: v('c-min'), from: v('c-from'), to: v('c-to') };
+  if (t === 'budget') return { type: t, minutes: v('c-min'), from: v('c-from') || '00:00', to: v('c-to') || '24:00' };
   if (t === 'soc') return { type: t, op: v('c-op'), pct: v('c-pct') };
   return { type: 'sun_tomorrow', op: v('c-op'), kwh: v('c-kwh') };
 }
