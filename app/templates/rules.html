@@ -11,8 +11,7 @@
   <div class="muted" style="margin-bottom:12px">Sag der Steuerung in einfachen Sätzen, wann ein Gerät ein- und ausgeschaltet werden soll – zum Beispiel
     „Heizung einschalten, wenn der Strom unter 25 ct kostet und der Akku über 50 % hat; ausschalten, sobald der Akku unter 30 % fällt“.
     Beim Einschalten müssen <b>alle</b> Bedingungen stimmen (WENN … UND …), beim Ausschalten genügt <b>eine</b> (WENN … ODER …).
-    Ohne eigene Ausschalt-Bedingung schaltet das Gerät aus, sobald die Einschalt-Bedingungen nicht mehr stimmen. Ein <b>Ausschalt-Timer</b> (ohne Einschalt-Bedingung)
-    schaltet ein Gerät nur aus, zum Beispiel jeden Abend um 23:30, und nie von selbst ein. Läuft ein Gerät schon, während die Einschalt-Bedingungen stimmen, übernimmt die Regel es
+    Ohne eigene Ausschalt-Bedingung schaltet das Gerät aus, sobald die Einschalt-Bedingungen nicht mehr stimmen. Läuft ein Gerät schon, während die Einschalt-Bedingungen stimmen, übernimmt die Regel es
     und schaltet es später auch wieder aus (wie ein Timer). Schaltest du ein Gerät von Hand aus, bleibt es aus, bis die Regel das nächste Mal neu beginnt.
     Die Geräte richtest du unter Einstellungen → Geräte ein.
     <b>Änderungen werden erst mit „Speichern“ (Leiste unten) übernommen.</b></div>
@@ -30,10 +29,7 @@
 <div class="card">
   <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Deine Regeln</h2>
   <div id="rules-list" style="display:flex;flex-direction:column;gap:12px"></div>
-  <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-    <select id="rule-new-dev" style="width:auto;min-width:220px"></select>
-    <select id="rule-new-timer" style="width:auto;min-width:220px" title="Schaltet ein Gerät zu einer Uhrzeit aus, das du selbst eingeschaltet hast"></select>
-  </div>
+  <div id="rule-wizard" style="margin-top:12px"></div>
   <div class="muted" id="rules-msg" style="margin-top:8px"></div>
   <details style="margin-top:14px">
     <summary>Einstellungen für Regeln (Pause nach Handschaltung, Sicherheits-Timer)</summary>
@@ -41,6 +37,8 @@
     <div style="margin-top:10px"><button id="rules-settings-reset" class="ghost" type="button">Alle auf Standard</button></div>
   </details>
 </div>
+
+<button type="button" id="fab-add" title="Neue Regel" onclick="wizStart()" style="position:fixed;right:20px;bottom:76px;z-index:800;width:56px;height:56px;border-radius:50%;padding:0;font-size:32px;line-height:1;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(0,0,0,.45)">+</button>
 
 <div id="savebar" style="display:none;position:fixed;left:0;right:0;bottom:0;z-index:900;background:var(--card);border-top:1px solid var(--border);padding:10px 16px;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;box-shadow:0 -6px 20px rgba(0,0,0,.35)">
   <span id="savebar-msg">● Ungespeicherte Änderungen – die Steuerung nutzt noch die bisherigen Regeln</span>
@@ -214,10 +212,27 @@ async function ruleDelete(id) {
   if (!await uiConfirm('Regel löschen?', 'Die Regel wird entfernt, sobald du „Speichern“ drückst. Das Gerät bleibt in der Liste.', 'Löschen')) return;
   R = R.filter(r => r.id !== id); touch(); renderRules();
 }
-function ruleNew(sel, timer) {
-  const d = sel.value; if (!d) return;
-  R.push({ id: 'new-' + (++newId), name: '', device_id: d, enabled: true, on: timer ? [] : [clone(COND_DEFAULT.time)], off: timer ? [clone(COND_DEFAULT.at)] : [] });
-  sel.value = ''; touch(); renderRules();
+let WIZ = null;                                   // neue Regel in Arbeit: {dev, mode} - erst Geraet, dann Ein/Aus, dann Bedingung
+function wizStart() { WIZ = { dev: '', mode: '' }; renderWizard(); $('rule-wizard').scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+function wizCancel() { WIZ = null; renderWizard(); }
+function wizDev(sel) { WIZ.dev = sel.value; WIZ.mode = ''; renderWizard(); }
+function wizMode(sel) { WIZ.mode = sel.value; renderWizard(); }
+function wizType(sel) {
+  if (!sel.value) return;
+  const c = clone(COND_DEFAULT[sel.value]);
+  R.push({ id: 'new-' + (++newId), name: '', device_id: WIZ.dev, enabled: true, on: WIZ.mode === 'on' ? [c] : [], off: WIZ.mode === 'off' ? [c] : [] });
+  WIZ = null; touch(); renderRules(); renderWizard();
+}
+function renderWizard() {
+  const w = $('rule-wizard'), fab = $('fab-add');
+  fab.style.display = WIZ ? 'none' : 'flex';
+  if (!WIZ) { w.innerHTML = ''; return; }
+  const sw = S.devs.filter(d => d.switchable !== false && !d.auto);
+  w.innerHTML = `<div style="border:1px dashed var(--border);border-radius:10px;padding:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <select style="width:auto;min-width:200px;font-weight:600" onchange="wizDev(this)"><option value="" disabled hidden ${WIZ.dev ? '' : 'selected'}>Gerät wählen …</option>${sw.map(d => `<option value="${escH(d.id)}" ${d.id === WIZ.dev ? 'selected' : ''}>${escH(d.icon)} ${escH(d.name)}</option>`).join('')}</select>
+    ${WIZ.dev ? `<select style="width:auto" onchange="wizMode(this)"><option value="" disabled hidden ${WIZ.mode ? '' : 'selected'}>Einschalten oder Ausschalten …</option>${optHtml(MODES, WIZ.mode)}</select>` : ''}
+    ${WIZ.mode ? `<select style="width:auto" onchange="wizType(this)"><option value="" disabled hidden selected>Bedingung wählen …</option>${optHtml(allowed(WIZ.mode, FIXED), '')}</select>` : ''}
+    <button class="ghost" style="padding:2px 9px;margin-left:auto" title="Abbrechen" onclick="wizCancel()">✕</button></div>`;
 }
 const norm = v => Array.isArray(v) ? v.map(norm) : (v && typeof v === 'object') ? Object.fromEntries(Object.keys(v).sort().map(k => [k, norm(v[k])])) : (typeof v === 'string' && v.trim() !== '' && !isNaN(v) ? Number(v) : v);
 const sig = r => JSON.stringify(norm({ device_id: r.device_id, enabled: r.enabled !== false, on: r.on || [], off: r.off || [] }));
@@ -246,10 +261,6 @@ function pendHtml(r) {                            // Zeile in Arbeit: erst Ein/A
 function renderRules() {
   const box = $('rules-list'), fixed = S.A.tariff_mode === 'fixed';
   const sw = S.devs.filter(d => d.switchable !== false && !d.auto);          // Geraete der Ueberschuss-Automatik gehoeren dieser (getrennt), nicht den Regeln
-  const nd = $('rule-new-dev'), nt = $('rule-new-timer');
-  const opts = sw.map(d => `<option value="${escH(d.id)}">${escH(d.icon)} ${escH(d.name)}</option>`).join('');
-  nd.innerHTML = `<option value="" disabled hidden selected>+ Neue Regel für …</option>` + opts; nt.innerHTML = `<option value="" disabled hidden selected>+ Ausschalt-Timer für …</option>` + opts;
-  nd.onchange = () => ruleNew(nd); nt.onchange = () => ruleNew(nt, true);
   FIXED = fixed;
   box.innerHTML = R.length ? R.map(r => {
     const d = dev(r.device_id);
@@ -265,11 +276,11 @@ function renderRules() {
       ${PEND[r.id] ? '' : `<button type="button" class="ghost" style="margin-top:10px" onclick="addStart('${escH(r.id)}')">+ Bedingung hinzufügen</button>`}
       <div class="r-status">${statusBlock(r)}</div>
     </div>`;
-  }).join('') : '<div class="muted">Noch keine Regel. Wähle unten ein Gerät, um eine anzulegen.</div>';
+  }).join('') : '<div class="muted">Noch keine Regel. Tippe unten rechts auf +, um eine anzulegen.</div>';
 }
 
 function renderMain() { $('rules_enabled').checked = CFG.enabled; $('rules_dry').checked = CFG.dry; }
-function renderAll() { renderMain(); renderSettings(); renderRules(); }
+function renderAll() { renderMain(); renderSettings(); renderRules(); renderWizard(); }
 async function loadServer() {
   const devs = await (await fetch('/api/shelly')).json();
   const A = await (await fetch('/api/rules')).json();
