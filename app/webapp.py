@@ -595,8 +595,7 @@ class Controller:
                 text = f"{dev['name']}: Schalten fehlgeschlagen ({e})"
         log.info("Ueberschuss-Automatik: %s", text)
         surplus_ctrl.log(text)
-        if not dry:
-            notify.push("surplus", "🔌 " + text, cfg)
+        notify.push("surplus", ("🧪 " if dry else "🔌 ") + text, cfg)      # auch im Trockenlauf (Text beginnt dann mit "(Trockenlauf)")
 
     def start(self):
         cfg = store.load_config()
