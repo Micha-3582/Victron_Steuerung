@@ -98,6 +98,10 @@
     #week-table, #month-table { table-layout: fixed; }
     #week-table td, #month-table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #week-table td:first-child, #month-table td:first-child { width: 20%; }
+    tr.clickable { cursor: pointer; }
+    tr.clickable:hover td { background: rgba(255,255,255,.04); }
+    tr.clickable.sel td { background: rgba(77,163,255,.14); }
+    #flow-card { scroll-margin-top: 70px; }
     tr.total td { border-top: 2px solid var(--muted); border-bottom: none;
       font-weight: 700; padding-top: 10px; }
     tr.total td:first-child { color: var(--muted); text-transform: uppercase;

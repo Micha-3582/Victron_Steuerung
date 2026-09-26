@@ -504,6 +504,7 @@ function fmtDayLabel(day) {
   return `${D}.${M}.${Y}`;
 }
 function applyEnergyDayUI() {
+  if (typeof markWeekRow === 'function') markWeekRow();
   const minD = energyMinDay || todayStr();
   ['e', 'f'].forEach(p => {
     $(p + '-day').textContent = fmtDayLabel(energyDay);
@@ -1118,7 +1119,7 @@ function renderWeek(data) {
     const dt = new Date(d.day + 'T00:00:00');
     const isToday = weekOffset === 0 && i === data.days.length - 1;
     const label = isToday ? 'Heute' : WEEKDAY_NAMES[dt.getDay()] + ' ' + d.day.slice(8, 10) + '.' + d.day.slice(5, 7) + '.';
-    return `<tr>
+    return `<tr class="clickable" data-day="${d.day}" title="Anklicken: diesen Tag in den Diagrammen anzeigen">
       <td>${label}</td>
       <td>${d.solar.toFixed(1)} kWh</td>
       <td>${d.verbrauch.toFixed(1)} kWh</td>
@@ -1137,7 +1138,18 @@ function renderWeek(data) {
     <td>${tot.cost_eur.toFixed(2)} €</td>
   </tr>`;
   t.innerHTML = head + rows + totalRow;
+  markWeekRow();
 }
+/* Zeile im Wochenrueckblick markieren, deren Tag gerade in den Energie-Diagrammen steht */
+function markWeekRow() {
+  document.querySelectorAll('#week-table tr[data-day]').forEach(tr => tr.classList.toggle('sel', tr.dataset.day === energyDay));
+}
+/* Klick auf einen Tag: Energie-Verlauf + Energiefluesse zeigen diesen Tag, Ansicht springt zu den Energiefluessen */
+$('week-table').addEventListener('click', e => {
+  const tr = e.target.closest('tr[data-day]'); if (!tr) return;
+  loadEnergyDay(tr.dataset.day);
+  $('flow-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
 async function loadWeek() {
   try { renderWeek(await (await fetch('/api/week?offset=' + weekOffset)).json()); } catch (e) {}
 }
