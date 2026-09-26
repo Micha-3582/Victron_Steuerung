@@ -391,7 +391,8 @@ def set_state(dev_id: str, on: bool, timer_s: int | None = None) -> dict:
         return status(d)
     try:
         if d["gen"] >= 2:
-            extra = f"&toggle_after={int(timer_s)}" if on and timer_s is not None else ""
+            # Gen2/3 kennen kein "Timer 0 = aus" (toggle_after=0 wird mit HTTP 500 abgelehnt, am Plus 1PM geprueft) -> ohne Timer schalten
+            extra = f"&toggle_after={int(timer_s)}" if on and timer_s else ""
             _get(d["ip"], f"/rpc/Switch.Set?id={d['channel']}&on={'true' if on else 'false'}{extra}",
                  CALL_TIMEOUT)
         else:
