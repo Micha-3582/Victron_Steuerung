@@ -663,7 +663,7 @@ async function shellyApi(url, method, body) {
   const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || ('Fehler ' + r.status));
+  if (!r.ok) throw new Error(j.error || (r.status >= 500 ? `Der Server antwortet nicht richtig (HTTP ${r.status}) – wurde die App gerade neu gestartet oder ist sie nicht erreichbar?` : 'Fehler ' + r.status));
   return j;
 }
 /* Kleine Bestaetigung unten in der Mitte - im Geraete-Reiter wird jede Aenderung sofort gespeichert */

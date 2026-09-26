@@ -1326,13 +1326,25 @@ async function loadShelly() {
       <div class="systile-s">${stat}</div></div>`;
   }).join('');
 }
+/* Meldungen im eigenen Stil statt Browser-Dialog (Fehler bleiben laenger stehen) */
+function showToast(text, isErr) {
+  let t = document.getElementById('app-toast');
+  if (!t) {
+    t = document.createElement('div'); t.id = 'app-toast';
+    t.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:1200;max-width:min(92vw,520px);padding:12px 18px;border-radius:12px;'
+      + 'background:var(--card);border:1px solid var(--border);box-shadow:0 8px 30px rgba(0,0,0,.5);font-size:14px;line-height:1.4;transition:opacity .25s;opacity:0';
+    document.body.appendChild(t);
+  }
+  t.textContent = text; t.style.borderColor = isErr ? '#e5544a' : 'var(--border)'; t.style.opacity = '1';
+  clearTimeout(t._h); t._h = setTimeout(() => { t.style.opacity = '0'; }, isErr ? 7000 : 3000);
+}
 async function shellySwitch(id, on, el) {
   el.disabled = true;
   try {
     const r = await fetch('/api/shelly/' + encodeURIComponent(id) + '/switch', { method: 'POST',
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on }) });
-    if (!r.ok) alert((await r.json().catch(() => ({}))).error || 'Schalten fehlgeschlagen');
-  } catch (e) { alert('Schalten fehlgeschlagen'); }
+    if (!r.ok) showToast((await r.json().catch(() => ({}))).error || `Schalten fehlgeschlagen (Server-Antwort ${r.status})`, true);
+  } catch (e) { showToast('Schalten fehlgeschlagen – Server nicht erreichbar', true); }
   loadShelly();
   setTimeout(loadShelly, 2000);   // Leistungsmessung des Shelly braucht einen Moment
 }

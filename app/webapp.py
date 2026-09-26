@@ -1188,7 +1188,7 @@ def api_shelly_switch(dev_id):
     try:
         result = shelly.set_state(dev_id, on, timer_s=0 if on else None)     # 0 = evtl. laufenden Auto-Timer aufheben
     except shelly.ShellyError as e:
-        return jsonify(error=str(e)), 502
+        return jsonify(error=str(e)), 400      # nicht 502/504: Cloudflare ersetzt diese Antworten durch eine eigene Fehlerseite
     surplus_ctrl.note_manual(dev_id, hold_min=surplus.settings(store.load_config())["manual_hold_min"])   # Automatik pausiert fuer dieses Geraet
     return jsonify(result)
 
