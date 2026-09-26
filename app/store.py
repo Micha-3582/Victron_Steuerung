@@ -878,6 +878,39 @@ def recent_solar_average(days: int = 7, now: datetime | None = None) -> float | 
     return round(sum(vals) / len(vals), 2)
 
 
+# --- Ladeplan-Simulation: Tages-Schnappschuss fuers Vergleichen ueber mehrere Tage ---------------
+PLANSIM_LOG_PATH = os.path.join(_DIR, "plansim_log.json")
+
+
+def _win_text(ws: list) -> str:
+    return ", ".join(f"{w['from']}-{w['to']}" for w in ws)
+
+
+def record_plansim(now: datetime, res: dict):
+    """Haelt pro Tag EINMAL (ab 14 Uhr, wenn die Preise von morgen bekannt sind) fest, was Simulation und bisherige
+    Steuerung laut Modell gekostet haetten. Nach ein paar Tagen zeigt das, welcher Ansatz besser ist."""
+    if now.hour < 14 or not res:
+        return
+    data = _load_json_recovering(PLANSIM_LOG_PATH, lambda: {"days": {}})
+    days = data.setdefault("days", {})
+    day = now.date().isoformat()
+    if day in days:
+        return
+    days[day] = {"horizon_end": res["horizon_end"],
+                 "sim_net": res["sim"]["net_ct"], "current_net": res["current"]["net_ct"], "none_net": res["none"]["net_ct"],
+                 "sim_charge_kwh": res["sim"]["grid_charge_kwh"], "current_charge_kwh": res["current"]["grid_charge_kwh"],
+                 "sim_windows": _win_text(res["sim"]["windows"]), "current_windows": _win_text(res["current"]["windows"])}
+    for old in sorted(days)[:-60]:
+        del days[old]
+    _dump_json(PLANSIM_LOG_PATH, data, indent=2)
+
+
+def plansim_log(limit: int = 30) -> list:
+    data = _load_json_recovering(PLANSIM_LOG_PATH, lambda: {"days": {}})
+    days = data.get("days", {}) if isinstance(data, dict) else {}
+    return [{"date": d, **days[d]} for d in sorted(days, reverse=True)[:limit]]
+
+
 def energy_grid_charge_buckets(day: str) -> dict:
     """{slot_key 'YYYY-MM-DDTHH:MM': gemessene Netz→Batterie-kWh} eines Tages.
     Basis für die tatsächliche (statt geschätzte) Lademenge in den Ladevorgängen."""

@@ -27,3 +27,4 @@ app/__pycache__/
 *.pyc
 app/vrm_cloud.json
 app/price_cache.json
+app/plansim_log.json

@@ -27,6 +27,7 @@ import shelly
 import store
 import surplus
 import tuya
+import planner
 import price_cache
 import updater
 import vrm
@@ -34,7 +35,7 @@ import vrm_import
 import weather
 from auth import UserError, UserStore, new_secret_key
 from datasources import fetch_tibber_prices
-from logic import ESS_CHARGE, ESS_IDLE, Params, decide
+from logic import ESS_CHARGE, ESS_IDLE, Params, Slot, decide
 from logic import _parse_iso as logic_parse_iso
 from victron import Cerbo
 
@@ -209,6 +210,7 @@ class Controller:
         self.lock = threading.Lock()
         self.status = {"ok": False, "reason": "startet ..."}
         self.prices = []          # aufbereitete Slots für die Kurve
+        self.plansim = {"available": False, "reason": "noch nicht berechnet"}   # Ladeplan-Simulation (nur Anzeige)
         self.last_tick = None
         self.last_error = None
         self._stop = threading.Event()
@@ -275,6 +277,11 @@ class Controller:
                    params=params)
         store.save_state(state)
         store.log_charge_state(d.ess_mode == ESS_CHARGE, d.strategy, now)
+        try:                                            # Simulation laeuft nur mit - sie steuert nichts und darf nie stoeren
+            self.plansim = self._run_plansim(now, soc, prices, d, vrm_data, params)
+        except Exception as e:                          # noqa: BLE001
+            log.warning("Ladeplan-Simulation fehlgeschlagen: %s", e)
+            self.plansim = {"available": False, "reason": f"Simulation fehlgeschlagen: {e}"}
         # Solar-Logbuch: VRM-Tagesprognose einmal pro Tag einfrieren, vergangene Tage mit dem realen Ertrag abschließen.
         try:
             store.record_vrm_forecast(vrm_data["today_kwh"] if vrm_data and vrm_data.get("hours") else None, now)
@@ -348,6 +355,41 @@ class Controller:
                 "cheap_lock": bool(absolute_cheap_price) and ct <= absolute_cheap_price,
             })
         return out
+
+    # ------------------------------------------------------------ Ladeplan-Simulation (nur Anzeige)
+    @staticmethod
+    def _hour_map(hours, now):
+        """VRM-Stundenwerte -> {(datum_iso, stunde): Wh}."""
+        out = {}
+        for h in hours or []:
+            day = now.date() if h.get("day") == "today" else now.date() + timedelta(days=1)
+            out[(day.isoformat(), int(h["hour"]))] = float(h["wh"])
+        return out
+
+    def _run_plansim(self, now, soc, prices, d, vrm_data, params):
+        if not vrm_data or not vrm_data.get("hours"):
+            return {"available": False, "reason": "Die Simulation braucht die VRM-Prognose (Einstellungen → VRM)."}
+        solar = self._hour_map(vrm_data["hours"], now)
+        cons = self._hour_map((vrm_data.get("cons") or {}).get("hours"), now)
+        # eigene Slot-Liste: logic.build_slots dedupliziert nach Uhrzeit (nur 24 h) - der Planer braucht heute UND morgen
+        now_q = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
+        seen, slots = set(), []
+        for item in prices:
+            start = logic_parse_iso(item["startsAt"])
+            if start >= now_q and start not in seen:
+                seen.add(start)
+                slots.append(Slot(name="", price=item["total"] * 100, start=start))
+        slots.sort(key=lambda x: x.start)
+        res = planner.run(now, soc, params, slots, solar, cons or None, {x.start for x in d.plan})
+        if not res:
+            return {"available": False, "reason": "Zu wenig Preis- oder Prognosedaten für eine Simulation."}
+        try:
+            store.record_plansim(now, res)
+        except Exception as e:                              # noqa: BLE001
+            log.warning("Simulations-Protokoll nicht schreibbar: %s", e)
+        return {"available": True, "computed": now.isoformat(timespec="seconds"), "result": res,
+                "cons_source": "VRM-Verbrauchsprognose" if cons else "Tagesverbrauch (Einstellung) / 24 h",
+                "current_strategy": d.strategy}
 
     # ------------------------------------------------------------ Tibber-Preise mit Ausfallsicherung
     _price_fail_since = None
@@ -708,6 +750,7 @@ def api_status():
                "show_ev_card": bool(cfg.get("show_ev_card", True)),
                "show_shelly_card": bool(cfg.get("show_shelly_card", True)),
                "show_weather_card": bool(cfg.get("show_weather_card", True)),
+               "show_plansim_card": bool(cfg.get("show_plansim_card", True)),
                "tile_order": [k for k in (cfg.get("tile_order") or []) if isinstance(k, str)]},
         "prices": prices,
         "ev_schedules": store.list_ev(),
@@ -803,7 +846,7 @@ def api_config():
                "show_live_values", "show_energy_chart", "show_flow_chart",
                "show_week_overview", "show_month_overview", "show_tibber_card",
                "show_override_card", "show_price_plan", "show_charge_log",
-               "show_ev_card", "show_shelly_card", "show_weather_card", "surplus_enabled", "surplus_dry_run",
+               "show_ev_card", "show_shelly_card", "show_weather_card", "show_plansim_card", "surplus_enabled", "surplus_dry_run",
                "surplus_min_soc", "tile_order", "scan_networks"] + list(Params().__dict__.keys())
     allowed = allowed + ["surplus_" + k for k in surplus.DEFAULTS]     # einstellbare Automatik-Werte
     if "scan_networks" in body:
@@ -969,6 +1012,15 @@ def api_shelly_auto_order():
         return jsonify(error="ids fehlt"), 400
     shelly.reorder_auto(ids)
     return jsonify(ok=True)
+
+
+@app.route("/api/plan-sim", methods=["GET"])
+def api_plan_sim():
+    """Ladeplan-Simulation (nur Anzeige): letzter Lauf + Tages-Vergleich der letzten Tage."""
+    with ctrl.lock:
+        data = dict(ctrl.plansim)
+    data["history"] = store.plansim_log()
+    return jsonify(data)
 
 
 @app.route("/api/weather", methods=["GET"])

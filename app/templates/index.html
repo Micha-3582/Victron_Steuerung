@@ -166,6 +166,33 @@
   #wx-days .d .m { color: var(--muted); font-size: 12px; }
   @media (max-width: 560px) { #wx-days .d { grid-template-columns: 64px 28px 76px 1fr; font-size: 13px; } }
 </style>
+<div class="card full" id="plansim-card" hidden style="margin-bottom:14px">
+  <style>
+    #plansim-card .ps-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    #plansim-card .ps-badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    #plansim-card .ps-box { position: relative; height: 260px; margin-top: 10px; }
+    #plansim-card .ps-wins { margin: 10px 0 4px; font-size: 14px; line-height: 1.6; }
+    #plansim-card table { margin-top: 8px; }
+    #plansim-card details { margin-top: 10px; }
+  </style>
+  <div class="ps-head"><h2 style="margin:0">Ladeplan-Simulation</h2><span class="ps-badge">Test – steuert nichts</span>
+    <span class="muted" style="margin-left:auto" id="ps-hint"></span></div>
+  <div class="muted" id="ps-msg" style="margin-top:6px"></div>
+  <div id="ps-body" hidden>
+    <div class="sysgrid" id="ps-tiles" style="margin-top:10px"></div>
+    <div class="ps-wins" id="ps-wins"></div>
+    <div class="ps-box"><canvas id="ps-chart"></canvas></div>
+    <div class="legend" style="margin-top:8px">
+      <span><i class="sw" style="background:#4da3ff"></i>Simulation (Vorschlag)</span>
+      <span><i class="sw" style="background:#f0a63c"></i>Bisherige Steuerung</span>
+      <span><i class="sw" style="background:#8b93a3"></i>Ohne Netzladen</span>
+      <span><i class="sw" style="background:rgba(53,192,122,.7)"></i>Simulation lädt (kWh)</span>
+    </div>
+    <div class="table-scroll"><table id="ps-hist"></table></div>
+    <details><summary class="muted">Annahmen &amp; Erklärung</summary><div class="muted" id="ps-assume" style="margin-top:6px"></div></details>
+  </div>
+</div>
+
 <div class="card full" id="weather-card" hidden style="margin-bottom:14px">
   <div class="wx-top">
     <div><div class="wx-place">📍 <span id="wx-place">Wetter</span></div><div class="wx-temp" id="wx-temp">–</div>
@@ -200,15 +227,16 @@ const TILE_IDS = {
   show_charge_log: 'charge-log-card', show_ev_card: 'ev-card',
 };
 // Reihenfolge der Kacheln (Einstellungen -> Kacheln); Standard = Reihenfolge dieser Liste.
-const ORDER_IDS = { ...TILE_IDS, show_shelly_card: 'shelly-card', show_weather_card: 'weather-card' };
+const ORDER_IDS = { ...TILE_IDS, show_shelly_card: 'shelly-card', show_weather_card: 'weather-card', show_plansim_card: 'plansim-card' };
 function applyTileOrder(order) {
   const keys = Object.keys(ORDER_IDS), given = (order || []).filter(k => keys.includes(k));
   [...given, ...keys.filter(k => !given.includes(k))].forEach((k, i) => { const el = $(ORDER_IDS[k]); if (el) el.style.order = i; });
 }
-let shellyEnabled = true, weatherEnabled = true;
+let shellyEnabled = true, weatherEnabled = true, plansimEnabled = true;
 function applyTileVisibility(ui) {
   applyTileOrder(ui.tile_order);
   shellyEnabled = ui.show_shelly_card !== false;
+  if (plansimEnabled !== (ui.show_plansim_card !== false)) { plansimEnabled = ui.show_plansim_card !== false; if (typeof loadPlansim === 'function') loadPlansim(); }
   if (weatherEnabled !== (ui.show_weather_card !== false)) { weatherEnabled = ui.show_weather_card !== false; if (typeof loadWeather === 'function') loadWeather(); }
   for (const [key, id] of Object.entries(TILE_IDS)) {
     const el = $(id);
@@ -1399,5 +1427,78 @@ function renderWeather() {
 }
 loadWeather();
 setInterval(loadWeather, 600000);
+
+/* --- Ladeplan-Simulation (Test, nur Anzeige) --- */
+let psChart = null, psData = null;
+async function loadPlansim() {
+  const card = $('plansim-card');
+  if (!plansimEnabled) { card.hidden = true; return; }
+  try { psData = await (await fetch('/api/plan-sim')).json(); } catch (e) { return; }
+  card.hidden = false;
+  renderPlansim();
+}
+function psWin(ws) {
+  const today = todayStr();
+  return ws.length ? ws.map(w => `${w.from}–${w.to}${w.day !== today ? ' (morgen)' : ''}`).join(', ') : 'kein Netzladen';
+}
+function renderPlansim() {
+  const d = psData;
+  if (!d.available) { $('ps-msg').textContent = d.reason || ''; $('ps-body').hidden = true; return; }
+  const r = d.result, fmtE = c => (c / 100).toFixed(2) + ' €';
+  $('ps-msg').textContent = '';
+  $('ps-body').hidden = false;
+  $('ps-hint').textContent = `Horizont bis ${r.horizon_end.slice(5, 10).split('-').reverse().join('.')}. ${r.horizon_end.slice(11, 16)} Uhr · Stand ${d.computed.slice(11, 16)}`;
+  const tile = (t, big, sub, color) => `<div class="systile"><div class="systile-t">${t}</div><div class="systile-v" style="color:${color}">${big}</div><div class="systile-s">${sub}</div></div>`;
+  const diff = r.current.net_ct - r.sim.net_ct;
+  $('ps-tiles').innerHTML =
+    tile('🧠 Simulation', fmtE(r.sim.net_ct), `lädt ${r.sim.grid_charge_kwh} kWh · Endstand ${r.sim.end_soc} %`, '#4da3ff') +
+    tile('⚙️ Bisherige Steuerung', fmtE(r.current.net_ct), `lädt ${r.current.grid_charge_kwh} kWh · Endstand ${r.current.end_soc} %`, '#f0a63c') +
+    tile('⛔ Ohne Netzladen', fmtE(r.none.net_ct), `Netzbezug ${r.none.grid_deficit_kwh} kWh · Endstand ${r.none.end_soc} %`, 'var(--muted)') +
+    tile('Unterschied', (diff >= 0 ? '−' : '+') + fmtE(Math.abs(diff)), diff >= 0 ? 'Simulation wäre günstiger' : 'bisherige Steuerung wäre günstiger', diff >= 0 ? 'var(--cheap)' : 'var(--exp)');
+  $('ps-wins').innerHTML = `<b style="color:#4da3ff">Simulation lädt:</b> ${psWin(r.sim.windows)}<br><b style="color:#f0a63c">Bisherige Steuerung:</b> ${psWin(r.current.windows)}`
+    + (d.current_strategy ? ` <span class="muted">(${escH(d.current_strategy)})</span>` : '');
+  const labels = r.times.map(t => t.slice(11, 16));
+  const setup = () => new Chart($('ps-chart').getContext('2d'), {
+    data: { labels: [], datasets: [
+      { type: 'bar', label: 'Simulation lädt', data: [], backgroundColor: 'rgba(53,192,122,.7)', yAxisID: 'y2', order: 2 },
+      { type: 'line', label: 'Simulation', data: [], borderColor: '#4da3ff', backgroundColor: '#4da3ff', pointRadius: 0, borderWidth: 2.5, tension: .25, yAxisID: 'y', order: 0 },
+      { type: 'line', label: 'Bisherige Steuerung', data: [], borderColor: '#f0a63c', pointRadius: 0, borderWidth: 2, tension: .25, yAxisID: 'y', order: 1 },
+      { type: 'line', label: 'Ohne Netzladen', data: [], borderColor: '#8b93a3', borderDash: [5, 4], pointRadius: 0, borderWidth: 1.5, tension: .25, yAxisID: 'y', order: 1 },
+    ] },
+    options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { display: false }, tooltip: { callbacks: {
+        title: it => { const i = it[0].dataIndex; return psData.result.times[i].slice(5, 10).split('-').reverse().join('.') + ' ' + it[0].label + ' Uhr'; },
+        label: it => it.dataset.label === 'Simulation lädt' ? (it.parsed.y ? `Simulation lädt: ${it.parsed.y.toFixed(2)} kWh` : null) : `${it.dataset.label}: ${it.parsed.y.toFixed(0)} %`,
+        footer: it => { const i = it[0].dataIndex, x = psData.result; return `Preis ${x.prices[i]} ct · Solar ${x.pv_kwh[i]} kWh · Verbrauch ${x.cons_kwh[i]} kWh`; } } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#8d96a8', autoSkip: false, maxRotation: 0,
+          callback(v) { const l = this.getLabelForValue(v); if (!l.endsWith(':00')) return ''; return parseInt(l, 10) % 4 === 0 ? l : ''; } } },
+        y: { position: 'left', min: 0, max: 100, title: { display: true, text: 'Akku %', color: '#8d96a8' }, grid: { color: '#2e3542' }, ticks: { color: '#8d96a8', callback: v => v + ' %' } },
+        y2: { position: 'right', beginAtZero: true, suggestedMax: 1, title: { display: true, text: 'Laden kWh', color: '#8d96a8' }, grid: { drawOnChartArea: false }, ticks: { color: '#8d96a8' } } } } });
+  if (!psChart) psChart = setup();
+  psChart.data.labels = labels;
+  psChart.data.datasets[0].data = r.sim.charge_kwh.map(v => v > 0 ? v : null);
+  psChart.data.datasets[1].data = r.sim.soc;
+  psChart.data.datasets[2].data = r.current.soc;
+  psChart.data.datasets[3].data = r.none.soc;
+  psChart.update('none');
+  const h = d.history || [];
+  if (h.length) {
+    const rows = h.slice(0, 10).map(x => { const df = x.current_net - x.sim_net;
+      return `<tr><td>${x.date.slice(8, 10)}.${x.date.slice(5, 7)}.</td><td>${(x.sim_net / 100).toFixed(2)} €</td><td>${(x.current_net / 100).toFixed(2)} €</td>
+        <td style="color:${df >= 0 ? 'var(--cheap)' : 'var(--exp)'};font-weight:600">${df >= 0 ? '−' : '+'}${(Math.abs(df) / 100).toFixed(2)} €</td>
+        <td class="muted">${escH(x.sim_windows || '–')}</td><td class="muted">${escH(x.current_windows || '–')}</td></tr>`; }).join('');
+    const avg = h.reduce((a, x) => a + (x.current_net - x.sim_net), 0) / h.length;
+    $('ps-hist').innerHTML = `<tr class="thead"><td>Tag (14 Uhr)</td><td>Simulation</td><td>Bisherig</td><td>Unterschied</td><td>Sim. lädt</td><td>Bisher lädt</td></tr>` + rows
+      + `<tr class="total"><td>Ø ${h.length} Tage</td><td></td><td></td><td>${avg >= 0 ? '−' : '+'}${(Math.abs(avg) / 100).toFixed(2)} €</td><td></td><td></td></tr>`;
+  } else $('ps-hist').innerHTML = '';
+  const a = r.assumptions;
+  $('ps-assume').innerHTML = `Der Planer rechnet stundenweise (Viertelstunden-Preise) bis zum Ende der bekannten Prognose und wählt die Ladezeiten, bei denen die Stromkosten am kleinsten sind.
+    Grundlage: Solarprognose des VRM, ${escH(d.cons_source)}, Tibber-Preise, dein Akku (Ladeleistung ${a.charge_kw} kW, Netzladen bis ${a.grid_cap_soc} %, Reserve ${a.floor_soc} %, Wirkungsgrad ${Math.round(a.eff_charge * 100)} %).
+    „Kosten" sind Netzbezug in €, abzüglich des Restwerts der im Akku verbliebenen Energie (${a.terminal_value_ct} ct/kWh = Preis der günstigsten Viertelstunden) – so sind Pläne mit unterschiedlichem Endstand vergleichbar.
+    Einspeisevergütung ist nicht eingerechnet. Diese Karte ist ein <b>Test</b>: geschaltet wird weiterhin nach der bisherigen Steuerung.`;
+}
+loadPlansim();
+setInterval(loadPlansim, 120000);
 </script>
 {% endblock %}
