@@ -125,6 +125,9 @@
     @media (max-width: 720px) { .dash { grid-template-columns: 1fr; } }
     .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px;
       font-size: 13px; color: var(--muted); }
+    .legend [data-k] { cursor: pointer; user-select: none; }
+    .legend [data-k].off { opacity: .4; text-decoration: line-through; }
+    .legend .sw-hatch { background: repeating-linear-gradient(45deg, #f0a63c 0 2px, transparent 2px 4px); border: 1px solid #f0a63c; }
     .legend .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px;
       margin-right: 6px; vertical-align: -1px; }
     .sw-cheap { background: var(--cheap); } .sw-normal { background: var(--normal); }

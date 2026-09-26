@@ -506,7 +506,6 @@ const TILE_DEFS = [
   { key: 'show_charge_log', label: 'Ladevorgänge (heute)', hint: 'Protokoll geplanter/durchgeführter Ladungen.' },
   { key: 'show_ev_card', label: 'Manuelle Ladetermine', hint: 'Formular zum Anlegen eines Ladetermins.' },
   { key: 'show_shelly_card', label: 'Geräte (Shelly/Tasmota/Tuya)', hint: 'Schalter für smarte Steckdosen auf dem Dashboard.' },
-  { key: 'show_forecast_card', label: 'Solar-Prognose (VRM)', hint: 'Erwarteter Solarertrag heute/morgen aus dem Victron-VRM-Portal (nur mit VRM-Zugang).' },
 ];
 let tileOrder = TILE_DEFS.map(t => t.key);   // Reihenfolge auf dem Dashboard (▲▼ unten)
 function mergeTileOrder(saved) {

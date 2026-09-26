@@ -727,7 +727,6 @@ def api_status():
                "show_charge_log": bool(cfg.get("show_charge_log", True)),
                "show_ev_card": bool(cfg.get("show_ev_card", True)),
                "show_shelly_card": bool(cfg.get("show_shelly_card", True)),
-               "show_forecast_card": bool(cfg.get("show_forecast_card", True)),
                "tile_order": [k for k in (cfg.get("tile_order") or []) if isinstance(k, str)]},
         "prices": prices,
         "ev_schedules": store.list_ev(),
@@ -824,7 +823,7 @@ def api_config():
                "show_live_values", "show_energy_chart", "show_flow_chart",
                "show_week_overview", "show_month_overview", "show_tibber_card",
                "show_override_card", "show_price_plan", "show_charge_log",
-               "show_ev_card", "show_shelly_card", "show_forecast_card", "surplus_enabled", "surplus_dry_run",
+               "show_ev_card", "show_shelly_card", "surplus_enabled", "surplus_dry_run",
                "surplus_min_soc", "tile_order", "scan_networks"] + list(Params().__dict__.keys())
     allowed = allowed + ["surplus_" + k for k in surplus.DEFAULTS]     # einstellbare Automatik-Werte
     if "scan_networks" in body:

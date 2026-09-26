@@ -22,11 +22,12 @@
   <div class="chart-scroll">
     <div class="chart-inner"><canvas id="energy-chart"></canvas></div>
   </div>
-  <div class="legend">
-    <span><i class="sw" style="background:#e5544a"></i>Verbrauch</span>
-    <span><i class="sw" style="background:#f0a63c"></i>Solar</span>
-    <span><i class="sw" style="background:#4da3ff"></i>Batterie-SOC</span>
-    <span><i class="sw" style="background:rgba(77,163,255,.25);border:1px solid #4da3ff"></i>SOC Min/Max</span>
+  <div class="legend" id="energy-legend" title="Klick auf einen Eintrag blendet ihn im Diagramm ein/aus">
+    <span data-k="verbrauch"><i class="sw" style="background:#e5544a"></i>Verbrauch</span>
+    <span data-k="solar"><i class="sw" style="background:#f0a63c"></i>Solar</span>
+    <span data-k="prognose" style="display:none"><i class="sw sw-hatch"></i>Solarprognose (VRM)</span>
+    <span data-k="soc"><i class="sw" style="background:#4da3ff"></i>Batterie-SOC</span>
+    <span data-k="band"><i class="sw" style="background:rgba(77,163,255,.25);border:1px solid #4da3ff"></i>SOC Min/Max</span>
   </div>
   <div class="sysgrid" id="energy-tiles" style="margin-top:12px"></div>
 </div>
@@ -141,19 +142,6 @@
   <h2>Geräte</h2>
   <div class="sysgrid" id="shelly-grid"></div>
 </div>
-
-<div class="card full" id="forecast-card" hidden style="margin-bottom:14px">
-  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-    <h2 style="margin:0">Solar-Prognose (Victron VRM)</h2>
-    <button id="fc-today" class="ghost daytab active">Heute</button>
-    <button id="fc-tomorrow" class="ghost daytab">Morgen</button>
-    <span class="muted" style="margin-left:auto" id="fc-hint"></span>
-  </div>
-  <div class="chart-scroll">
-    <div class="chart-inner" style="min-width:0"><canvas id="fc-chart" style="max-height:240px"></canvas></div>
-  </div>
-  <div class="sysgrid" id="fc-tiles" style="margin-top:12px"></div>
-</div>
 </div>
 
 {% endblock %}
@@ -174,16 +162,15 @@ const TILE_IDS = {
   show_charge_log: 'charge-log-card', show_ev_card: 'ev-card',
 };
 // Reihenfolge der Kacheln (Einstellungen -> Kacheln); Standard = Reihenfolge dieser Liste.
-const ORDER_IDS = { ...TILE_IDS, show_shelly_card: 'shelly-card', show_forecast_card: 'forecast-card' };
+const ORDER_IDS = { ...TILE_IDS, show_shelly_card: 'shelly-card' };
 function applyTileOrder(order) {
   const keys = Object.keys(ORDER_IDS), given = (order || []).filter(k => keys.includes(k));
   [...given, ...keys.filter(k => !given.includes(k))].forEach((k, i) => { const el = $(ORDER_IDS[k]); if (el) el.style.order = i; });
 }
-let shellyEnabled = true, forecastEnabled = true;
+let shellyEnabled = true;
 function applyTileVisibility(ui) {
   applyTileOrder(ui.tile_order);
   shellyEnabled = ui.show_shelly_card !== false;
-  if (forecastEnabled !== (ui.show_forecast_card !== false)) { forecastEnabled = ui.show_forecast_card !== false; if (typeof loadForecast === 'function') loadForecast(); }
   for (const [key, id] of Object.entries(TILE_IDS)) {
     const el = $(id);
     if (el) el.hidden = ui[key] === false;
@@ -191,6 +178,8 @@ function applyTileVisibility(ui) {
 }
 let chart, energyChart, flowChart, prices = [], allPrices = [], schedules = [], nowSlot = '', nowIso = '';
 let energyDay = '', energyMinDay = '';
+let fcData = null, lastEnergyHist = [], energyFcFull = [];   // VRM-Prognose, zuletzt gezeigte Messwerte, Prognose je Balken
+const legendHidden = new Set((() => { try { return JSON.parse(localStorage.getItem('energyLegendHidden') || '[]'); } catch (e) { return []; } })());
 let activeDay = 'today', chargePowerW = 3500, overrideBusy = false;
 let drag = null;           // {from, to}
 let selectMode = false;    // Touch: ziehen markiert statt scrollen
@@ -302,14 +291,17 @@ function buildEnergyChart() {
     data: {
       labels: [],
       datasets: [
-        { type: 'bar', label: 'Verbrauch', data: [], backgroundColor: '#e5544a', yAxisID: 'y', order: 3 },
-        { type: 'bar', label: 'Solar', data: [], backgroundColor: '#f0a63c', yAxisID: 'y', order: 3 },
+        { type: 'bar', label: 'Verbrauch', data: [], backgroundColor: '#e5544a', yAxisID: 'y', order: 3, stack: 'v' },
+        { type: 'bar', label: 'Solar', data: [], backgroundColor: '#f0a63c', yAxisID: 'y', order: 3, stack: 's' },
         { type: 'line', label: 'SOC Max', data: [], borderColor: 'transparent', pointRadius: 0,
           yAxisID: 'y1', order: 1, spanGaps: true },
         { type: 'line', label: 'SOC Min', data: [], borderColor: 'transparent', pointRadius: 0,
           backgroundColor: 'rgba(77,163,255,.18)', fill: '-1', yAxisID: 'y1', order: 1, spanGaps: true },
         { type: 'line', label: 'Batterie-SOC', data: [], borderColor: '#4da3ff', backgroundColor: '#4da3ff',
           pointRadius: 2, borderWidth: 2, tension: .3, yAxisID: 'y1', order: 0, spanGaps: true },
+        // Prognose-Rest ueber dem realen Solarertrag (gestapelt): wird vom Ertrag "ausgemalt", uebertroffen = kein Rest
+        { type: 'bar', label: 'Solarprognose', data: [], backgroundColor: hatchPattern('#f0a63c'), borderColor: '#f0a63c',
+          borderWidth: 1, borderSkipped: false, yAxisID: 'y', order: 3, stack: 's' },
       ]
     },
     options: {
@@ -321,6 +313,7 @@ function buildEnergyChart() {
           label: item => {
             const l = item.dataset.label;
             if (l === 'SOC Max' || l === 'SOC Min') return null;
+            if (l === 'Solarprognose') { const f = energyFcFull[item.dataIndex]; return f ? `Solarprognose: ${f.toFixed(2)} kWh` : null; }
             const v = item.parsed.y;
             if (v == null) return null;
             return l === 'Batterie-SOC' ? `${l}: ${v} %` : `${l}: ${v.toFixed(2)} kWh`;
@@ -328,9 +321,9 @@ function buildEnergyChart() {
         } }
       },
       scales: {
-        x: { grid: { display: false }, ticks: { color: '#8d96a8', autoSkip: false, maxRotation: 0,
+        x: { stacked: true, grid: { display: false }, ticks: { color: '#8d96a8', autoSkip: false, maxRotation: 0,
           callback(v) { const lab = this.getLabelForValue(v); if (!lab.endsWith(':00')) return ''; const hr = parseInt(lab, 10); const step = (energyChart && energyChart.width > 900) ? 2 : 3; return hr % step === 0 ? lab : ''; } } },
-        y: { position: 'left', beginAtZero: true, title: { display: true, text: 'kWh', color: '#8d96a8' },
+        y: { stacked: true, position: 'left', beginAtZero: true, title: { display: true, text: 'kWh', color: '#8d96a8' },
           grid: { color: '#2e3542' }, ticks: { color: '#8d96a8' } },
         y1: { position: 'right', min: 0, max: 100, title: { display: true, text: '%', color: '#8d96a8' },
           grid: { drawOnChartArea: false }, ticks: { color: '#8d96a8', callback: v => v + ' %' } }
@@ -373,24 +366,67 @@ function aggregateHourly(hist) {
     return o;
   });
 }
+/* Gestrichelte Schraffur fuer die Solarprognose-Balken (wie im VRM) */
+function hatchPattern(color) {
+  const c = document.createElement('canvas'); c.width = c.height = 8;
+  const x = c.getContext('2d'); x.strokeStyle = color; x.lineWidth = 1.6;
+  x.beginPath(); x.moveTo(0, 8); x.lineTo(8, 0); x.moveTo(-2, 2); x.lineTo(2, -2); x.moveTo(6, 10); x.lineTo(10, 6); x.stroke();
+  return x.createPattern(c, 'repeat');
+}
+function tomorrowStr() { const d = new Date(todayStr() + 'T00:00'); d.setDate(d.getDate() + 1); return isoDay(d); }
+/* Prognose (Wh je Stunde) fuer heute/morgen aus dem VRM oder null (kein Zugang / keine Daten / anderer Tag) */
+function fcForDay(day) {
+  if (!fcData || !fcData.hours || !fcData.hours.length) return null;
+  const key = day === todayStr() ? 'today' : day === tomorrowStr() ? 'tomorrow' : null;
+  if (!key) return null;
+  const m = {}; fcData.hours.filter(h => h.day === key).forEach(h => { m[h.hour] = h.wh; });
+  return Object.keys(m).length ? m : null;
+}
+// Legenden-Eintrag -> Datensaetze des Energie-Diagramms
+const LEGEND_DS = { verbrauch: [0], solar: [1], soc: [4], band: [2, 3], prognose: [5] };
 function renderEnergyChart(hist) {
   if (!energyChart) return;
   hist = hist || [];
+  lastEnergyHist = hist;
   if (energyHourly) hist = aggregateHourly(hist);
-  energyChart.data.labels = hist.map(h => h.hour);
+  const day = energyDay || todayStr();
+  const fc = fcForDay(day);
+  let rows = hist;
+  if (fc) {               // mit Prognose: ganzer Tag als Raster (wie im VRM), Zukunft bleibt leer
+    const step = energyHourly ? 60 : 15, byLabel = new Map(hist.map(h => [h.hour, h]));
+    rows = [];
+    for (let m = 0; m < 1440; m += step) { const lab = `${pad(Math.floor(m / 60))}:${pad(m % 60)}`; rows.push(byLabel.get(lab) || { hour: lab }); }
+  }
+  energyChart.data.labels = rows.map(h => h.hour);
   const d = energyChart.data.datasets;
-  d[0].data = hist.map(h => h.verbrauch);
-  d[1].data = hist.map(h => h.solar);
-  d[2].data = hist.map(h => h.soc_max);
-  d[3].data = hist.map(h => h.soc_min);
-  d[4].data = hist.map(h => h.soc_avg);
+  d[0].data = rows.map(h => h.verbrauch ?? null);
+  d[1].data = rows.map(h => h.solar ?? null);
+  d[2].data = rows.map(h => h.soc_max ?? null);
+  d[3].data = rows.map(h => h.soc_min ?? null);
+  d[4].data = rows.map(h => h.soc_avg ?? null);
+  const per = energyHourly ? 1 : 0.25;             // Prognose ist stuendlich -> bei 15-Min-Raster gleichmaessig verteilt
+  energyFcFull = rows.map(h => fc ? (fc[parseInt(h.hour, 10)] || 0) / 1000 * per : null);
+  d[5].data = rows.map((h, i) => energyFcFull[i] == null ? null
+    : Math.round((legendHidden.has('solar') ? energyFcFull[i] : Math.max(0, energyFcFull[i] - (h.solar || 0))) * 1000) / 1000);
+  Object.entries(LEGEND_DS).forEach(([k, idx]) => idx.forEach(i => { d[i].hidden = legendHidden.has(k); }));
+  document.querySelectorAll('#energy-legend [data-k]').forEach(el => {
+    el.classList.toggle('off', legendHidden.has(el.dataset.k));
+    if (el.dataset.k === 'prognose') el.style.display = fc ? '' : 'none';
+  });
   const hasData = hist.some(h => h.verbrauch || h.solar || h.soc_avg != null);
   const takt = energyHourly ? 'stündlich' : 'im 15-Min-Takt';
   $('energy-hint').textContent = hasData
-    ? `Verbrauch & Solar, Batterie-SOC ${takt} (echte Messwerte).`
-    : 'Noch keine Verlaufsdaten – füllt sich mit jedem Regelzyklus.';
+    ? `Verbrauch & Solar, Batterie-SOC ${takt} (echte Messwerte)${fc ? ' – gestrichelt: Solarprognose vom Victron-VRM.' : '.'}`
+    : fc ? 'Solarprognose vom Victron-VRM (gestrichelt).' : 'Noch keine Verlaufsdaten – füllt sich mit jedem Regelzyklus.';
   energyChart.update('none');
 }
+$('energy-legend').addEventListener('click', e => {
+  const el = e.target.closest('[data-k]'); if (!el) return;
+  const k = el.dataset.k;
+  if (legendHidden.has(k)) legendHidden.delete(k); else legendHidden.add(k);
+  try { localStorage.setItem('energyLegendHidden', JSON.stringify([...legendHidden])); } catch (err) { /* nur Komfort */ }
+  renderEnergyChart(lastEnergyHist);
+});
 
 /* --- Energieflüsse (7 Pfade, gestapelt +/-) --- */
 const FLOWS = [
@@ -463,6 +499,7 @@ function fmtDayLabel(day) {
   const y = new Date(t + 'T00:00'); y.setDate(y.getDate() - 1);
   const [Y, M, D] = day.split('-');
   if (day === t) return 'Heute';
+  if (day === tomorrowStr()) return 'Morgen';
   if (day === isoDay(y)) return `Gestern · ${D}.${M}.`;
   return `${D}.${M}.${Y}`;
 }
@@ -471,13 +508,14 @@ function applyEnergyDayUI() {
   ['e', 'f'].forEach(p => {
     $(p + '-day').textContent = fmtDayLabel(energyDay);
     $(p + '-prev').style.display = energyDay <= minD ? 'none' : '';
-    $(p + '-next').style.display = energyDay >= todayStr() ? 'none' : '';
+    $(p + '-next').style.display = energyDay >= (fcForDay(tomorrowStr()) ? tomorrowStr() : todayStr()) ? 'none' : '';
   });
 }
 async function loadEnergyDay(day) {
   energyDay = day;
   try {
-    const d = await (await fetch('/api/history?day=' + day)).json();
+    const d = day > todayStr() ? { history: [] }        // Zukunft: keine Messwerte, nur die Prognose
+      : await (await fetch('/api/history?day=' + day)).json();
     energyMinDay = d.min_day || energyMinDay;
     renderEnergyChart(d.history);
     renderFlowChart(d.history);
@@ -490,7 +528,8 @@ function shiftEnergyDay(delta) {
   base.setDate(base.getDate() + delta);
   let nd = isoDay(base);
   const t = todayStr(), minD = energyMinDay || t;
-  if (nd > t) nd = t;
+  const maxD = fcForDay(tomorrowStr()) ? tomorrowStr() : t;
+  if (nd > maxD) nd = maxD;
   if (nd < minD) nd = minD;
   loadEnergyDay(nd);
 }
@@ -827,6 +866,11 @@ function renderEnergyTiles(history, day) {
     </div>`;
   // Autarkiegrad: Anteil des Verbrauchs, der aus eigener PV/Batterie gedeckt
   // wurde statt aus dem Netz bezogen zu werden. 100 % = komplett autark.
+  const fcm = fcForDay(day);
+  const fcSum = fcm ? Object.values(fcm).reduce((a, b) => a + b, 0) / 1000 : null;
+  const fcTile = fcSum != null ? tile(sun + ' Solar-Prognose', fcSum.toFixed(1) + ' kWh',
+    day === todayStr() ? `noch ${fcData.remaining_today_kwh.toFixed(1)} kWh bis Tagesende (VRM)` : 'erwartet (VRM)', 'var(--timer)') : '';
+  if (day > todayStr()) { el.innerHTML = fcTile; return; }        // Zukunft: nur die Prognose
   const autarky = verbrauch > 0 ? Math.max(0, Math.min(100, (1 - imp / verbrauch) * 100)) : null;
   const autarkyColor = autarky === null ? 'var(--muted)'
     : autarky >= 70 ? 'var(--cheap)' : autarky >= 40 ? 'var(--accent)' : 'var(--exp)';
@@ -837,7 +881,7 @@ function renderEnergyTiles(history, day) {
     tile(sun + ' Solar', solar.toFixed(1) + ' kWh', kv([[tag + ' erzeugt', '']]), 'var(--timer)') +
     tile('🧭 Autarkiegrad',
       autarky === null ? '–' : Math.round(autarky) + ' %',
-      kv([[tag + (autarky === null ? ' noch keine Daten' : ' aus eigener Erzeugung'), '']]), autarkyColor);
+      kv([[tag + (autarky === null ? ' noch keine Daten' : ' aus eigener Erzeugung'), '']]), autarkyColor) + fcTile;
 }
 
 /* Schnelle Live-Aktualisierung (unabhängig vom 5-Min-Regelzyklus) */
@@ -1191,49 +1235,14 @@ function initShellyDragging() {
 initShellyDragging();
 setInterval(loadShelly, 15000);
 
-/* --- Solar-Prognose aus dem VRM-Portal (Zugang in den Einstellungen; Server puffert 30 min) --- */
-let fcData = null, fcDay = 'today', fcChart = null;
+/* --- Solar-Prognose aus dem VRM-Portal: fliesst in den Energieverlauf ein (Zugang in den Einstellungen; Server puffert 30 min) --- */
 async function loadForecast() {
-  const card = $('forecast-card');
-  if (!forecastEnabled) { card.hidden = true; return; }
   try { fcData = await (await fetch('/api/vrm/forecast')).json(); } catch (e) { return; }
-  if (!fcData.configured) { card.hidden = true; return; }      // ohne Zugang keine Kachel
-  card.hidden = false;
-  renderForecast();
+  if (!energyChart) return;
+  renderEnergyChart(lastEnergyHist);
+  renderEnergyTiles(lastEnergyHist, energyDay || todayStr());
+  applyEnergyDayUI();
 }
-function renderForecast() {
-  const d = fcData; if (!d) return;
-  const rows = d.hours.filter(h => h.day === fcDay);
-  const nowH = new Date().getHours();
-  const hrs = rows.length ? rows.filter(h => h.wh > 0) : [];
-  const lo = hrs.length ? Math.max(0, Math.min(...hrs.map(h => h.hour)) - 1) : 5;
-  const hi = hrs.length ? Math.min(23, Math.max(...hrs.map(h => h.hour)) + 1) : 21;
-  const shown = rows.filter(h => h.hour >= lo && h.hour <= hi);
-  const colors = shown.map(h => fcDay === 'today' && h.hour === nowH ? '#f0a63c' : 'rgba(240,166,60,.55)');
-  if (!fcChart) {
-    fcChart = new Chart($('fc-chart').getContext('2d'), { type: 'bar',
-      data: { labels: [], datasets: [{ data: [], borderWidth: 0 }] },
-      options: { responsive: true, maintainAspectRatio: false, animation: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: {
-          title: it => it[0].label + ' Uhr', label: it => `${Math.round(it.parsed.y)} Wh` } } },
-        scales: { x: { ticks: { color: '#8b93a3' }, grid: { display: false } },
-                  y: { beginAtZero: true, ticks: { color: '#8b93a3', callback: v => v >= 1000 ? (v / 1000) + ' kWh' : v + ' Wh' }, grid: { color: 'rgba(139,147,163,.15)' } } } } });
-  }
-  fcChart.data.labels = shown.map(h => pad(h.hour));
-  fcChart.data.datasets[0].data = shown.map(h => h.wh);
-  fcChart.data.datasets[0].backgroundColor = colors;
-  fcChart.update();
-  const tile = (t, v, s, c) => `<div class="systile"><div class="systile-t">${t}</div><div class="systile-v" style="color:${c}">${v}</div><div class="systile-s">${s}</div></div>`;
-  $('fc-tiles').innerHTML =
-    tile('☀︎ Heute erwartet', d.today_kwh.toFixed(1) + ' kWh', 'Prognose gesamt', 'var(--timer)') +
-    tile('⏳ Heute noch', d.remaining_today_kwh.toFixed(1) + ' kWh', 'bis Sonnenuntergang', 'var(--accent)') +
-    tile('🌤 Morgen erwartet', d.tomorrow_kwh.toFixed(1) + ' kWh', 'Prognose gesamt', 'var(--timer)');
-  $('fc-hint').textContent = d.error ? '⚠ ' + d.error : (d.updated ? 'Stand ' + d.updated.slice(11, 16) + ' Uhr' : '');
-  $('fc-today').classList.toggle('active', fcDay === 'today');
-  $('fc-tomorrow').classList.toggle('active', fcDay === 'tomorrow');
-}
-$('fc-today').addEventListener('click', () => { fcDay = 'today'; renderForecast(); });
-$('fc-tomorrow').addEventListener('click', () => { fcDay = 'tomorrow'; renderForecast(); });
 loadForecast();
 setInterval(loadForecast, 300000);
 </script>
