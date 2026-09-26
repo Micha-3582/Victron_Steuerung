@@ -13,8 +13,9 @@
     Ohne eigene Ausschalt-Bedingung schaltet das Gerät aus, sobald die Einschalt-Bedingungen nicht mehr stimmen. Ein <b>Ausschalt-Timer</b> (ohne Einschalt-Bedingung)
     schaltet ein Gerät nur aus, zum Beispiel jeden Abend um 23:30, und nie von selbst ein. Läuft ein Gerät schon, während die Einschalt-Bedingungen stimmen, übernimmt die Regel es
     und schaltet es später auch wieder aus (wie ein Timer). Schaltest du ein Gerät von Hand aus, bleibt es aus, bis die Regel das nächste Mal neu beginnt.
-    Die Geräte richtest du unter <a href="/admin#geraete" style="color:var(--accent);font-weight:600">Einstellungen → Geräte</a> ein.
+    Die Geräte richtest du unter Einstellungen → Geräte ein.
     <b>Änderungen werden erst mit „Speichern“ (Leiste unten) übernommen.</b></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"><a href="/rules-log"><button type="button" class="ghost">📒 Logbuch</button></a><a href="/automation"><button type="button" class="ghost">Zur Überschuss-Automatik</button></a><a href="/admin#geraete"><button type="button" class="ghost">Geräte einrichten</button></a></div>
   <div style="display:flex;align-items:center;gap:14px">
     <label class="switch" style="margin:0"><input type="checkbox" id="rules_enabled"><span class="slider"></span></label>
     <div><b>Regeln aktiv</b><div class="muted">Hauptschalter für alle Regeln auf dieser Seite.</div></div>
@@ -23,7 +24,7 @@
     <label class="switch" style="margin:0"><input type="checkbox" id="rules_dry"><span class="slider"></span></label>
     <div><b>Trockenlauf</b><div class="muted">Nur protokollieren (und melden), was geschaltet würde – nichts wird wirklich geschaltet.</div></div>
   </div>
-  <div style="margin-top:12px"><b>Letzte Aktionen</b> <a href="/rules-log" style="margin-left:8px;color:var(--accent)">📒 Logbuch öffnen</a>
+  <div style="margin-top:12px"><b>Letzte Aktionen</b>
     <div id="rules-events" class="muted" style="margin-top:4px">–</div></div>
 </div>
 

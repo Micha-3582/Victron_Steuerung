@@ -6,7 +6,7 @@
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
     <h2 style="margin:0">{{ log_title }}</h2>
     <select id="days" class="ghost" style="width:auto"><option value="7">7 Tage</option><option value="30" selected>30 Tage</option><option value="">Alles</option></select>
-    <a href="{{ back_url }}" style="margin-left:auto;color:var(--accent)">→ {{ back_label }}</a>
+    <a href="{{ back_url }}" style="margin-left:auto"><button type="button" class="ghost">← {{ back_label }}</button></a>
   </div>
   <div class="muted" style="margin:6px 0 10px">{{ log_hint }} Auch die Aktionen des Trockenlaufs stehen hier (dort steht „würde …“), neueste zuerst.</div>
   <div id="summary" class="muted" style="margin-bottom:8px"></div>

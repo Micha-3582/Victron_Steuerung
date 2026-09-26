@@ -10,9 +10,9 @@
   <h2><svg class="h2i" style="color:var(--timer)" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg>Überschuss-Automatik</h2>
   <div class="muted" style="margin-bottom:12px">Ist der Akku voll und wird eingespeist, schaltet die Steuerung die Geräte dieser Liste nacheinander zu (oberstes zuerst).
     Bei Netzbezug oder Batterie-Entladung werden sie in umgekehrter Reihenfolge wieder abgeschaltet.
-    Die Geräte richtest du unter <a href="/admin#geraete" style="color:var(--accent);font-weight:600">Einstellungen → Geräte</a> ein; eigene Schaltregeln (Uhrzeit, Preis, …) findest du unter
-    <a href="/rules" style="color:var(--accent);font-weight:600">Regeln</a> – ein Gerät gehört entweder hierher oder zu einer Regel.
+    Die Geräte richtest du unter Einstellungen → Geräte ein; eigene Schaltregeln (Uhrzeit, Preis, …) gibt es auf der Seite „Regeln“ – ein Gerät gehört entweder hierher oder zu einer Regel.
     <b>Änderungen werden erst mit „Speichern“ (Leiste unten) übernommen.</b></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"><a href="/automation-log"><button type="button" class="ghost">📒 Logbuch</button></a><a href="/rules"><button type="button" class="ghost">Zu den Regeln</button></a><a href="/admin#geraete"><button type="button" class="ghost">Geräte einrichten</button></a></div>
   <div style="display:flex;align-items:center;gap:14px">
     <label class="switch" style="margin:0"><input type="checkbox" id="surplus_enabled"><span class="slider"></span></label>
     <div><b>Überschuss-Automatik aktiv</b></div>
@@ -21,7 +21,7 @@
     <label class="switch" style="margin:0"><input type="checkbox" id="surplus_dry"><span class="slider"></span></label>
     <div><b>Trockenlauf</b><div class="muted">Nur protokollieren (und melden), was geschaltet würde – nichts wird wirklich geschaltet.</div></div>
   </div>
-  <div style="margin-top:12px"><b>Letzte Aktionen</b> <a href="/automation-log" style="margin-left:8px;color:var(--accent)">📒 Logbuch öffnen</a>
+  <div style="margin-top:12px"><b>Letzte Aktionen</b>
     <div id="surplus-events" class="muted" style="margin-top:4px">–</div></div>
 </div>
 
