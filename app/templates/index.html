@@ -149,10 +149,11 @@
   #weather-card .wx-temp { font-size: 34px; font-weight: 600; line-height: 1.15; margin-top: 4px; }
   #weather-card .wx-right { text-align: right; }
   #weather-card .wx-icon { font-size: 40px; line-height: 1.1; }
-  #weather-card .wx-toggle { display: block; width: 100%; margin-top: 8px; padding: 2px 0; font-size: 18px; line-height: 1; }
-  #weather-card .wx-toggle span { display: inline-block; transition: transform .2s; }
-  #weather-card.open .wx-toggle span { transform: rotate(180deg); }
-  #wx-hours { display: flex; gap: 6px; overflow-x: auto; padding: 10px 0 6px; -webkit-overflow-scrolling: touch; }
+  #wx-hours { display: flex; gap: 6px; overflow-x: auto; padding: 10px 0 6px; -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin; scrollbar-color: #3a4252 transparent; }
+  #wx-hours::-webkit-scrollbar { height: 8px; }
+  #wx-hours::-webkit-scrollbar-track { background: transparent; }
+  #wx-hours::-webkit-scrollbar-thumb { background: #3a4252; border-radius: 4px; }
   #wx-hours .h { flex: 0 0 auto; min-width: 58px; text-align: center; padding: 8px 6px; border-radius: 10px;
     background: var(--card2, rgba(255,255,255,.04)); font-size: 13px; }
   #wx-hours .h .t { font-weight: 600; font-size: 15px; }
@@ -164,15 +165,14 @@
   #wx-days .d .m { color: var(--muted); font-size: 12px; }
   @media (max-width: 560px) { #wx-days .d { grid-template-columns: 64px 28px 76px 1fr; font-size: 13px; } }
 </style>
-<div class="card" id="weather-card" hidden style="margin-bottom:14px">
+<div class="card full" id="weather-card" hidden style="margin-bottom:14px">
   <div class="wx-top">
     <div><div class="wx-place">📍 <span id="wx-place">Wetter</span></div><div class="wx-temp" id="wx-temp">–</div>
       <div class="muted" id="wx-sub" style="margin-top:2px"></div></div>
     <div class="wx-right"><div id="wx-text"></div><div class="wx-icon" id="wx-icon"></div></div>
   </div>
-  <button type="button" class="ghost wx-toggle" id="wx-toggle" aria-expanded="false" title="Details ein-/ausklappen"><span>⌄</span></button>
-  <div id="wx-detail" hidden>
-    <div class="muted" style="margin-top:6px">Nächste 24 Stunden</div>
+  <div id="wx-detail">
+    <div class="muted" style="margin-top:10px">Nächste 24 Stunden</div>
     <div id="wx-hours"></div>
     <div class="muted" style="margin-top:8px">7 Tage</div>
     <div id="wx-days"></div>
@@ -1384,11 +1384,6 @@ function renderWeather() {
   }).join('');
   $('wx-foot').textContent = (w.error ? '⚠ ' + w.error + ' · ' : '') + 'Daten: Open-Meteo' + (w.updated ? ' · Stand ' + w.updated.slice(11, 16) + ' Uhr' : '');
 }
-$('wx-toggle').addEventListener('click', () => {
-  const card = $('weather-card'), open = $('wx-detail').hidden;
-  $('wx-detail').hidden = !open; card.classList.toggle('open', open); card.classList.toggle('full', open);
-  $('wx-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
-});
 loadWeather();
 setInterval(loadWeather, 600000);
 </script>
