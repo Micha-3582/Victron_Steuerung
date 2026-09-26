@@ -22,7 +22,7 @@ _lock = threading.Lock()
 def log(module: str, text: str, dev: str = "", action: str = "", dry: bool = False, rule: str | None = None, now: datetime | None = None):
     if module not in PATHS:
         raise ValueError(module)
-    row = {"ts": (now or datetime.now()).isoformat(timespec="seconds"), "dev": dev, "action": action, "text": text, "dry": bool(dry), "rule": rule}
+    row = {"ts": (now or datetime.now()).isoformat(timespec="milliseconds"), "dev": dev, "action": action, "text": text, "dry": bool(dry), "rule": rule}
     with _lock:
         path = PATHS[module]
         try:
@@ -84,7 +84,7 @@ def mark_read(module: str, now: datetime | None = None):
         raise ValueError(module)
     with _lock:
         d = _read_marks()
-        d[module] = (now or datetime.now()).isoformat(timespec="seconds")
+        d[module] = (now or datetime.now()).isoformat(timespec="milliseconds")
         try:
             with open(READ_PATH, "w", encoding="utf-8") as f:
                 json.dump(d, f)
