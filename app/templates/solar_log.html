@@ -9,7 +9,8 @@
     eingefrorene Tages-Prognose gegen den realen Ertrag. „Vorschlag" ist die
     <b>Performance Ratio (PR)</b>, mit der Open-Meteo diesen Tag exakt getroffen hätte –
     über mehrere Tage nähert sich daraus ein stabiler Wert. forecast.solar läuft nur noch
-    als Vergleichsspalte mit (steuert nichts).
+    als Vergleichsspalte mit (steuert nichts), ebenso die Prognose des Victron-VRM-Portals
+    (falls eingerichtet) – so siehst du, welche Quelle deine Anlage am besten trifft.
   </div>
 
   <div class="row" style="margin-bottom:14px">
@@ -52,7 +53,7 @@ async function load() {
     ? `Empfehlung aus ${d.days_used} sauberen abgeschlossenen Tagen.${curtNote} PR änderst du in den Einstellungen unter PV-Prognose.`
     : `Noch keine verwertbaren Tage – das Logbuch füllt sich ab dem ersten vollen Tag.${curtNote}`;
 
-  const head = `<tr class="thead"><td>Datum</td><td>Open-Meteo (steuert)</td><td>forecast.solar (Vergleich)</td><td>Ertrag</td><td>Vorschlag PR</td></tr>`;
+  const head = `<tr class="thead"><td>Datum</td><td>Open-Meteo (steuert)</td><td>forecast.solar (Vergleich)</td><td>Victron VRM (Vergleich)</td><td>Ertrag</td><td>Vorschlag PR</td></tr>`;
   const rows = (d.rows || []).map(r => {
     const prov = r.provisional ? ' <span class="muted">(läuft)</span>' : '';
     const curt = r.curtailed
@@ -66,6 +67,10 @@ async function load() {
     const fs = (r.forecast_corr != null)
       ? `${r.forecast_corr.toFixed(1)} kWh<br><span class="muted">roh ${(r.forecast_raw ?? 0).toFixed(1)} · Abw. </span>${devSpan(r.deviation_pct)}`
       : '<span class="muted">–</span>';
+    // Victron VRM (Vergleich)
+    const vr = r.vrm_forecast != null
+      ? `${r.vrm_forecast.toFixed(1)} kWh<br><span class="muted">Abw. </span>${devSpan(r.vrm_deviation_pct)}`
+      : '<span class="muted">–</span>';
     // Vorschlags-PR (Open-Meteo); an gedeckelten Tagen nur in Klammern (ausgeklammert)
     const sug = r.om_suggested_pr != null
       ? (r.curtailed ? `<span class="muted">(${r.om_suggested_pr.toFixed(2)})</span>` : r.om_suggested_pr.toFixed(2))
@@ -74,6 +79,7 @@ async function load() {
       <td><b>${fmtDate(r.date)}</b>${prov}</td>
       <td>${om}</td>
       <td>${fs}</td>
+      <td>${vr}</td>
       <td>${r.actual != null ? r.actual.toFixed(1) + ' kWh' : '–'}${curt}</td>
       <td>${sug}</td>
     </tr>`;

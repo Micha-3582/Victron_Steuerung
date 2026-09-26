@@ -779,6 +779,13 @@ def _finalize_om_pr(e: dict):
         e["om_suggested_pr"] = round(pr_used * actual / om, 2)
 
 
+def _finalize_vrm(e: dict):
+    """Abweichung der VRM-Prognose (nur Vergleich, steuert nichts): (real - Prognose) / Prognose."""
+    vrm_kwh, actual = e.get("vrm_forecast"), e.get("actual")
+    if vrm_kwh and actual is not None:
+        e["vrm_deviation_pct"] = round((actual - vrm_kwh) / vrm_kwh * 100, 1)
+
+
 def _finalize_bucket_ratios(e: dict, day: str):
     """Tageszeit-Bucket-Abweichung eines abgeschlossenen Tages: wie stark weicht
     JEDER Bucket vom Tages-DURCHSCHNITT ab (nicht vom Rohwert) - die globale
@@ -817,6 +824,7 @@ def _finalize_solar_days(days: dict, now: datetime):
             e["suggested_factor"] = round(actual / raw, 2) if raw else None
             # Open-Meteo (Steuerquelle): Abweichung + Vorschlags-PR
             _finalize_om_pr(e)
+            _finalize_vrm(e)
             _finalize_bucket_ratios(e, day)
             smax = _solar_socmax_for_day(day)
             e["soc_max"] = round(smax, 1) if smax is not None else None
@@ -830,6 +838,8 @@ def _finalize_solar_days(days: dict, now: datetime):
                     e["curtailed"] = bool(smax >= _SOC_FULL_THRESHOLD)
             if e.get("om_suggested_pr") is None:
                 _finalize_om_pr(e)
+            if e.get("vrm_deviation_pct") is None:
+                _finalize_vrm(e)
             if e.get("bucket_ratio_norm") is None and e.get("bucket_forecast"):
                 _finalize_bucket_ratios(e, day)
 
@@ -838,7 +848,8 @@ def record_solar_forecast(om_kwh: float | None, pr: float,
                           now: datetime | None = None,
                           fs_raw: float | None = None, fs_corr: float | None = None,
                           fs_factor: float | None = None,
-                          hourly_today: dict | None = None):
+                          hourly_today: dict | None = None,
+                          vrm_kwh: float | None = None):
     """Friert die Tages-Prognose EINMAL pro Tag ein und finalisiert vergangene Tage.
     Primärquelle = Open-Meteo (om_kwh mit Performance Ratio pr, steuert die Anlage);
     forecast.solar (fs_*) läuft nur als Vergleich mit. Überschreibt einen bereits
@@ -846,15 +857,19 @@ def record_solar_forecast(om_kwh: float | None, pr: float,
 
     hourly_today (optional): die Open-Meteo-Stundenkurve vom ERSTEN Tick des Tages -
     wird als 'bucket_forecast' eingefroren (Tageszeit-Buckets, siehe datasources.
-    bucket_sums), Grundlage fuer auto_adjust_bucket_factors()."""
+    bucket_sums), Grundlage fuer auto_adjust_bucket_factors().
+
+    vrm_kwh (optional): Tagesprognose aus dem Victron-VRM-Portal - wird ebenfalls
+    einmal pro Tag eingefroren, nur als Vergleich im Logbuch (steuert nichts)."""
     now = now or datetime.now()
     today = now.date().isoformat()
     data = _load_solar_log()
     days = data["days"]
     _finalize_solar_days(days, now)
     om = round(om_kwh, 2) if om_kwh and om_kwh > 0 else None
+    vrm_v = round(vrm_kwh, 2) if vrm_kwh and vrm_kwh > 0 else None
     if today not in days:
-        if om is None and not fs_raw:
+        if om is None and not fs_raw and vrm_v is None:
             return                      # noch keine einzige Quelle -> nicht einfrieren
         days[today] = {
             "om_forecast": om, "pr": round(pr, 3),
@@ -865,6 +880,7 @@ def record_solar_forecast(om_kwh: float | None, pr: float,
             "actual": None, "deviation_pct": None, "suggested_factor": None,
             "bucket_forecast": bucket_sums(hourly_today) if hourly_today else None,
             "bucket_actual": None, "bucket_ratio_norm": None,
+            "vrm_forecast": vrm_v, "vrm_deviation_pct": None,
         }
     else:
         e = days[today]
@@ -877,6 +893,8 @@ def record_solar_forecast(om_kwh: float | None, pr: float,
             e["factor"] = round(fs_factor, 2) if fs_factor else None
         if hourly_today and e.get("bucket_forecast") is None:
             e["bucket_forecast"] = bucket_sums(hourly_today)
+        if vrm_v is not None and e.get("vrm_forecast") is None:
+            e["vrm_forecast"] = vrm_v
     _dump_json(SOLAR_LOG_PATH, data, indent=2)
 
 

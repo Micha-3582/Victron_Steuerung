@@ -309,14 +309,21 @@ class Controller:
         store.log_charge_state(d.ess_mode == ESS_CHARGE, d.strategy, now)
         # Solar-Logbuch: Open-Meteo (Steuerquelle) einfrieren, forecast.solar als
         # Vergleich mitloggen, vergangene Tage mit dem realen Ertrag abschließen.
-        if solar_today > 0 or fs_today > 0:
+        vrm_today = None
+        try:                                     # VRM-Prognose: nur Vergleich fuers Logbuch, Ausfall egal
+            vf = vrm.forecast()
+            if vf.get("hours"):
+                vrm_today = vf["today_kwh"]
+        except Exception as e:                               # noqa: BLE001
+            log.warning("VRM-Prognose (Vergleich) nicht verfügbar: %s", e)
+        if solar_today > 0 or fs_today > 0 or vrm_today:
             fs_factor = Params.from_config(cfg).pv_korrektur_faktor
             fs_corr = round(fs_today * fs_factor, 2) if fs_today else None
             store.record_solar_forecast(
                 om_kwh=solar_today, pr=float(cfg.get("openmeteo_pr", OPENMETEO_PR)),
                 now=now, fs_raw=(fs_today or None), fs_corr=fs_corr,
                 fs_factor=fs_factor,
-                hourly_today=self._om_source(cfg).get_hourly_today())
+                hourly_today=self._om_source(cfg).get_hourly_today(), vrm_kwh=vrm_today)
             # Einmal pro Tag die PR leise Richtung Logbuch-Empfehlung nachziehen -
             # ab hier laeuft die Kalibrierung von selbst, kein manuelles Nachtragen
             # mehr noetig (siehe store.auto_adjust_pr).
