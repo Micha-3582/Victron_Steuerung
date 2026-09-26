@@ -272,6 +272,7 @@
     // als kleines Popover neben dem Knopf, Klick woanders schliesst es wieder.
     document.addEventListener('click', (e) => {
       const btn = e.target.closest('.qhelp');
+      if (btn && btn.closest('label')) e.preventDefault();      // ? in einem Kaestchen-/Radio-Label darf die Auswahl nicht umschalten
       const wasOpen = btn && btn.getAttribute('aria-expanded') === 'true';
       const openPop = document.querySelector('.qpop');
       if (openPop) {

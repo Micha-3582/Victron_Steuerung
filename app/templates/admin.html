@@ -74,11 +74,11 @@
   <input id="app_display_name" placeholder="Victron Steuerung" style="margin-bottom:16px">
   <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px">
     <label class="switch" style="margin:0"><input type="checkbox" id="dry_run"><span class="slider"></span></label>
-    <div><b>Dry-Run</b><div class="muted">An = nur beobachten, der Cerbo wird nicht geschaltet.</div></div>
+    <div><b>Dry-Run</b> <span class="qhelp" role="button" tabindex="0" data-help="Trockenlauf der Ladesteuerung: Die App rechnet und protokolliert alles, schaltet aber am Cerbo nichts (auch der minimale Akkustand und der Sollwert Netz lassen sich dann nicht setzen). Zum Beobachten beim Einrichten, für den echten Betrieb ausschalten.">?</span><div class="muted">An = nur beobachten, der Cerbo wird nicht geschaltet.</div></div>
   </div>
   <div class="grid2">
-    <div><label>Regel-Intervall (Sekunden)</label><input id="poll_seconds" type="number"></div>
-    <div><label>Energie-Messtakt (Sekunden)</label><input id="energy_sample_seconds" type="number"></div>
+    <div><label>Regel-Intervall (Sekunden) <span class="qhelp" role="button" tabindex="0" data-help="Wie oft (in Sekunden) die Steuerung neu rechnet und bei Bedarf den Lademodus am Cerbo umschaltet. Standard: 300 (5 Minuten). Kleinere Werte reagieren schneller, belasten aber Cerbo und Preisabfrage stärker.">?</span></label><input id="poll_seconds" type="number"></div>
+    <div><label>Energie-Messtakt (Sekunden) <span class="qhelp" role="button" tabindex="0" data-help="Wie oft (in Sekunden) Solar, Verbrauch, Netz und Akku für Verlauf, Diagramme und Tagesbilanz gemessen werden. Kleiner = feinere Kurven, dafür mehr gespeicherte Daten.">?</span></label><input id="energy_sample_seconds" type="number"></div>
   </div>
   <details class="help">
     <summary>Was bedeuten Dry-Run und Abfrage-Intervall?</summary>
@@ -98,11 +98,11 @@
   <h2><svg class="h2i" viewBox="0 0 24 24"><line x1="3" y1="21" x2="21" y2="21"/><rect x="5" y="11" width="3" height="8"/><rect x="11" y="6" width="3" height="13"/><rect x="17" y="14" width="3" height="5"/></svg>Diagramme</h2>
   <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
     <label class="switch" style="margin:0"><input type="checkbox" id="chart_energy_hourly"><span class="slider"></span></label>
-    <div><b>Energie (Verlauf) stündlich</b><div class="muted">An = stündlich zusammengefasst (wie VRM), Aus = 15-Min-Auflösung.</div></div>
+    <div><b>Energie (Verlauf) stündlich</b> <span class="qhelp" role="button" tabindex="0" data-help="Fasst das Energie-Diagramm stündlich zusammen wie im VRM-Portal. Aus = jede Viertelstunde einzeln.">?</span><div class="muted">An = stündlich zusammengefasst (wie VRM), Aus = 15-Min-Auflösung.</div></div>
   </div>
   <div style="display:flex;align-items:center;gap:14px">
     <label class="switch" style="margin:0"><input type="checkbox" id="chart_flow_hourly"><span class="slider"></span></label>
-    <div><b>Energieflüsse stündlich</b><div class="muted">An = stündlich zusammengefasst (wie VRM), Aus = 15-Min-Auflösung.</div></div>
+    <div><b>Energieflüsse stündlich</b> <span class="qhelp" role="button" tabindex="0" data-help="Fasst das Energiefluss-Diagramm stündlich zusammen wie im VRM-Portal. Aus = jede Viertelstunde einzeln.">?</span><div class="muted">An = stündlich zusammengefasst (wie VRM), Aus = 15-Min-Auflösung.</div></div>
   </div>
   <details class="help">
     <summary>Wann welche Auflösung?</summary>
@@ -123,8 +123,8 @@
 <div class="card">
   <h2><svg class="h2i" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1"/><line x1="12" y1="2" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="22"/><line x1="2" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="22" y2="12"/></svg>Victron Cerbo GX</h2>
   <div class="grid2">
-    <div><label>Cerbo IP</label><input id="cerbo_host"></div>
-    <div><label>Port</label><input id="cerbo_port"></div>
+    <div><label>Cerbo IP <span class="qhelp" role="button" tabindex="0" data-help="IP-Adresse deines Cerbo GX im Heimnetz (Remote-Konsole → Einstellungen → Ethernet bzw. WLAN). Am Cerbo muss Modbus-TCP eingeschaltet sein.">?</span></label><input id="cerbo_host"></div>
+    <div><label>Port <span class="qhelp" role="button" tabindex="0" data-help="Port für Modbus-TCP am Cerbo. Fast immer 502, nur ändern, wenn du es am Cerbo selbst umgestellt hast.">?</span></label><input id="cerbo_port"></div>
   </div>
   <details class="help">
     <summary>Wie finde ich IP & Port, und wie aktiviere ich Modbus?</summary>
@@ -144,10 +144,10 @@
   <div class="grid2" style="margin-top:10px">
     <label style="display:flex;align-items:center;gap:8px;font-weight:normal">
       <input type="checkbox" id="has_pv_inverter" style="width:auto"> PV-Wechselrichter (AC-gekoppelt)
-    </label>
+     <span class="qhelp" role="button" tabindex="0" data-help="Ankreuzen, wenn ein PV-Wechselrichter (zum Beispiel Fronius oder SMA) am AC-Ausgang hängt und über den Cerbo gemessen wird.">?</span></label>
     <label style="display:flex;align-items:center;gap:8px;font-weight:normal">
       <input type="checkbox" id="has_mppt" style="width:auto"> MPPT-Solarladeregler (DC-gekoppelt)
-    </label>
+     <span class="qhelp" role="button" tabindex="0" data-help="Ankreuzen, wenn ein Victron-MPPT-Solarladeregler die Module direkt in den Akku lädt (DC-gekoppelt).">?</span></label>
   </div>
 
   <div style="margin-top:18px">
@@ -164,14 +164,14 @@
   <div class="grid2">
     <label style="display:flex;align-items:center;gap:8px;font-weight:normal">
       <input type="radio" name="tariff_mode" id="tariff_tibber" value="tibber" style="width:auto"> Dynamischer Tarif (Tibber)
-    </label>
+     <span class="qhelp" role="button" tabindex="0" data-help="Stundenpreise von Tibber: Die Steuerung lädt in den günstigsten Zeiten und plant den Akku danach. Braucht den Access Token unten.">?</span></label>
     <label style="display:flex;align-items:center;gap:8px;font-weight:normal">
       <input type="radio" name="tariff_mode" id="tariff_fixed" value="fixed" style="width:auto"> Normaler Vertrag (fester Preis)
-    </label>
+     <span class="qhelp" role="button" tabindex="0" data-help="Ein fester Preis pro kWh: Es gibt keine Preisplanung, die App lädt nie aktiv aus dem Netz. PV-Vorrang, Ladelimit und Sofort-Override wirken weiter.">?</span></label>
   </div>
 
   <div id="tariff-tibber-fields" style="margin-top:12px">
-    <label>Access Token</label><input id="tibber_token">
+    <label>Access Token <span class="qhelp" role="button" tabindex="0" data-help="Dein persönlicher Zugriffstoken von developer.tibber.com. Damit holt die App die Strompreise. Nicht weitergeben.">?</span></label><input id="tibber_token">
     <a class="help-link" href="https://developer.tibber.com/" target="_blank" rel="noopener">Token bei developer.tibber.com holen ↗</a>
     <details class="help">
       <summary>Wie komme ich an meinen Tibber Access Token?</summary>
@@ -206,7 +206,7 @@
       Saisonal: Winter niedrig (~0.05), Sommer höher (~0.25).</div>
   </details>
   <div class="grid2">
-    <div><label>Morgen-Faktor (0–1)</label><input id="pv_tom_morning_factor" type="number" step="0.01"></div>
+    <div><label>Morgen-Faktor (0–1) <span class="qhelp" role="button" tabindex="0" data-help="Anteil der morgigen Vormittags-Sonne (0 bis 1), der schon in die Nachtplanung eingerechnet wird. Winter etwa 0,05, Sommer etwa 0,25. Höher = nachts wird weniger aus dem Netz geladen, weil die Sonne den Akku morgens wieder füllt.">?</span></label><input id="pv_tom_morning_factor" type="number" step="0.01"></div>
     <div></div>
   </div>
   <div style="margin-top:14px">
@@ -252,7 +252,7 @@
     <div><label>Nutzbare Akkukapazität (kWh)
         <span class="qhelp" role="button" tabindex="0" data-help="Nicht die „Nennkapazität“ aus dem Datenblatt, sondern die „Usable Capacity“. Nicht angegeben: ca. 95 % der Nennkapazität ansetzen.">?</span>
       </label><input id="battery_usable_kwh" type="number" step="0.1"></div>
-    <div><label>Tagesverbrauch (kWh)</label><input id="daily_usage_kwh" type="number" step="0.1"></div>
+    <div><label>Tagesverbrauch (kWh) <span class="qhelp" role="button" tabindex="0" data-help="Durchschnittlicher Stromverbrauch deines Hauses pro Tag in kWh. Damit rechnet die Steuerung, wie viel Energie bis zum nächsten Mittag gebraucht wird. Einen guten Wert liefert der Tagesverlauf im Dashboard oder der Betriebsbericht.">?</span></label><input id="daily_usage_kwh" type="number" step="0.1"></div>
     <div><label>Ladestrom beim Netzladen (A)
         <span class="qhelp" role="button" tabindex="0" data-help="VictronConnect/VEConfigure → Ladegerät → Ladestrom. Direkt ablesen, keine Umrechnung nötig.">?</span>
       </label><input id="charge_current_a" type="number" step="1"></div>
@@ -303,12 +303,12 @@
     </div>
   </details>
   <div class="grid2">
-    <div><label>Morgen-Peak Start (Uhr)</label><input id="morning_peak_start" type="number" min="0" max="23"></div>
-    <div><label>Morgen-Peak Ende (Uhr)</label><input id="morning_peak_end" type="number" min="0" max="23"></div>
-    <div><label>Abend-Peak Start (Uhr)</label><input id="evening_peak_start" type="number" min="0" max="23"></div>
-    <div><label>Abend-Peak Ende (Uhr)</label><input id="evening_peak_end" type="number" min="0" max="23"></div>
-    <div><label>Mindest-SOC vor Peak (%)</label><input id="min_peak_soc" type="number" min="0" max="100"></div>
-    <div><label>Notbrems-Preislimit (ct/kWh)</label><input id="peak_avoid_price" type="number" step="0.5"></div>
+    <div><label>Morgen-Peak Start (Uhr) <span class="qhelp" role="button" tabindex="0" data-help="Beginn deiner typischen Verbrauchsspitze am Morgen (volle Stunde, 0 bis 23 Uhr). Davor soll der Akku genug geladen sein, damit kein teurer Netzstrom nötig wird.">?</span></label><input id="morning_peak_start" type="number" min="0" max="23"></div>
+    <div><label>Morgen-Peak Ende (Uhr) <span class="qhelp" role="button" tabindex="0" data-help="Ende der morgendlichen Verbrauchsspitze (volle Stunde, 0 bis 23 Uhr).">?</span></label><input id="morning_peak_end" type="number" min="0" max="23"></div>
+    <div><label>Abend-Peak Start (Uhr) <span class="qhelp" role="button" tabindex="0" data-help="Beginn deiner typischen Verbrauchsspitze am Abend (volle Stunde, 0 bis 23 Uhr). Davor soll der Akku genug geladen sein.">?</span></label><input id="evening_peak_start" type="number" min="0" max="23"></div>
+    <div><label>Abend-Peak Ende (Uhr) <span class="qhelp" role="button" tabindex="0" data-help="Ende der abendlichen Verbrauchsspitze (volle Stunde, 0 bis 23 Uhr).">?</span></label><input id="evening_peak_end" type="number" min="0" max="23"></div>
+    <div><label>Mindest-SOC vor Peak (%) <span class="qhelp" role="button" tabindex="0" data-help="Ladestand in Prozent, den der Akku vor einer Verbrauchsspitze mindestens haben soll. Reicht die Vorhersage nicht dafür, lädt die Steuerung vorher in den günstigsten Zeiten nach. Nie niedriger als der minimale Akkustand am Cerbo.">?</span></label><input id="min_peak_soc" type="number" min="0" max="100"></div>
+    <div><label>Notbrems-Preislimit (ct/kWh) <span class="qhelp" role="button" tabindex="0" data-help="Höchster Preis in ct/kWh, zu dem für den Peak-Schutz notfalls noch geladen wird. Ist der Strom teurer, wartet die Steuerung auf günstigere Zeiten.">?</span></label><input id="peak_avoid_price" type="number" step="0.5"></div>
   </div>
 </div>
 
@@ -326,9 +326,9 @@
     </div>
   </details>
   <div class="grid2">
-    <div><label>Nacht-Sicherheits-SOC (%)</label><input id="night_safety_soc" type="number" min="0" max="100"></div>
-    <div><label>Ziel-SOC Morgen-Brücke (%)</label><input id="target_safe_soc" type="number" min="0" max="100"></div>
-    <div><label>Hysterese (%)</label><input id="hysterese_soc" type="number" step="0.5"></div>
+    <div><label>Nacht-Sicherheits-SOC (%) <span class="qhelp" role="button" tabindex="0" data-help="Mindest-Ladestand über Nacht in Prozent (22 bis 6 Uhr). Fällt der Akku darunter und ist die Energiebilanz negativ, lädt die Steuerung in den günstigsten Nachtstunden nach.">?</span></label><input id="night_safety_soc" type="number" min="0" max="100"></div>
+    <div><label>Ziel-SOC Morgen-Brücke (%) <span class="qhelp" role="button" tabindex="0" data-help="Ladestand in Prozent, auf den morgens (0 bis 9 Uhr) vorgeladen wird, damit der Akku bis in den Vormittag reicht, bis die Sonne übernimmt.">?</span></label><input id="target_safe_soc" type="number" min="0" max="100"></div>
+    <div><label>Hysterese (%) <span class="qhelp" role="button" tabindex="0" data-help="Puffer in Prozent, damit die Steuerung nicht ständig an einer Schwelle hin- und herschaltet. Ein Modus wird erst wieder freigegeben, wenn der Ladestand um diesen Wert von der Schwelle abweicht.">?</span></label><input id="hysterese_soc" type="number" step="0.5"></div>
   </div>
 </div>
 </div>
@@ -344,8 +344,8 @@
     </div>
   </details>
   <div class="grid2">
-    <div><label>Aus dem Netz heute (kWh)</label><input id="grid_import" type="number" step="0.1" placeholder="z.B. 5.8"></div>
-    <div><label>Zum Netz heute (kWh)</label><input id="grid_export" type="number" step="0.1" placeholder="z.B. 0.2"></div>
+    <div><label>Aus dem Netz heute (kWh) <span class="qhelp" role="button" tabindex="0" data-help="Bisheriger Netzbezug heute in kWh (aus der Victron-App). Nur nötig, wenn die App über Mitternacht aus war und die Tagesbasis fehlt.">?</span></label><input id="grid_import" type="number" step="0.1" placeholder="z.B. 5.8"></div>
+    <div><label>Zum Netz heute (kWh) <span class="qhelp" role="button" tabindex="0" data-help="Bisherige Netzeinspeisung heute in kWh (aus der Victron-App). Nur nötig, wenn die App über Mitternacht aus war.">?</span></label><input id="grid_export" type="number" step="0.1" placeholder="z.B. 0.2"></div>
   </div>
   <div style="margin-top:12px"><button id="btn-grid">Übernehmen</button>
     <span id="grid-msg" class="muted" style="margin-left:12px"></span></div>
@@ -363,21 +363,21 @@
   <h2><svg class="h2i" viewBox="0 0 24 24"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>Wettervorhersage – Standort</h2>
   <div class="muted" style="margin-bottom:10px">Zeigt auf dem Dashboard das Wetter für den Standort der Anlage (Kachel „Wetter“, nur Anzeige – die Steuerung nutzt das nicht).
     Die Daten kommen von <b>Open-Meteo</b>; dorthin gehen nur die Koordinaten. Ohne Standort bleibt die Kachel unsichtbar.</div>
-  <label>Ort suchen</label>
+  <label>Ort suchen <span class="qhelp" role="button" tabindex="0" data-help="Ortsname eintippen und auf Suchen klicken, dann den passenden Treffer anklicken. Er legt den Standort für die Wetterkachel fest.">?</span></label>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
     <input id="wx-q" placeholder="z. B. Alpen" autocomplete="off" style="flex:1;min-width:160px">
     <button id="wx-search" class="ghost" type="button">Suchen</button>
     <button id="wx-gps" class="ghost" type="button">📍 Meinen Standort verwenden</button>
   </div>
   <div id="wx-results" style="display:flex;flex-direction:column;gap:2px;margin-top:6px"></div>
-  <label style="margin-top:12px">Oder aus Google Maps einfügen</label>
+  <label style="margin-top:12px">Oder aus Google Maps einfügen <span class="qhelp" role="button" tabindex="0" data-help="Koordinaten aus Google Maps (Rechtsklick auf den Ort) beide zusammen einfügen, zum Beispiel 51.59, 6.50. Sie werden automatisch auf Breiten- und Längengrad aufgeteilt.">?</span></label>
   <input id="wx-coords" placeholder="51.592657, 6.504778" autocomplete="off">
   <small class="hint">Beide Zahlen zusammen einfügen – wird automatisch aufgeteilt. (Google Maps: Rechtsklick auf den Standort → oben stehen die Koordinaten.)</small>
   <div class="grid2" style="margin-top:10px">
-    <div><label>Breitengrad</label><input id="wx-lat" inputmode="decimal"></div>
-    <div><label>Längengrad</label><input id="wx-lon" inputmode="decimal"></div>
+    <div><label>Breitengrad <span class="qhelp" role="button" tabindex="0" data-help="Breitengrad des Standorts in Dezimalgrad, zum Beispiel 51.59. Wird durch die Suche oder die Koordinaten oben automatisch gefüllt.">?</span></label><input id="wx-lat" inputmode="decimal"></div>
+    <div><label>Längengrad <span class="qhelp" role="button" tabindex="0" data-help="Längengrad des Standorts in Dezimalgrad, zum Beispiel 6.50. Wird durch die Suche oder die Koordinaten oben automatisch gefüllt.">?</span></label><input id="wx-lon" inputmode="decimal"></div>
   </div>
-  <label style="margin-top:10px">Anzeigename (optional)</label>
+  <label style="margin-top:10px">Anzeigename (optional) <span class="qhelp" role="button" tabindex="0" data-help="Name, der auf der Wetterkachel angezeigt wird, zum Beispiel Zuhause. Optional.">?</span></label>
   <input id="wx-name" placeholder="z. B. Zuhause" maxlength="80" autocomplete="off">
   <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
     <button id="wx-save" type="button">Standort speichern</button>
@@ -398,8 +398,8 @@
       3. Hier auf <b>„Chat-ID ermitteln“</b> klicken und den Treffer anklicken. Dann <b>Speichern</b> und <b>Test senden</b>.</div>
   </details>
   <div class="grid2">
-    <div><label>Bot-Token</label><input id="nt-token" type="password" autocomplete="new-password" placeholder="123456:ABC…"></div>
-    <div><label>Chat-ID</label><input id="nt-chat" inputmode="numeric" autocomplete="off" placeholder="z. B. 123456789"></div>
+    <div><label>Bot-Token <span class="qhelp" role="button" tabindex="0" data-help="Token deines Telegram-Bots, den dir @BotFather bei /newbot nennt. Damit sendet die Steuerung die Meldungen. Nicht weitergeben.">?</span></label><input id="nt-token" type="password" autocomplete="new-password" placeholder="123456:ABC…"></div>
+    <div><label>Chat-ID <span class="qhelp" role="button" tabindex="0" data-help="Nummer des Telegram-Chats, an den gesendet wird. Mit „Chat-ID ermitteln“ findest du sie, nachdem du dem Bot eine Nachricht geschrieben hast.">?</span></label><input id="nt-chat" inputmode="numeric" autocomplete="off" placeholder="z. B. 123456789"></div>
   </div>
   <div id="nt-found" style="display:flex;flex-direction:column;gap:2px;margin-top:6px"></div>
   <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
@@ -412,8 +412,8 @@
     <b>Was soll gemeldet werden?</b>
     <div id="nt-events" style="display:flex;flex-direction:column;gap:10px;margin-top:10px"></div>
     <div class="grid2" style="margin-top:14px">
-      <div><label>Akku niedrig unter (%)</label><input id="nt-lowsoc" type="number" min="3" max="60" step="1"></div>
-      <div><label>Tages-Zusammenfassung um (Uhr)</label><input id="nt-hour" type="number" min="0" max="23" step="1"></div>
+      <div><label>Akku niedrig unter (%) <span class="qhelp" role="button" tabindex="0" data-help="Fällt der Akku unter diesen Ladestand (in Prozent), kommt eine Telegram-Meldung, und eine weitere, wenn er wieder 5 Punkte darüber liegt.">?</span></label><input id="nt-lowsoc" type="number" min="3" max="60" step="1"></div>
+      <div><label>Tages-Zusammenfassung um (Uhr) <span class="qhelp" role="button" tabindex="0" data-help="Ab dieser Uhrzeit (0 bis 23) kommt einmal am Tag die Zusammenfassung mit Tagesbilanz und Systemcheck per Telegram.">?</span></label><input id="nt-hour" type="number" min="0" max="23" step="1"></div>
     </div>
   </div>
 </div>
@@ -436,8 +436,8 @@
       2. Die <b>Installations-ID</b> findest du unter <i>Installationen</i> → deine Anlage → <i>Einstellungen</i> → <i>Allgemeines</i> (Zeile „VRM-Installations-ID“, nicht die „VRM Portal-ID“).</div>
   </details>
   <div class="grid2">
-    <div><label>Installations-ID</label><input id="vrm-inst" inputmode="numeric" autocomplete="off" placeholder="z. B. 844297"></div>
-    <div><label>Zugriffstoken</label><input id="vrm-token" type="password" autocomplete="new-password"></div>
+    <div><label>Installations-ID <span class="qhelp" role="button" tabindex="0" data-help="Deine VRM-Installations-ID (nicht die Portal-ID): Installationen → deine Anlage → Einstellungen → Allgemeines. Damit fragt die App die Solar-Prognose ab.">?</span></label><input id="vrm-inst" inputmode="numeric" autocomplete="off" placeholder="z. B. 844297"></div>
+    <div><label>Zugriffstoken <span class="qhelp" role="button" tabindex="0" data-help="Zugriffstoken aus dem VRM-Portal (Präferenzen → Integrationen → Zugriffstoken). Er erlaubt der App, deine Prognose und Verläufe zu lesen. Nicht weitergeben.">?</span></label><input id="vrm-token" type="password" autocomplete="new-password"></div>
   </div>
   <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
     <button id="vrm-save" class="ghost">Zugang speichern &amp; testen</button>
@@ -470,11 +470,11 @@
   <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
     <button id="shelly-scan" class="ghost">Shellys suchen</button>
     <button id="tasmota-scan" class="ghost">Tasmota suchen</button>
-    <input type="text" id="shelly-ip" placeholder="oder IP (Shelly/Tasmota), z.B. 192.168.2.55" style="flex:1;min-width:190px">
+    <input type="text" id="shelly-ip" placeholder="oder IP (Shelly/Tasmota), z.B. 192.168.2.55" style="flex:1;min-width:190px"> <span class="qhelp" role="button" tabindex="0" data-help="IP-Adresse eines einzelnen Shelly- oder Tasmota-Geräts, falls die Suche es nicht findet. Danach auf Hinzufügen klicken.">?</span>
     <button id="shelly-add" class="ghost">Hinzufügen</button>
   </div>
   <div style="margin-top:14px">
-    <label>Weitere Netze / VLANs für die Suche (optional)</label>
+    <label>Weitere Netze / VLANs für die Suche (optional) <span class="qhelp" role="button" tabindex="0" data-help="Zusätzliche Netze für die Gerätesuche, zum Beispiel 192.168.178.0/24, mehrere durch Komma getrennt. Nur nötig, wenn Geräte in einem anderen VLAN stehen. Der Server muss dorthin routen dürfen.">?</span></label>
     <input id="scan-networks" placeholder="z.B. 192.168.178.0/24, 192.168.48.0/21" autocomplete="off">
     <div class="muted">Standardmäßig wird nur das Netz des Servers durchsucht. Geräte in anderen VLANs hier eintragen (gilt für Shelly, Tasmota
       und Tuya; der Server muss dorthin routen dürfen). Die Suche dauert dann etwas länger.</div>
@@ -492,9 +492,9 @@
         3. Unter <i>Devices → Link App Account</i> die Smart-Life-/Tuya-App per QR-Code verknüpfen.<br>
         4. Auf der Projekt-Übersicht <i>Access ID</i> und <i>Access Secret</i> kopieren und hier eintragen.</div>
       <div class="grid2">
-        <div><label>Region</label><select id="tuya-region"></select></div>
-        <div><label>Access ID</label><input id="tuya-key" autocomplete="off"></div>
-        <div><label>Access Secret</label><input id="tuya-secret" type="password" autocomplete="new-password"></div>
+        <div><label>Region <span class="qhelp" role="button" tabindex="0" data-help="Rechenzentrum deines Tuya-Kontos. Es muss zu der Region passen, die du beim Anlegen des Projekts auf iot.tuya.com gewählt hast.">?</span></label><select id="tuya-region"></select></div>
+        <div><label>Access ID <span class="qhelp" role="button" tabindex="0" data-help="Access ID deines Tuya-Cloud-Projekts (iot.tuya.com → Projekt → Übersicht). Die Cloud wird nur einmal gebraucht, um die Geräteschlüssel abzuholen.">?</span></label><input id="tuya-key" autocomplete="off"></div>
+        <div><label>Access Secret <span class="qhelp" role="button" tabindex="0" data-help="Access Secret deines Tuya-Cloud-Projekts, gehört zur Access ID. Nicht weitergeben.">?</span></label><input id="tuya-secret" type="password" autocomplete="new-password"></div>
         <div style="display:flex;align-items:flex-end"><button id="tuya-save" class="ghost">Zugang speichern</button></div>
       </div>
     </details>
@@ -507,10 +507,10 @@
 <div class="card">
   <h2><svg class="h2i" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Konto &amp; Zugang</h2>
   <div class="grid2">
-    <div><label>Benutzername</label><input id="acc-username" autocomplete="username"></div>
-    <div><label>Aktuelles Passwort</label><input id="pw-current" type="password" autocomplete="current-password"></div>
-    <div><label>Neues Passwort <span class="muted" style="font-weight:normal">(optional)</span></label><input id="pw-new" type="password" autocomplete="new-password"></div>
-    <div><label>Neues Passwort wiederholen</label><input id="pw-new2" type="password" autocomplete="new-password"></div>
+    <div><label>Benutzername <span class="qhelp" role="button" tabindex="0" data-help="Name, mit dem du dich an dieser App anmeldest. Zum Ändern brauchst du dein aktuelles Passwort.">?</span></label><input id="acc-username" autocomplete="username"></div>
+    <div><label>Aktuelles Passwort <span class="qhelp" role="button" tabindex="0" data-help="Dein aktuelles Passwort. Es wird bei jeder Änderung an Konto oder Passwort zur Bestätigung gebraucht.">?</span></label><input id="pw-current" type="password" autocomplete="current-password"></div>
+    <div><label>Neues Passwort <span class="muted" style="font-weight:normal">(optional)</span> <span class="qhelp" role="button" tabindex="0" data-help="Neues Passwort, falls du es ändern willst. Leer lassen, um es zu behalten.">?</span></label><input id="pw-new" type="password" autocomplete="new-password"></div>
+    <div><label>Neues Passwort wiederholen <span class="qhelp" role="button" tabindex="0" data-help="Das neue Passwort noch einmal, damit sich kein Tippfehler einschleicht.">?</span></label><input id="pw-new2" type="password" autocomplete="new-password"></div>
   </div>
   <small class="hint">Aktuelles Passwort wird immer gebraucht, auch um nur den Benutzernamen zu ändern.</small>
   <div style="margin-top:12px">
