@@ -13,8 +13,7 @@ Nach einem Ausschalten durch eine Ausschalt-Bedingung ist die Regel gesperrt, bi
 Bedingungen:
   time          Zwischen von und bis Uhr (optional nur an bestimmten Wochentagen)
   price         Strompreis unter/ueber X ct
-  cheapest      In den N guenstigsten Stunden des Tages
-  budget        Tagesziel: X Minuten pro Tag. Einschalten: laeuft zu den guenstigsten Zeiten, bis das Ziel erreicht ist (dann aus).
+  budget        Laufzeit pro Tag (frueher auch 'guenstigste Stunden'): X Minuten pro Tag. Einschalten: laeuft zu den guenstigsten Zeiten, bis das Ziel erreicht ist (dann aus).
                 Ausschalten: trifft zu, sobald das Geraet heute X Minuten gelaufen ist.
   soc           Akku ueber/unter X %
   at            Um HH:MM Uhr, einmal pro Tag (loest innerhalb von 30 Min nach der Uhrzeit aus). Beim Einschalten bleibt das Geraet danach
@@ -83,6 +82,11 @@ def load() -> dict:
         d = {"version": VERSION, "rules": []}
     if d.get("version") != VERSION:
         d = _upgrade(d)
+        _save(d)
+    if any(c.get("type") == "cheapest" for r in d["rules"] for c in (r.get("on") or []) + (r.get("off") or [])):
+        for r in d["rules"]:                         # alte Bedingung "guenstigste Stunden" -> "Laufzeit pro Tag"
+            for k in ("on", "off"):
+                r[k] = [normalize_condition(c) if c.get("type") == "cheapest" else c for c in r.get(k) or []]
         _save(d)
     return d
 
@@ -160,6 +164,8 @@ def normalize_condition(c: dict) -> dict:
     t = c.get("type")
     if t not in TYPES:
         raise RuleError("Unbekannte Bedingung")
+    if t == "cheapest":                              # entfallen: "N guenstigste Stunden" = "Laufzeit pro Tag" ueber den ganzen Tag
+        return {"type": "budget", "minutes": int(_num(c.get("hours"), 1, 23, "Stunden")) * 60, "from": "00:00", "to": "24:00"}
     if t == "at":
         days = sorted({int(x) for x in (c.get("days") or []) if str(x).isdigit() and 0 <= int(x) <= 6})
         return {"type": t, "time": _hhmm(c.get("time", "23:30"), "Uhrzeit"), "days": days if len(days) < 7 else []}
