@@ -28,3 +28,5 @@ app/__pycache__/
 app/vrm_cloud.json
 app/price_cache.json
 app/plansim_log.json
+app/telegram.json
+app/notify_state.json

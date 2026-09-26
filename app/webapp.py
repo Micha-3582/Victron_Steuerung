@@ -28,6 +28,7 @@ import store
 import surplus
 import tuya
 import planner
+import notify
 import price_cache
 import updater
 import vrm
@@ -227,6 +228,10 @@ class Controller:
         cerbo = Cerbo(cfg["cerbo_host"], cfg.get("cerbo_port", 502))
         soc = cerbo.read_soc()
         current_ess = cerbo.read_ess_mode()
+        thr = int(cfg.get("notify_low_soc", notify.DEFAULT_LOW_SOC))
+        notify.event("low_soc", soc < thr or (notify.is_active("low_soc") and soc < thr + 5),
+                     f"🪫 Akku niedrig: {soc:.0f} % (Schwelle {thr} %).", f"🔋 Akku wieder bei {soc:.0f} %.", cfg=cfg)
+        notify.daily_summary(cfg, datetime.now())
         try:
             system = cerbo.read_system()
         except Exception as e:                           # noqa: BLE001
@@ -251,6 +256,10 @@ class Controller:
         except Exception as e:                               # noqa: BLE001
             vrm_why = "PV-Prognose (VRM) nicht verfügbar – Rückfall auf Durchschnitt der letzten Tage"
             log.warning("VRM-Prognose fuer die Regelung fehlgeschlagen: %s", e)
+        if vrm_why:
+            notify.event("vrm", True, f"⚠️ {vrm_why}", "✅ Die VRM-Prognose ist wieder verfügbar.", after_min=30)
+        elif vrm_ctl:
+            notify.event("vrm", False, "", "✅ Die VRM-Prognose ist wieder verfügbar.")
         if vrm_ctl:
             pv_source = "VRM"
             solar_today_for_control = vrm_ctl["today_kwh"]
@@ -406,6 +415,7 @@ class Controller:
             if not prices:
                 raise ValueError("Tibber lieferte keine Preise")
             self._price_fail_since = None
+            notify.event("tibber", False, "", "✅ Tibber-Preise sind wieder verfügbar.")
             try:
                 price_cache.save(prices, now)
             except Exception as e:                           # noqa: BLE001
@@ -417,6 +427,8 @@ class Controller:
             cached = price_cache.load()
             if cached and price_cache.covers(cached["prices"], now):
                 stand = str(cached.get("fetched", ""))[11:16]
+                notify.event("tibber", True, f"⚠️ Tibber ist seit 20 Minuten nicht erreichbar – die Steuerung nutzt die gespeicherten Preise von {stand} Uhr.",
+                             after_min=20)
                 return cached["prices"], f"Tibber nicht erreichbar – nutze die Preise von {stand} Uhr"
             stopped = ""
             waited = (now - self._price_fail_since).total_seconds() / 60
@@ -427,17 +439,20 @@ class Controller:
                     log.warning("Keine brauchbaren Strompreise seit %.0f min - Netzladen gestoppt (Ruhe-Modus)", waited)
                 except Exception as e2:                      # noqa: BLE001
                     log.error("Netzladen konnte nicht gestoppt werden: %s", e2)
+            notify.event("tibber", True, "⛔ Keine Strompreise verfügbar" + (" – das laufende Netzladen wurde gestoppt." if stopped else "."), after_min=0)
             raise RuntimeError(f"Keine Strompreise verfügbar ({e}){stopped}")
 
     def safe_tick(self):
         """Tick mit Fehlerabfang - für Hintergrundschleife und On-Demand-Aufrufe."""
         try:
             self.tick()
+            notify.event("tick_error", False, "", "✅ Die Steuerung läuft wieder normal.")
         except Exception as e:                           # noqa: BLE001
             self.last_error = str(e)
             with self.lock:
                 self.status = {"ok": False, "reason": f"Fehler: {e}"}
             log.error("Tick fehlgeschlagen: %s", e)
+            notify.event("tick_error", True, f"⚠️ Die Steuerung meldet seit 10 Minuten einen Fehler: {e}", after_min=10)
 
     def run(self, interval):
         while not self._stop.is_set():
@@ -483,7 +498,11 @@ class Controller:
                 "am Multiplus, siehe Projekt-Notiz (Vorfall 01.09.2026)",
                 grid_w, batt_a, soc,
             )
+        if wd["just_warned"]:
+            notify.push("watchdog", f"🔋 Batterie-Watchdog: Die Batterie reagiert seit 15 Minuten nicht (Netz {grid_w:.0f} W, Batteriestrom {batt_a:.2f} A, "
+                                    f"Akku {soc:.0f} %). Möglicher Ladehänger am Multiplus – ggf. Anlage prüfen.")
         if wd["just_resolved"]:
+            notify.push("watchdog", f"✅ Batterie-Watchdog: wieder normal nach {wd['just_resolved']['duration_min']:.0f} Minuten.")
             ev = wd["just_resolved"]
             log.info("Batterie-Watchdog: wieder normal nach %.1f Min (seit %s)",
                      ev["duration_min"], ev["start"])
@@ -572,6 +591,8 @@ class Controller:
                 text = f"{dev['name']}: Schalten fehlgeschlagen ({e})"
         log.info("Ueberschuss-Automatik: %s", text)
         surplus_ctrl.log(text)
+        if not dry:
+            notify.push("surplus", "🔌 " + text, cfg)
 
     def start(self):
         cfg = store.load_config()
@@ -1023,6 +1044,58 @@ def api_plan_sim():
     return jsonify(data)
 
 
+@app.route("/api/notify", methods=["GET"])
+def api_notify_info():
+    return jsonify({**notify.credentials_public(), **notify.settings_public(store.load_config())})
+
+
+@app.route("/api/notify/credentials", methods=["POST"])
+def api_notify_credentials():
+    body = request.get_json(silent=True) or {}
+    try:
+        notify.save_credentials(body.get("token"), body.get("chat_id"))
+    except notify.NotifyError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True)
+
+
+@app.route("/api/notify/detect", methods=["POST"])
+def api_notify_detect():
+    """Chat-ID ermitteln: erst dem Bot in Telegram eine Nachricht schreiben, dann hier abfragen."""
+    body = request.get_json(silent=True) or {}
+    try:
+        return jsonify(notify.detect_chats(body.get("token")))
+    except notify.NotifyError as e:
+        return jsonify(error=str(e)), 400
+
+
+@app.route("/api/notify/settings", methods=["POST"])
+def api_notify_settings():
+    body = request.get_json(silent=True) or {}
+    try:
+        upd = notify.validate_settings(body)
+    except notify.NotifyError as e:
+        return jsonify(error=str(e)), 400
+    cfg = store.load_config()
+    if "notify_events" in upd:                               # Schalter zusammenfuehren, nicht ersetzen
+        merged = dict(cfg.get("notify_events") or {})
+        merged.update(upd.pop("notify_events"))
+        upd["notify_events"] = merged
+    cfg.update(upd)
+    store.save_config(cfg)
+    return jsonify(ok=True)
+
+
+@app.route("/api/notify/test", methods=["POST"])
+def api_notify_test():
+    cfg = store.load_config()
+    try:
+        notify.send(f"[{cfg.get('app_display_name') or 'Victron Steuerung'}] ✅ Testnachricht – die Benachrichtigungen funktionieren.")
+    except notify.NotifyError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True)
+
+
 @app.route("/api/weather", methods=["GET"])
 def api_weather():
     """Wettervorhersage fuer den Standort (nur Anzeige). ?refresh=1 umgeht den Zwischenspeicher."""
@@ -1215,6 +1288,7 @@ def api_test():
 def main():
     ctrl.start()
     cfg = store.load_config()
+    notify.push("startup", "🔄 Die Steuerung wurde gestartet.", cfg)
     # PORT-Umgebungsvariable hat Vorrang (pm2/systemd), sonst web_port aus Config
     port = int(os.environ.get("PORT", cfg.get("web_port", 5005)))
     log.info("Web-App startet auf Port %s (dry_run=%s)", port, cfg.get("dry_run"))

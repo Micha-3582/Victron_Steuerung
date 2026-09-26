@@ -314,6 +314,38 @@
   <div class="muted" id="wx-msg" style="margin-top:10px"></div>
 </div>
 
+<div class="card" id="notify-admin">
+  <h2><svg class="h2i" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>Benachrichtigungen (Telegram)</h2>
+  <div class="muted" style="margin-bottom:10px">Die Steuerung meldet sich aufs Handy, wenn etwas nicht stimmt – und wenn es wieder in Ordnung ist. Gemeldet wird nur bei einem
+    <b>Wechsel</b>, nicht bei jedem Durchlauf. Jede Meldung beginnt mit dem Namen dieser Anlage.</div>
+  <details id="notify-setup">
+    <summary>Telegram-Bot einrichten (einmalig, ca. 2 Minuten)</summary>
+    <div class="muted" style="margin:8px 0">
+      1. In Telegram den Kontakt <b>@BotFather</b> öffnen → <code>/newbot</code> senden → Namen vergeben → den angezeigten <b>Token</b> kopieren und unten einfügen.<br>
+      2. Deinen neuen Bot in Telegram öffnen und ihm <b>irgendeine Nachricht</b> schreiben (z. B. „Hallo“). Für eine Gruppe: Bot zur Gruppe hinzufügen und dort schreiben.<br>
+      3. Hier auf <b>„Chat-ID ermitteln“</b> klicken und den Treffer anklicken. Dann <b>Speichern</b> und <b>Test senden</b>.</div>
+  </details>
+  <div class="grid2">
+    <div><label>Bot-Token</label><input id="nt-token" type="password" autocomplete="new-password" placeholder="123456:ABC…"></div>
+    <div><label>Chat-ID</label><input id="nt-chat" inputmode="numeric" autocomplete="off" placeholder="z. B. 123456789"></div>
+  </div>
+  <div id="nt-found" style="display:flex;flex-direction:column;gap:2px;margin-top:6px"></div>
+  <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <button id="nt-detect" class="ghost" type="button">Chat-ID ermitteln</button>
+    <button id="nt-save" class="ghost" type="button">Speichern</button>
+    <button id="nt-test" class="ghost" type="button">Test senden</button>
+  </div>
+  <div class="muted" id="nt-msg" style="margin-top:8px"></div>
+  <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">
+    <b>Was soll gemeldet werden?</b>
+    <div id="nt-events" style="display:flex;flex-direction:column;gap:10px;margin-top:10px"></div>
+    <div class="grid2" style="margin-top:14px">
+      <div><label>Akku niedrig unter (%)</label><input id="nt-lowsoc" type="number" min="3" max="60" step="1"></div>
+      <div><label>Tages-Zusammenfassung um (Uhr)</label><input id="nt-hour" type="number" min="0" max="23" step="1"></div>
+    </div>
+  </div>
+</div>
+
 <div class="card" id="vrm-admin">
   <h2>Victron VRM – Zugang &amp; Solar-Prognose</h2>
   <div class="muted" style="margin-bottom:10px">Zeigt auf dem Dashboard den Solarertrag, den das Victron-VRM-Portal für heute und morgen erwartet.
@@ -1033,6 +1065,49 @@ document.getElementById('wx-clear').addEventListener('click', async () => {
   catch (e) { wxMsg(e.message, true); }
 });
 wxLoad();
+/* --- Benachrichtigungen (Telegram) --- */
+function ntMsg(t, err) { const m = document.getElementById('nt-msg'); m.textContent = t; m.style.color = err ? '#e5544a' : ''; }
+async function ntLoad() {
+  let n; try { n = await (await fetch('/api/notify')).json(); } catch (e) { return; }
+  document.getElementById('nt-chat').value = n.chat_id || '';
+  document.getElementById('nt-token').placeholder = n.has_token ? '(gespeichert – leer lassen = unverändert)' : '123456:ABC…';
+  document.getElementById('notify-setup').open = !n.configured;
+  document.getElementById('nt-lowsoc').value = n.low_soc; document.getElementById('nt-hour').value = n.summary_hour;
+  document.getElementById('nt-events').innerHTML = n.events.map(e => `<div style="display:flex;align-items:center;gap:14px">
+    <label class="switch" style="margin:0"><input type="checkbox" data-ev="${e.key}" ${e.enabled ? 'checked' : ''}><span class="slider"></span></label>
+    <div>${escH(e.label)}</div></div>`).join('');
+  document.querySelectorAll('#nt-events input[data-ev]').forEach(cb => cb.addEventListener('change', async () => {
+    try { await shellyApi('/api/notify/settings', 'POST', { events: { [cb.dataset.ev]: cb.checked } }); savedToast(); }
+    catch (e) { ntMsg(e.message, true); cb.checked = !cb.checked; }
+  }));
+}
+for (const id of ['nt-lowsoc', 'nt-hour']) document.getElementById(id).addEventListener('change', async () => {
+  try { await shellyApi('/api/notify/settings', 'POST', { low_soc: document.getElementById('nt-lowsoc').value, summary_hour: document.getElementById('nt-hour').value }); savedToast(); }
+  catch (e) { ntMsg(e.message, true); ntLoad(); }
+});
+document.getElementById('nt-detect').addEventListener('click', async () => {
+  const box = document.getElementById('nt-found'); box.innerHTML = ''; ntMsg('Suche …');
+  try {
+    const res = await shellyApi('/api/notify/detect', 'POST', { token: document.getElementById('nt-token').value });
+    ntMsg(res.length ? 'Treffer anklicken:' : 'Keine Nachricht gefunden – bitte dem Bot in Telegram zuerst eine Nachricht schreiben und nochmal versuchen.', !res.length);
+    res.forEach(c => { const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost'; b.style.textAlign = 'left';
+      b.textContent = `${c.name} (${c.type || 'Chat'}) – ${c.id}`;
+      b.onclick = () => { document.getElementById('nt-chat').value = c.id; box.innerHTML = ''; ntMsg('Übernommen – jetzt „Speichern“.'); };
+      box.appendChild(b); });
+  } catch (e) { ntMsg(e.message, true); }
+});
+document.getElementById('nt-save').addEventListener('click', async () => {
+  try {
+    await shellyApi('/api/notify/credentials', 'POST', { token: document.getElementById('nt-token').value, chat_id: document.getElementById('nt-chat').value });
+    document.getElementById('nt-token').value = ''; ntMsg('Gespeichert. Mit „Test senden“ prüfen.'); savedToast(); ntLoad();
+  } catch (e) { ntMsg(e.message, true); }
+});
+document.getElementById('nt-test').addEventListener('click', async () => {
+  ntMsg('Sende …');
+  try { await shellyApi('/api/notify/test', 'POST'); ntMsg('Testnachricht gesendet ✓ – sie sollte gleich in Telegram erscheinen.'); }
+  catch (e) { ntMsg(e.message, true); }
+});
+ntLoad();
 /* --- Fehlende Verlaufsdaten aus dem VRM nachholen (erst Vorschau, dann Übernehmen) --- */
 function restoreMsg(t, err) { const m = document.getElementById('vrm-restore-msg'); m.textContent = t; m.style.color = err ? '#e5544a' : ''; }
 function fmtDay(d) { const [Y, M, D] = d.split('-'); return `${D}.${M}.${Y}`; }
@@ -1075,6 +1150,7 @@ const ADMIN_TABS = [
   { id: 'solar', label: 'Solar', match: ['PV-Wechselrichter'] },
   { id: 'vrm', label: 'VRM', match: ['Victron VRM'] },
   { id: 'wetter', label: 'Wetter', match: ['Wettervorhersage'] },
+  { id: 'meldungen', label: 'Meldungen', match: ['Benachrichtigungen'] },
   { id: 'geraete', label: 'Geräte & Überschuss', match: ['Geräte', 'Shelly', 'Überschuss'] },
   { id: 'anzeige', label: 'Dashboard', match: ['Kacheln', 'Diagramme'] },
   { id: 'system', label: 'System & Konto', match: ['App-Version', 'Betrieb', 'Konto'] },
@@ -1096,7 +1172,7 @@ const ADMIN_TABS = [
   function show(id) {
     if (!TABS.some(t => t.id === id)) id = TABS[0].id;
     // Speichern-Leiste ueberall ausser bei 'Geraete' und 'VRM' (dort speichert jede Aenderung sofort bzw. hat eigene Knoepfe)
-    cards.forEach(c => { c.hidden = c.dataset.tab === '*' ? (id === 'geraete' || id === 'vrm' || id === 'wetter') : c.dataset.tab !== id; });
+    cards.forEach(c => { c.hidden = c.dataset.tab === '*' ? (id === 'geraete' || id === 'vrm' || id === 'wetter' || id === 'meldungen') : c.dataset.tab !== id; });
     bar.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
     if (id !== 'geraete') { const f = document.getElementById('shelly-found'); if (f) f.innerHTML = ''; }   // Suchergebnisse nur solange man im Reiter bleibt
     bar.querySelector('.active')?.scrollIntoView({ inline: 'center', block: 'nearest' });
