@@ -20,7 +20,11 @@ from datetime import datetime, timedelta
 EFF_CHARGE = 0.95        # Wirkungsgrad Laden (AC -> Akku)
 EFF_DISCHARGE = 0.95     # Wirkungsgrad Entladen (Akku -> Verbrauch)
 LEVEL_KWH = 0.25         # Rasterung des Ladezustands fuer die Optimierung
-MIN_GAIN_CT = 1.0        # Laden nur, wenn es in diesem Slot mindestens so viel spart (verhindert Zick-Zack-Plaene fuer Cent-Betraege)
+MIN_GAIN_CT = 0.05       # Laden nur, wenn es in diesem Slot mindestens so viel spart (verhindert Zick-Zack-Plaene bei
+                         # Bruchteilen eines Cents durch Rundung); bewusst knapp ueber Null, damit innerhalb einer
+                         # Guenstig-Phase zuverlaessig der tatsaechlich guenstigste Moment gewaehlt wird, statt eines
+                         # nur wenige Cent teureren (gefunden 27.09., Michael: "warum 04:30 statt 00:00, wenn beide
+                         # fast gleich teuer sind" - mit 1.0 hat die alte Schwelle genau solche Faelle durchgehen lassen)
 
 
 @dataclass
