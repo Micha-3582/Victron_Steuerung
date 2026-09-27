@@ -232,12 +232,12 @@
 <body>
   <header>
     <span class="sun">🔆</span>
-    <h1>{{ app_display_name }}</h1>
+    <h1>{{ app_display_name }}{% if user_role == 'demo' %} <span class="muted" style="font-size:13px;font-weight:normal">(Demo – nur Ansicht)</span>{% endif %}</h1>
     <nav>
       <a href="/">Dashboard</a>
       <a href="/automation">Automatik</a>
       <a href="/rules">Regeln</a>
-      <a href="/admin">Einstellungen</a>
+      {% if user_role == 'admin' %}<a href="/admin">Einstellungen</a>{% endif %}
       <form action="/logout" method="post" style="display:inline;margin:0">
         <button type="submit" class="ghost logout-btn">
           <span class="logout-full">Abmelden</span>

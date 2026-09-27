@@ -597,6 +597,35 @@
     <span id="pw-msg" class="muted" style="margin-left:12px"></span>
   </div>
 </div>
+
+<div class="card" data-tab="system">
+  <h2><svg class="h2i" viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/><path d="M2 21v-2a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v2"/><path d="M17 11a4 4 0 1 0 0-8"/><path d="M23 21v-2a4.5 4.5 0 0 0-3-4.2"/></svg>Weitere Benutzer</h2>
+  <div class="hint" style="margin-bottom:10px">
+    Zusätzliche Zugänge mit eingeschränkten Rechten – z.B. für Familie oder eine Vorführung mit deinen echten Daten,
+    ohne dass dabei etwas verändert werden kann.
+    <b>Admin</b>: alles wie du. <b>Benutzer</b>: Dashboard ansehen + Geräte ein/ausschalten, keine Einstellungen/Regeln.
+    <b>Demo</b>: alles nur ansehen, nichts lässt sich schalten oder ändern.
+  </div>
+  <div class="table-scroll">
+    <table id="users-table" style="width:100%;border-collapse:collapse">
+      <thead><tr>
+        <th style="text-align:left">Benutzername</th><th style="text-align:left">Rolle</th>
+        <th style="text-align:left">Ablauf</th><th style="text-align:left">Letzter Login</th><th></th>
+      </tr></thead>
+      <tbody id="users-body"></tbody>
+    </table>
+  </div>
+  <div class="muted" id="users-msg" style="margin-top:8px"></div>
+  <hr style="border-color:var(--border);margin:16px 0">
+  <div class="grid2">
+    <div><label>Benutzername</label><input id="nu-username" autocomplete="off" placeholder="z.B. marion oder demo"></div>
+    <div><label>Passwort</label><input id="nu-password" type="password" autocomplete="new-password"></div>
+    <div><label>Rolle <span class="qhelp" role="button" tabindex="0" data-help="Admin = alles wie dein eigenes Konto. Benutzer = Dashboard + Geräte schalten, keine Einstellungen/Regeln. Demo = nur ansehen, nichts schaltbar - ideal um die Steuerung mit echten Daten vorzuführen.">?</span></label>
+      <select id="nu-role"><option value="user">Benutzer (Dashboard + Geräte)</option><option value="demo">Demo (nur ansehen)</option><option value="admin">Admin (alles)</option></select></div>
+    <div><label>Ablauf <span class="muted" style="font-weight:normal">(optional)</span> <span class="qhelp" role="button" tabindex="0" data-help="Ab diesem Tag funktioniert der Zugang nicht mehr - praktisch für einen befristeten Demo-Zugang. Leer lassen = unbegrenzt gültig.">?</span></label><input id="nu-expires" type="date"></div>
+  </div>
+  <div style="margin-top:12px"><button id="btn-nu-add">Benutzer anlegen</button></div>
+</div>
 </div>
 
 {% endblock %}
@@ -899,6 +928,86 @@ document.getElementById('btn-pw').addEventListener('click', async () => {
   setTimeout(() => msg.textContent = '', 4000);
 });
 document.getElementById('acc-username').value = {{ (session_user_display or '') | tojson }};
+
+/* ---- Weitere Benutzer (Rechteverwaltung) ---- */
+const ROLE_LABEL = { admin: 'Admin', user: 'Benutzer', demo: 'Demo' };
+function fmtLogin(ts) { return ts ? new Date(ts * 1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) : 'noch nie'; }
+async function loadUsers() {
+  const msg = document.getElementById('users-msg');
+  try {
+    const r = await fetch('/api/users');
+    const d = await r.json();
+    const body = document.getElementById('users-body');
+    body.innerHTML = '';
+    for (const u of d.users) {
+      const tr = document.createElement('tr');
+      tr.style.borderTop = '1px solid var(--border)';
+      const roleSel = `<select data-u="${u.username}" class="u-role" ${u.is_me ? 'disabled' : ''} style="padding:4px 6px">${
+        Object.entries(ROLE_LABEL).map(([v, l]) => `<option value="${v}" ${u.role === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+      tr.innerHTML = `
+        <td style="padding:6px 4px">${u.username}${u.is_me ? ' <span class="muted">(du)</span>' : ''}</td>
+        <td style="padding:6px 4px">${roleSel}</td>
+        <td style="padding:6px 4px"><input type="date" class="u-expires" data-u="${u.username}" value="${u.expires || ''}" style="padding:4px 6px"></td>
+        <td style="padding:6px 4px" class="muted">${fmtLogin(u.last_login)}</td>
+        <td style="padding:6px 4px;white-space:nowrap">
+          <button type="button" class="ghost u-pw" data-u="${u.username}" title="Neues Passwort setzen">🔑</button>
+          ${u.is_me ? '' : `<button type="button" class="danger u-del" data-u="${u.username}" title="Löschen">✕</button>`}
+        </td>`;
+      body.appendChild(tr);
+    }
+    body.querySelectorAll('.u-role').forEach(el => el.addEventListener('change', () => patchUser(el.dataset.u, { role: el.value })));
+    body.querySelectorAll('.u-expires').forEach(el => el.addEventListener('change', () => patchUser(el.dataset.u, { expires: el.value })));
+    body.querySelectorAll('.u-pw').forEach(el => el.addEventListener('click', async () => {
+      const pw = await uiDialog({ title: 'Neues Passwort', message: `Neues Passwort für „${el.dataset.u}“.`, label: 'Passwort', type: 'password', okText: 'Setzen' });
+      if (pw === null) return;
+      if (pw.length < 8) { msg.textContent = 'Passwort: mind. 8 Zeichen.'; return; }
+      patchUser(el.dataset.u, { password: pw });
+    }));
+    body.querySelectorAll('.u-del').forEach(el => el.addEventListener('click', async () => {
+      if (!confirm(`Benutzer „${el.dataset.u}“ wirklich löschen?`)) return;
+      try {
+        const r = await fetch('/api/users/' + encodeURIComponent(el.dataset.u), { method: 'DELETE' });
+        const d = await r.json();
+        if (!r.ok) { msg.textContent = d.error || 'Fehler'; return; }
+        loadUsers();
+      } catch (e) { msg.textContent = 'Fehler beim Löschen.'; }
+    }));
+  } catch (e) { msg.textContent = 'Fehler beim Laden der Benutzer.'; }
+}
+async function patchUser(username, body) {
+  const msg = document.getElementById('users-msg');
+  try {
+    const r = await fetch('/api/users/' + encodeURIComponent(username), {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!r.ok) { msg.textContent = d.error || 'Fehler'; loadUsers(); return; }
+    msg.textContent = 'Gespeichert ✓'; setTimeout(() => msg.textContent = '', 3000);
+  } catch (e) { msg.textContent = 'Fehler beim Speichern.'; }
+}
+document.getElementById('btn-nu-add').addEventListener('click', async () => {
+  const msg = document.getElementById('users-msg');
+  const username = document.getElementById('nu-username').value.trim();
+  const password = document.getElementById('nu-password').value;
+  const role = document.getElementById('nu-role').value;
+  const expires = document.getElementById('nu-expires').value;
+  if (!username) { msg.textContent = 'Benutzername eingeben.'; return; }
+  if (password.length < 8) { msg.textContent = 'Passwort: mind. 8 Zeichen.'; return; }
+  try {
+    const r = await fetch('/api/users', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, role, expires }),
+    });
+    const d = await r.json();
+    if (!r.ok) { msg.textContent = d.error || 'Fehler'; return; }
+    document.getElementById('nu-username').value = '';
+    document.getElementById('nu-password').value = '';
+    document.getElementById('nu-expires').value = '';
+    msg.textContent = 'Angelegt ✓'; setTimeout(() => msg.textContent = '', 3000);
+    loadUsers();
+  } catch (e) { msg.textContent = 'Fehler beim Anlegen.'; }
+});
+loadUsers();
 
 /* Eigener Dialog im App-Design (statt Browser-prompt/confirm) */
 function uiDialog({ title, message, label, value = '', type = 'text', okText = 'OK' }) {

@@ -38,7 +38,7 @@ import updater
 import vrm
 import vrm_import
 import weather
-from auth import UserError, UserStore, new_secret_key
+from auth import ROLES, UserError, UserStore, is_expired, new_secret_key
 from datasources import build_fixed_price_entries, fetch_tibber_prices
 from logic import ESS_CHARGE, ESS_IDLE, Params, Slot, decide, merge_into_windows
 from logic import _parse_iso as logic_parse_iso
@@ -104,6 +104,30 @@ def note_failed_attempt(ip: str) -> None:
         _attempts.setdefault(ip, []).append(time.time())
 
 
+def _deny(msg: str, code: int = 403):
+    if request.path.startswith("/api/"):
+        return jsonify(error=msg), code
+    return redirect(url_for("index"))
+
+
+# Nur fuer Rolle "admin" sichtbar/erreichbar (Seite + API) - Einstellungen, Zugangsdaten,
+# Geraeteverwaltung, sicherheitsrelevante ESS-Register. Alles andere (Dashboard, Regeln,
+# Automatik, Watchdog, Report ...) bleibt fuer "user"/"demo" lesbar.
+ADMIN_ONLY_ENDPOINTS = {
+    "setup", "admin",
+    "api_config",
+    "api_ess_min_soc", "api_ess_grid_setpoint",
+    "api_notify_info", "api_vrm_info", "api_tuya_info",
+    "api_weather_location",
+    "api_pv_calibration",
+    "api_check_update",
+    "api_users", "api_users_item",
+}
+# Schreibende Aktionen (POST/PATCH/DELETE/PUT), die Rolle "user" zusaetzlich zum
+# Lesen darf - alles Weitere ist fuer "user" wie fuer "demo" nur lesend erreichbar.
+WRITE_ALLOWED_FOR_USER = {"api_shelly_switch", "api_override", "api_update_own_account"}
+
+
 @app.before_request
 def _require_login():
     if request.endpoint in PUBLIC_ENDPOINTS:
@@ -114,14 +138,27 @@ def _require_login():
         return redirect(url_for("create_account"))
     username = session.get("user")
     user = users.get(username) if username else None
-    if not user:
+    if not user or is_expired(user):
         session.clear()
         if request.path.startswith("/api/"):
             return jsonify(error="Nicht angemeldet.", login_required=True), 401
         return redirect(url_for("login", next=request.path))
     g.user = username
     g.user_display = user["username"]
+    g.role = user.get("role") or "admin"
+
+    if g.role != "admin":
+        if request.endpoint in ADMIN_ONLY_ENDPOINTS:
+            return _deny("Kein Zugriff mit diesem Konto.")
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            if g.role == "demo" or request.endpoint not in WRITE_ALLOWED_FOR_USER:
+                return _deny("Dieses Konto darf nichts ändern (nur lesen).")
     return None
+
+
+@app.context_processor
+def inject_role():
+    return {"user_role": getattr(g, "role", "admin")}
 
 
 @app.route("/create-account", methods=["GET", "POST"])
@@ -244,6 +281,56 @@ def api_update_own_account():
         return jsonify(error=str(exc)), 400
     session["user"] = active
     return jsonify(ok=True)
+
+
+def _user_out(u: dict) -> dict:
+    return {"username": u["username"], "role": u.get("role") or "admin",
+            "created": u.get("created"), "last_login": u.get("last_login"),
+            "expires": u.get("expires"), "is_me": u["username"].strip().lower() == g.user}
+
+
+@app.route("/api/users", methods=["GET", "POST"])
+def api_users():
+    """Benutzerverwaltung (nur Admin) - Liste sowie Neuanlage mit Rolle (admin/user/demo)
+    und optionalem Ablaufdatum (z.B. fuer einen zeitlich befristeten Demo-Zugang)."""
+    if request.method == "GET":
+        return jsonify(users=[_user_out(u) for u in users.list()], roles=list(ROLES))
+    body = request.json or {}
+    role = body.get("role") or "user"
+    expires = (body.get("expires") or "").strip() or None
+    try:
+        u = users.create(body.get("username") or "", body.get("password") or "", role=role, expires=expires)
+    except UserError as exc:
+        return jsonify(error=str(exc)), 400
+    return jsonify(ok=True, user=_user_out(u))
+
+
+@app.route("/api/users/<username>", methods=["PATCH", "DELETE"])
+def api_users_item(username):
+    """Rolle/Ablauf/Passwort eines Benutzers aendern oder den Benutzer loeschen (nur Admin).
+    Der letzte Admin kann weder degradiert noch geloescht werden - sonst sperrt man sich
+    versehentlich selbst aus."""
+    if request.method == "DELETE":
+        try:
+            users.delete(username)
+        except UserError as exc:
+            return jsonify(error=str(exc)), 400
+        return jsonify(ok=True)
+
+    body = request.json or {}
+    try:
+        if "role" in body:
+            users.set_role(username, body["role"])
+        if "expires" in body:
+            users.set_expires(username, (body.get("expires") or "").strip() or None)
+        if body.get("password"):
+            users.update_password(username, body["password"])
+    except UserError as exc:
+        return jsonify(error=str(exc)), 400
+    u = users.get(username)
+    if not u:
+        return jsonify(error="Benutzer nicht gefunden."), 404
+    return jsonify(ok=True, user=_user_out(u))
 
 
 ESS_TEXT = {ESS_CHARGE: "Netzladen", ESS_IDLE: "Normal / Warten"}

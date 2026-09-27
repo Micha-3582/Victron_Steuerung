@@ -4,9 +4,13 @@
 <style>
   .card h2 { display: flex; align-items: center; gap: 8px; }
   .card h2 svg.h2i { width: 16px; height: 16px; flex: 0 0 auto; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .ro-locked { opacity: .65; pointer-events: none; }
 </style>
 
-<div class="card" id="rules-card">
+{% if user_role != 'admin' %}
+<div class="card" style="border-color:var(--muted)"><div class="muted">👁️ Nur Ansicht – mit diesem Konto lassen sich keine Regeln anlegen oder ändern.</div></div>
+{% endif %}
+<div class="card{{ ' ro-locked' if user_role != 'admin' else '' }}" id="rules-card">
   <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Regeln</h2>
   <div class="muted" style="margin-bottom:12px">Sag der Steuerung in einfachen Sätzen, wann ein Gerät ein- und ausgeschaltet werden soll – zum Beispiel
     „Heizung einschalten, wenn der Strom unter 25 ct kostet und der Akku über 50 % hat; ausschalten, sobald der Akku unter 30 % fällt“.
@@ -26,7 +30,7 @@
   <div style="margin-top:14px"><span data-log-badge="rules" style="display:inline-block"><a href="/rules-log"><button type="button" class="ghost">📒 Logbuch</button></a></span></div>
 </div>
 
-<div class="card">
+<div class="card{{ ' ro-locked' if user_role != 'admin' else '' }}">
   <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Deine Regeln</h2>
   <div id="rules-list" style="display:flex;flex-direction:column;gap:12px"></div>
   <div id="rule-wizard" style="margin-top:12px"></div>

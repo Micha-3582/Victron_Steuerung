@@ -14,9 +14,14 @@ import secrets
 import threading
 import time
 
+from datetime import date
+
 from werkzeug.security import check_password_hash, generate_password_hash
 
 MIN_PASSWORD_LEN = 8
+ROLES = ("admin", "user", "demo")
+# admin: alles. user: Dashboard + Geraete schalten (z.B. Ehepartner). demo: nur lesen,
+# nichts schaltbar - fuer Vorfuehrungen mit echten Daten, ohne dass etwas veraendert werden kann.
 
 
 class UserError(Exception):
@@ -25,6 +30,18 @@ class UserError(Exception):
 
 def _norm(username: str) -> str:
     return (username or "").strip().lower()
+
+
+def is_expired(user: dict) -> bool:
+    """True, wenn der Zugang ein gesetztes Ablaufdatum hat und das heute schon vorbei ist.
+    `expires` = "YYYY-MM-DD", gueltig bis einschliesslich diesem Tag (23:59)."""
+    expires = user.get("expires")
+    if not expires:
+        return False
+    try:
+        return date.today().isoformat() > expires
+    except Exception:                                    # noqa: BLE001
+        return False
 
 
 class UserStore:
@@ -83,8 +100,26 @@ class UserStore:
             self._sync()
             return [u["username"] for u in self._users.values()]
 
+    def list(self) -> list[dict]:
+        """Alle Benutzer (ohne Passwort-Hash) fuer die Verwaltung im Adminbereich."""
+        with self._lock:
+            self._sync()
+            out = []
+            for u in self._users.values():
+                d = dict(u)
+                d.pop("pw_hash", None)
+                d.setdefault("role", "admin")
+                out.append(d)
+            return sorted(out, key=lambda d: d.get("created") or 0)
+
+    def admin_count(self) -> int:
+        with self._lock:
+            self._sync()
+            return sum(1 for u in self._users.values() if (u.get("role") or "admin") == "admin")
+
     def verify(self, username: str, password: str):
-        """Gibt den Benutzer zurueck oder None. Aktualisiert last_login."""
+        """Gibt den Benutzer zurueck oder None. Aktualisiert last_login. Ein
+        abgelaufener Zugang (siehe `expires`) wird wie ein falsches Passwort behandelt."""
         with self._lock:
             self._sync()
             user = self._users.get(_norm(username))
@@ -92,16 +127,20 @@ class UserStore:
                 return None
             if not check_password_hash(user["pw_hash"], password):
                 return None
+            if is_expired(user):
+                return None
             user["last_login"] = time.time()
             self._write()
             return dict(user)
 
-    def create(self, username: str, password: str) -> dict:
+    def create(self, username: str, password: str, role: str = "admin", expires: str | None = None) -> dict:
         key = _norm(username)
         if not key:
             raise UserError("Benutzername darf nicht leer sein.")
         if len(password or "") < MIN_PASSWORD_LEN:
             raise UserError(f"Passwort muss mindestens {MIN_PASSWORD_LEN} Zeichen haben.")
+        if role not in ROLES:
+            role = "admin"
         with self._lock:
             self._sync()
             if key in self._users:
@@ -111,10 +150,54 @@ class UserStore:
                 "pw_hash": generate_password_hash(password),
                 "created": time.time(),
                 "last_login": None,
+                "role": role,
+                "expires": expires or None,          # "YYYY-MM-DD" oder None (unbegrenzt)
             }
             self._users[key] = user
             self._write()
             return dict(user)
+
+    def set_role(self, username: str, role: str) -> dict:
+        if role not in ROLES:
+            raise UserError("Unbekannte Rolle.")
+        key = _norm(username)
+        with self._lock:
+            self._sync()
+            user = self._users.get(key)
+            if not user:
+                raise UserError("Benutzer nicht gefunden.")
+            if (user.get("role") or "admin") == "admin" and role != "admin" and self._admin_count_locked() <= 1:
+                raise UserError("Der letzte Administrator kann nicht degradiert werden.")
+            user["role"] = role
+            self._write()
+            return dict(user)
+
+    def set_expires(self, username: str, expires: str | None) -> dict:
+        key = _norm(username)
+        with self._lock:
+            self._sync()
+            user = self._users.get(key)
+            if not user:
+                raise UserError("Benutzer nicht gefunden.")
+            user["expires"] = expires or None
+            self._write()
+            return dict(user)
+
+    def delete(self, username: str) -> None:
+        key = _norm(username)
+        with self._lock:
+            self._sync()
+            user = self._users.get(key)
+            if not user:
+                raise UserError("Benutzer nicht gefunden.")
+            if (user.get("role") or "admin") == "admin" and self._admin_count_locked() <= 1:
+                raise UserError("Der letzte Administrator kann nicht gelöscht werden.")
+            del self._users[key]
+            self._write()
+
+    def _admin_count_locked(self) -> int:
+        """Wie admin_count(), aber ohne erneut den Lock zu holen (nur intern, Lock ist schon gehalten)."""
+        return sum(1 for u in self._users.values() if (u.get("role") or "admin") == "admin")
 
     def update_password(self, username: str, password: str) -> dict:
         key = _norm(username)
