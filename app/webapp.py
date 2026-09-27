@@ -961,6 +961,27 @@ def api_alarms():
         return jsonify(error=str(e)), 400
 
 
+@app.route("/api/_debug/battery-vrm-raw")
+def api_debug_battery_vrm_raw():
+    """NUR zur Fehlersuche (14.5 Zyklen wirkte zu niedrig, 27.09.): zeigt die rohen VRM-Tageswerte
+    fuer Pb/Gb/Bc/Bg in einem Zeitraum, damit man sieht, wo Daten fehlen. Wieder entfernen danach."""
+    import vrm
+    c = vrm.load_credentials()
+    try:
+        days = int(request.args.get("days", 14))
+    except ValueError:
+        days = 14
+    now = datetime.now()
+    start = now - timedelta(days=days)
+    data = vrm._request(c, {"type": "kwh", "interval": "days", "start": int(start.timestamp()), "end": int(now.timestamp())})
+    rec = data.get("records") if isinstance(data, dict) else None
+    out = {}
+    for code in ("Pb", "Gb", "Bc", "Bg"):
+        pts = vrm._points(rec, code) if isinstance(rec, dict) else []
+        out[code] = [{"date": datetime.fromtimestamp(ts).date().isoformat(), "kwh": round(v, 2)} for ts, v in pts]
+    return jsonify(raw_records_keys=list(rec.keys()) if isinstance(rec, dict) else None, values=out)
+
+
 @app.route("/api/battery-cycles")
 def api_battery_cycles():
     """Lebenslaufende Akku-Nutzung: Durchsatz und daraus die aequivalenten Vollzyklen (siehe store.battery_cycle_stats)."""
