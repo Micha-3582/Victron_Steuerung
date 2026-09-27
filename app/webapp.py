@@ -362,7 +362,7 @@ class Controller:
         # jeden Tick neu berechnete, kostenoptimale Planung. Greift NICHT bei manuellem Override/Ladetermin, festem
         # Tarif, fehlenden Preisen oder wenn die harte Ladesperre (Ladelimit) bereits gezogen hat - diese
         # Sicherheitsfaelle bleiben unveraendert bei der bewaehrten Logik oben.
-        if (cfg.get("smart_planner_enabled") and not forced and cfg.get("tariff_mode") != "fixed"
+        if (cfg.get("smart_planner_enabled", True) and not forced and cfg.get("tariff_mode") != "fixed"
                 and d.reason != "Keine Preisdaten" and "Ladelimit" not in d.strategy):
             try:
                 sm = self._smart_decision(now, soc, prices, vrm_data, params)

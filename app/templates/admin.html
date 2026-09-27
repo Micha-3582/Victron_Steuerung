@@ -303,15 +303,15 @@
 
 <div id="dynamic-pricing-cards">
 <div class="card">
-  <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-4 12.7V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.3A7 7 0 0 0 12 2z"/><line x1="9" y1="22" x2="15" y2="22"/></svg>Intelligente Planung (Beta)</h2>
-  <div class="muted" style="margin-bottom:12px">Rechnet bei jedem Durchlauf frisch – mit dem gerade gemessenen Akkustand und der aktuellsten VRM-Prognose für
-    Sonne und Verbrauch –, wann Netzladen über den ganzen sichtbaren Zeitraum (heute und, sobald bekannt, morgen) am günstigsten ist,
-    und lädt danach. Ersetzt dabei Peak-Schutz, SOC-Strategie und den Günstig-Vorkauf unten, die bei aktivierter Planung nicht mehr
-    greifen (Ladelimit, PV-Reserve und der minimale Akkustand am Cerbo gelten weiter). Bei manuellem Override, Ladeterminen und
-    festem Tarif ist sie ohne Wirkung.</div>
+  <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-4 12.7V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.3A7 7 0 0 0 12 2z"/><line x1="9" y1="22" x2="15" y2="22"/></svg>Intelligente Planung</h2>
+  <div class="muted" style="margin-bottom:12px">Der Standard bei dynamischem Tarif: rechnet bei jedem Durchlauf frisch – mit dem gerade gemessenen Akkustand und der
+    aktuellsten VRM-Prognose für Sonne und Verbrauch –, wann Netzladen über den ganzen sichtbaren Zeitraum (heute und, sobald bekannt,
+    morgen) am günstigsten ist, und lädt danach. Ersetzt dabei Peak-Schutz, SOC-Strategie und den Günstig-Vorkauf unten, die bei
+    aktivierter Planung nicht mehr greifen (Ladelimit, PV-Reserve und der minimale Akkustand am Cerbo gelten weiter). Bei manuellem
+    Override, Ladeterminen und festem Tarif ist sie ohne Wirkung.</div>
   <div style="display:flex;align-items:center;gap:14px">
     <label class="switch" style="margin:0"><input type="checkbox" id="smart_planner_enabled"><span class="slider"></span></label>
-    <div><b>Intelligente Planung aktiv</b><div class="muted">Aus (Standard) = die Strategien unten entscheiden wie bisher.</div></div>
+    <div><b>Intelligente Planung aktiv</b><div class="muted">An (Standard). Nur ausschalten, um stattdessen die festen Strategien unten von Hand einzustellen.</div></div>
   </div>
   <details class="help" style="margin-top:12px">
     <summary>Was ist daran anders als die Strategien unten?</summary>
@@ -325,6 +325,11 @@
   </details>
 </div>
 
+<div id="legacy-strategy-cards">
+<div class="card" id="legacy-strategy-note" data-tab="tarif" style="display:none">
+  <div class="muted">Peak-Schutz, SOC-Strategie und der Günstig-Vorkauf sind ausgeblendet, solange die <b>Intelligente Planung</b> oben aktiv ist –
+    sie greifen dann nicht. Die eingetragenen Werte bleiben erhalten und wirken sofort wieder, sobald die Intelligente Planung ausgeschaltet wird.</div>
+</div>
 <div class="card">
   <h2><svg class="h2i" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.5 8 8 11 4.5-3 8-6 8-11V5l-8-3z"/></svg>Peak-Schutz &amp; Preislimit</h2>
   <details class="help">
@@ -379,6 +384,7 @@
     <div><label>Ziel-SOC Morgen-Brücke (%) <span class="qhelp" role="button" tabindex="0" data-help="Ladestand in Prozent, auf den morgens (0 bis 9 Uhr) vorgeladen wird, damit der Akku bis in den Vormittag reicht, bis die Sonne übernimmt.">?</span></label><input id="target_safe_soc" type="number" min="0" max="100"></div>
     <div><label>Hysterese (%) <span class="qhelp" role="button" tabindex="0" data-help="Puffer in Prozent, damit die Steuerung nicht ständig an einer Schwelle hin- und herschaltet. Ein Modus wird erst wieder freigegeben, wenn der Ladestand um diesen Wert von der Schwelle abweicht.">?</span></label><input id="hysterese_soc" type="number" step="0.5"></div>
   </div>
+</div>
 </div>
 </div>
 
@@ -684,7 +690,7 @@ async function init() {
   document.getElementById('has_pv_inverter').checked = cfg.has_pv_inverter !== false;
   document.getElementById('has_mppt').checked = cfg.has_mppt !== false;
   document.getElementById('pv_auto_calibration').checked = !!cfg.pv_auto_calibration;
-  document.getElementById('smart_planner_enabled').checked = !!cfg.smart_planner_enabled;
+  document.getElementById('smart_planner_enabled').checked = cfg.smart_planner_enabled !== false;
   document.getElementById(cfg.tariff_mode === 'fixed' ? 'tariff_fixed' : 'tariff_tibber').checked = true;
   document.getElementById('tibber_token').value = cfg.tibber_token || '';
   document.getElementById('fixed_price_ct').value = cfg.fixed_price_ct ?? '';
@@ -729,7 +735,16 @@ function updateTariffFields() {
   const tibberToggle = document.getElementById('show_tibber_card');
   tibberToggle.disabled = fixed;
   if (fixed) tibberToggle.checked = false;
+  updateLegacyStrategyCards();
 }
+// Peak-Schutz/SOC-Strategie/Guenstig-Vorkauf greifen nicht mehr, solange die Intelligente
+// Planung aktiv ist - dann nur noch eine Hinweiszeile statt der (wirkungslosen) Karten zeigen.
+function updateLegacyStrategyCards() {
+  const smart = document.getElementById('smart_planner_enabled').checked;
+  document.getElementById('legacy-strategy-note').style.display = smart ? '' : 'none';
+  document.querySelectorAll('#legacy-strategy-cards > .card:not(#legacy-strategy-note)').forEach(c => c.hidden = smart);
+}
+document.getElementById('smart_planner_enabled').addEventListener('change', updateLegacyStrategyCards);
 document.querySelectorAll('input[name="tariff_mode"]').forEach(r => r.addEventListener('change', updateTariffFields));
 document.getElementById('tibber_token').addEventListener('input', updateTariffFields);
 
@@ -1266,6 +1281,7 @@ const ADMIN_TABS = [
   const cards = [...document.querySelectorAll('.card')];
   cards.forEach(c => {
     if (c.querySelector('#btn-save')) { c.classList.add('savebar'); c.dataset.tab = '*'; (document.getElementById('tab-account') || c.parentNode).appendChild(c); return; }   // Leiste immer ans Ende
+    if (c.dataset.tab) return;          // schon fest zugeordnet (z.B. eine Hinweiszeile ohne eigene Ueberschrift)
     const h = (c.querySelector('h2')?.textContent || '').replace(/\s+/g, ' ').trim();
     const t = ADMIN_TABS.find(t => t.match.some(m => h.startsWith(m)));
     c.dataset.tab = t ? t.id : 'system';
