@@ -124,17 +124,11 @@
   </details>
 </div>
 
-<div class="card">
-  <h2><svg class="h2i" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Kacheln</h2>
-  <div class="muted" style="margin-bottom:12px">Jede Dashboard-Kachel einzeln ein-/ausblendbar und mit ▲▼ in der Reihenfolge verschiebbar –
-    so lässt sich die Startseite auf das Wesentliche zuschneiden (für <b>alle</b> Konten). (Erst mit „Speichern“ übernommen.)</div>
-  <div id="tile-toggles" style="display:flex;flex-direction:column;gap:10px"></div>
-</div>
-
 <div class="card" data-tab="anzeige" data-area="personal">
   <h2><svg class="h2i" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Meine Ansicht</h2>
-  <div class="muted" style="margin-bottom:12px">Nur für <b>dein eigenes</b> Konto: welche der oben freigegebenen Kacheln du zusätzlich für dich
-    aus-/einblendest und in welcher Reihenfolge. Wirkt sich auf niemand sonst aus. Alles angehakt = wie voreingestellt.</div>
+  <div class="muted" style="margin-bottom:12px">Welche deiner freigegebenen Dashboard-Kacheln <b>du</b> sehen willst und in welcher Reihenfolge –
+    nur für dein eigenes Konto, wirkt sich auf niemand sonst aus. Was dir nicht freigegeben ist (siehe „Weitere Benutzer“),
+    steht hier gar nicht erst zur Auswahl. Alles angehakt = alles Freigegebene sichtbar.</div>
   <div id="my-tile-toggles" style="display:flex;flex-direction:column;gap:10px"></div>
   <div style="margin-top:12px"><button id="my-tiles-save">Speichern</button>
   <span id="my-tiles-msg" class="muted" style="margin-left:12px"></span></div>
@@ -704,55 +698,11 @@ const PARAM_KEYS = ['battery_usable_kwh','daily_usage_kwh','pv_reserve_kwh',
   'contract_fee_month_eur','grid_fee_day_eur','meter_fee_day_eur','section14a_credit_day_eur','vat_percent',
   'battery_expected_cycles'];
 
-// Muss exakt zu TILE_IDS in index.html passen (Schluessel = Config-Feld/Checkbox-ID).
-// show_tibber_card bekommt zusaetzlich eine Sperre bei festem Tarif (siehe
-// updateTariffFields) - ohne dynamischen Tarif ist die Kachel ohnehin nur eine
-// leere "Status"-Huelle, das Freischalten erst nach Tarifwahl macht das sichtbar.
-const TILE_DEFS = [
-  { key: 'show_live_values', label: 'Live-Werte (Victron)', hint: 'Momentanwerte von Netz/Verbrauch/Solar/Batterie.' },
-  { key: 'show_energy_chart', label: 'Energie (Verlauf)', hint: 'Balken-Diagramm Verbrauch/Solar/Batterie-SOC.' },
-  { key: 'show_flow_chart', label: 'Energieflüsse', hint: 'Woher der Strom kam und wohin er ging.' },
-  { key: 'show_week_overview', label: 'Wochenrückblick', hint: 'Solar/Verbrauch/Netz/Autarkie/Kosten der letzten 7 Tage.' },
-  { key: 'show_month_overview', label: 'Monatsüberblick', hint: 'Gleiche Werte je Kalendermonat, dauerhaft archiviert.' },
-  { key: 'show_tibber_card', label: 'Tibber-Kachel', hint: 'Preis jetzt, ESS-Modus, Bilanz. Nur bei dynamischem Tarif verfügbar.' },
-  { key: 'show_override_card', label: 'Sofort laden (Override)', hint: 'Erzwingt Netzladen unabhängig vom Preis.' },
-  { key: 'show_price_plan', label: 'Strompreis & Ladeplan', hint: 'Preiskurve mit Ladeplan, manuelle Termine markieren.' },
-  { key: 'show_charge_log', label: 'Ladevorgänge (heute)', hint: 'Protokoll geplanter/durchgeführter Ladungen.' },
-  { key: 'show_ev_card', label: 'Manuelle Ladetermine', hint: 'Formular zum Anlegen eines Ladetermins.' },
-  { key: 'show_shelly_card', label: 'Geräte (Shelly/Tasmota/Tuya)', hint: 'Schalter für smarte Steckdosen auf dem Dashboard.' },
-  { key: 'show_savings_card', label: 'Ersparnis', hint: 'Was PV, Akku und Steuerung gegenüber „alles aus dem Netz“ sparen.' },
-  { key: 'show_plansim_card', label: 'Ladeplan-Simulation (Test)', hint: 'Vorschlag des EMS-Planers im Vergleich zur bisherigen Steuerung – steuert nichts. Nur bei dynamischem Tarif.' },
-  { key: 'show_weather_card', label: 'Wetter', hint: 'Wettervorhersage für den Standort (Standort im Reiter „Wetter“).' },
-];
-let tileOrder = TILE_DEFS.map(t => t.key);   // Reihenfolge auf dem Dashboard (▲▼ unten)
-function mergeTileOrder(saved) {
-  const known = TILE_DEFS.map(t => t.key), s = (saved || []).filter(k => known.includes(k));
-  return [...s, ...known.filter(k => !s.includes(k))];
-}
-function moveTile(key, dir) {
-  const i = tileOrder.indexOf(key), j = i + dir;
-  if (i < 0 || j < 0 || j >= tileOrder.length) return;
-  [tileOrder[i], tileOrder[j]] = [tileOrder[j], tileOrder[i]];
-  renderTileToggles();
-  if (typeof updateTariffFields === 'function') updateTariffFields();   // Sperre (Fork) nach dem Neuzeichnen wieder setzen
-}
-function renderTileToggles() {
-  const checks = {};
-  TILE_DEFS.forEach(t => { const el = document.getElementById(t.key); if (el) checks[t.key] = el.checked; });
-  const defs = tileOrder.map(k => TILE_DEFS.find(t => t.key === k)).filter(Boolean);
-  document.getElementById('tile-toggles').innerHTML = defs.map((t, i) => `
-    <div style="display:flex;align-items:center;gap:14px">
-      <label class="switch" style="margin:0"><input type="checkbox" id="${t.key}"><span class="slider"></span></label>
-      <div style="flex:1;min-width:0"><b>${t.label}</b><div class="muted">${t.hint}</div></div>
-      <button type="button" class="ghost" onclick="moveTile('${t.key}', -1)" ${i === 0 ? 'disabled' : ''} title="Weiter nach oben">▲</button>
-      <button type="button" class="ghost" onclick="moveTile('${t.key}', 1)" ${i === defs.length - 1 ? 'disabled' : ''} title="Weiter nach unten">▼</button>
-    </div>`).join('');
-  TILE_DEFS.forEach(t => { if (t.key in checks) document.getElementById(t.key).checked = checks[t.key]; });
-}
-renderTileToggles();
-
-/* ---- "Meine Ansicht": genau dieselben Regler (Kippschalter + ▲▼), aber je Konto fuer sich selbst -
-   nutzt /api/my-tiles statt /api/config und wirkt sich nie auf andere Konten aus. */
+/* ---- "Meine Ansicht": Kippschalter + ▲▼, je Konto fuer sich selbst - ersetzt die frueher globale
+   "Kacheln"-Karte (die fuer ALLE Konten auf einmal galt und dadurch ueberfluessig war, jetzt wo
+   jedes Konto seine Ansicht selbst einstellt). Nutzt /api/my-tiles, wirkt sich nie auf andere aus.
+   Kacheln, die der Admin fuer dieses Konto nicht freigegeben hat (siehe "Weitere Benutzer"),
+   tauchen hier gar nicht erst auf - nicht nur ausgegraut. */
 let myTileDefs = [], myTileOrder = [], myAdminCeiling = null;
 function moveMyTile(key, dir) {
   const i = myTileOrder.indexOf(key), j = i + dir;
@@ -763,28 +713,27 @@ function moveMyTile(key, dir) {
 function renderMyTileToggles() {
   const checks = {};
   myTileDefs.forEach(t => { const el = document.getElementById('my-' + t.key); if (el) checks[t.key] = el.checked; });
-  const defs = myTileOrder.map(k => myTileDefs.find(t => t.key === k)).filter(Boolean);
-  document.getElementById('my-tile-toggles').innerHTML = defs.map((t, i) => {
-    const lockedOut = myAdminCeiling && !myAdminCeiling.includes(t.key);   // Admin hat diese Kachel komplett gesperrt
-    return `<div style="display:flex;align-items:center;gap:14px;${lockedOut ? 'opacity:.5' : ''}">
-      <label class="switch" style="margin:0"><input type="checkbox" id="my-${t.key}" ${lockedOut ? 'disabled' : ''}><span class="slider"></span></label>
-      <div style="flex:1;min-width:0"><b>${t.label}</b><div class="muted">${t.hint}${lockedOut ? ' · <span title="Vom Admin gesperrt">vom Admin gesperrt</span>' : ''}</div></div>
+  const defs = myTileOrder.map(k => myTileDefs.find(t => t.key === k)).filter(Boolean);   // vom Admin nicht freigegebene Kacheln stehen gar nicht erst in myTileDefs
+  document.getElementById('my-tile-toggles').innerHTML = defs.map((t, i) => `
+    <div style="display:flex;align-items:center;gap:14px">
+      <label class="switch" style="margin:0"><input type="checkbox" id="my-${t.key}"><span class="slider"></span></label>
+      <div style="flex:1;min-width:0"><b>${t.label}</b><div class="muted">${t.hint}</div></div>
       <button type="button" class="ghost" onclick="moveMyTile('${t.key}', -1)" ${i === 0 ? 'disabled' : ''} title="Weiter nach oben">▲</button>
       <button type="button" class="ghost" onclick="moveMyTile('${t.key}', 1)" ${i === defs.length - 1 ? 'disabled' : ''} title="Weiter nach unten">▼</button>
-    </div>`;
-  }).join('');
+    </div>`).join('');
   myTileDefs.forEach(t => { if (t.key in checks) document.getElementById('my-' + t.key).checked = checks[t.key]; });
 }
 async function loadMyTiles() {
   let d; try { d = await (await fetch('/api/my-tiles')).json(); } catch (e) { return; }
-  myTileDefs = d.tiles.map(([key, label, hint]) => ({ key, label, hint }));
   myAdminCeiling = d.admin_tiles;
-  myTileOrder = (d.my_order && d.my_order.length ? d.my_order : myTileDefs.map(t => t.key));
+  const allowedKeys = new Set(myAdminCeiling || d.tiles.map(([key]) => key));
+  myTileDefs = d.tiles.filter(([key]) => allowedKeys.has(key)).map(([key, label, hint]) => ({ key, label, hint }));
+  myTileOrder = (d.my_order || []).filter(k => allowedKeys.has(k));
+  myTileOrder = [...myTileOrder, ...myTileDefs.map(t => t.key).filter(k => !myTileOrder.includes(k))];
   renderMyTileToggles();
-  const allowed = new Set(myAdminCeiling || myTileDefs.map(t => t.key));
   myTileDefs.forEach(t => {
     const el = document.getElementById('my-' + t.key);
-    if (el) el.checked = allowed.has(t.key) && (!d.my_tiles || d.my_tiles.includes(t.key));
+    if (el) el.checked = !d.my_tiles || d.my_tiles.includes(t.key);
   });
 }
 document.getElementById('my-tiles-save').addEventListener('click', async () => {
@@ -832,8 +781,6 @@ async function init() {
   document.getElementById('energy_sample_seconds').value = cfg.energy_sample_seconds ?? 10;
   document.getElementById('chart_energy_hourly').checked = !!cfg.chart_energy_hourly;
   document.getElementById('chart_flow_hourly').checked = !!cfg.chart_flow_hourly;
-  tileOrder = mergeTileOrder(cfg.tile_order); renderTileToggles();
-  TILE_DEFS.forEach(t => { document.getElementById(t.key).checked = cfg[t.key] !== false; });
   const cerboEl = document.getElementById('cerbo_host');
   cerboEl.value = cfg.cerbo_host || '';
   cerboEl.placeholder = (cfg.cerbo_host_set && !cfg.cerbo_host) ? '•.•.•.• hinterlegt (nur bei Schreibrecht sichtbar)' : '';
@@ -889,9 +836,8 @@ function updateTariffFields() {
   // index.html isFixedTariff) - Schalter dafuer gesperrt/ausgegraut und erzwungen
   // aus, bis "Tibber" als Tarif gewaehlt ist (Token-Pflicht wie oben reicht hier
   // nicht als Bedingung, schon die reine Tarifwahl schaltet frei).
-  const tibberToggle = document.getElementById('show_tibber_card');
-  tibberToggle.disabled = fixed;
-  if (fixed) tibberToggle.checked = false;
+  const tibberToggle = document.getElementById('show_tibber_card');   // gibt es nur noch, falls ein Fork die Karte behalten hat
+  if (tibberToggle) { tibberToggle.disabled = fixed; if (fixed) tibberToggle.checked = false; }
   updateLegacyStrategyCards();
 }
 // Peak-Schutz/SOC-Strategie/Guenstig-Vorkauf greifen nicht mehr, solange die Intelligente
@@ -916,8 +862,6 @@ document.getElementById('btn-save')?.addEventListener('click', async () => {
     energy_sample_seconds: parseInt(document.getElementById('energy_sample_seconds').value) || 10,
     chart_energy_hourly: document.getElementById('chart_energy_hourly').checked,
     chart_flow_hourly: document.getElementById('chart_flow_hourly').checked,
-    ...Object.fromEntries(TILE_DEFS.map(t => [t.key, document.getElementById(t.key).checked])),
-    tile_order: tileOrder,
     cerbo_host: document.getElementById('cerbo_host').value.trim(),
     cerbo_port: parseInt(document.getElementById('cerbo_port').value) || 502,
     has_pv_inverter: document.getElementById('has_pv_inverter').checked,
