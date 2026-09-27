@@ -32,7 +32,7 @@ def run(apply: bool = False, now: datetime | None = None) -> dict:
     if not (c.get("token") and c.get("installation_id")):
         raise vrm.VrmError("VRM-Zugang ist noch nicht eingerichtet")
     now = now or datetime.now()
-    start = (now - timedelta(days=store._HISTORY_KEEP_DAYS - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = (now - timedelta(days=store.VRM_RESTORE_LOOKBACK_DAYS - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
     end = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)     # laufender Slot bleibt bei der App
     flows, used = vrm.fetch_flow_slots(c, start, end)
     have = store.history_keys()

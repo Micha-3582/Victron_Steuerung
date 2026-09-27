@@ -8,6 +8,7 @@ app/ev_schedules.json
 app/energy.json
 app/charge_log.json
 app/history.json
+app/history_archive/
 app/solar_log.json
 app/monthly_summary.json
 app/backups/

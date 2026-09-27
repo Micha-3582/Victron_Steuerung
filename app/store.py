@@ -26,6 +26,7 @@ HISTORY_PATH = os.path.join(_DIR, "history.json")
 SOLAR_LOG_PATH = os.path.join(_DIR, "solar_log.json")
 WATCHDOG_PATH = os.path.join(_DIR, "battery_watchdog.json")
 MONTHLY_PATH = os.path.join(_DIR, "monthly_summary.json")
+HISTORY_ARCHIVE_DIR = os.path.join(_DIR, "history_archive")   # dauerhaftes Archiv, ein File pro Monat (siehe unten)
 
 _lock = threading.Lock()
 log = logging.getLogger("store")
@@ -327,8 +328,127 @@ def list_charge_sessions(now=None):
 # history.json: {"hours": {"YYYY-MM-DDTHH:MM": {verbrauch, solar, 7 Flüsse,
 #   soc_min, soc_max, soc_sum, soc_n}}, "last": {ts, pv, load, grid, bc, bd}}
 # (Schlüssel "hours" historisch beibehalten, enthält jetzt Viertelstunden-Slots.)
-_HISTORY_KEEP_DAYS = 35           # rollierend, ältere Tage werden verworfen
+# Nur der LAUFENDE Tag (+ ein kurzer Puffer um Mitternacht) bleibt hier "heiss" und wird bei
+# jedem Sample komplett neu geschrieben - deshalb muss diese Datei klein bleiben. Abgeschlossene
+# Tage wandern mit voller Aufloesung dauerhaft in HISTORY_ARCHIVE_DIR (ein File pro Monat, wird
+# pro Tag nur EINMAL geschrieben) und werden hier entfernt. Das haelt die 10-Sekunden-Schreibungen
+# immer gleich schnell, egal wie alt die Anlage schon laeuft.
 _MAX_SAMPLE_GAP_S = 900           # Lücken (z.B. nach Downtime) auf 15 min kappen
+# Wie weit vrm_import.run() bei "fehlende Tage nachholen" zurueckschaut - unabhaengig von der
+# heissen Datei (die deckt ja nur noch den laufenden Tag ab), war frueher an _HISTORY_KEEP_DAYS gekoppelt.
+VRM_RESTORE_LOOKBACK_DAYS = 35
+
+
+def _archive_month_path(month_key: str) -> str:
+    return os.path.join(HISTORY_ARCHIVE_DIR, f"{month_key}.json")
+
+
+def _load_archive_month(month_key: str) -> dict:
+    """{"YYYY-MM-DD": {slot_key: bucket, ...}, ...} eines Monats aus dem dauerhaften Archiv."""
+    return _load_json_recovering(_archive_month_path(month_key), lambda: {"days": {}}).get("days", {})
+
+
+def _append_full_days_to_archive(per_day_full: dict) -> None:
+    """Schreibt die vollen Viertelstunden-Werte abgeschlossener Tage dauerhaft ins Monats-Archiv.
+    Passiert nur EINMAL pro abgeschlossenem Tag (nicht bei jedem Sample) - kostet also so gut wie
+    nichts, auch wenn das Archiv über Jahre waechst. Ergaenzt slot-weise, ueberschreibt nie einen
+    ganzen Tag auf einen Schlag (falls ein Tag aus irgendeinem Grund zweimal hier ankommt)."""
+    if not per_day_full:
+        return
+    os.makedirs(HISTORY_ARCHIVE_DIR, exist_ok=True)
+    by_month: dict[str, dict] = {}
+    for day, buckets in per_day_full.items():
+        by_month.setdefault(day[:7], {})[day] = buckets
+    for month, days in by_month.items():
+        path = _archive_month_path(month)
+        existing = _load_json_recovering(path, lambda: {"days": {}})
+        existing.setdefault("days", {})
+        for day, buckets in days.items():
+            existing["days"].setdefault(day, {}).update(buckets)
+        _dump_json(path, existing, indent=None, backup=True)
+
+
+def _sum_days_into_monthly(per_day_full: dict) -> None:
+    """Aggregiert abgeschlossene Tage in die dauerhaften Monatssummen (monthly_summary.json,
+    Basis fuer den Monatsüberblick) - je Tag genau einmal (days_archived-Liste als Schutz)."""
+    if not per_day_full:
+        return
+    mdata = _load_monthly()
+    archived = set(mdata.get("days_archived", []))
+    months = mdata.setdefault("months", {})
+    changed = False
+    for day, buckets in per_day_full.items():
+        if day in archived:
+            continue
+        row = {"solar": 0.0, "verbrauch": 0.0, "import": 0.0, "export": 0.0,
+               "cost_ct": 0.0, "batt_charge": 0.0, "batt_discharge": 0.0}
+        for b in buckets.values():
+            row["solar"] += b.get("solar", 0.0)
+            row["verbrauch"] += b.get("verbrauch", 0.0)
+            row["import"] += b.get("g_load", 0.0) + b.get("g_batt", 0.0)
+            row["export"] += b.get("s_grid", 0.0) + b.get("b_grid", 0.0)
+            row["cost_ct"] += b.get("grid_cost_ct", 0.0)
+            row["batt_charge"] += b.get("s_batt", 0.0) + b.get("g_batt", 0.0)
+            row["batt_discharge"] += b.get("b_load", 0.0) + b.get("b_grid", 0.0)
+        m = months.setdefault(day[:7], {"solar": 0.0, "verbrauch": 0.0, "import": 0.0,
+                                         "export": 0.0, "cost_ct": 0.0, "batt_charge": 0.0, "batt_discharge": 0.0})
+        for key in row:
+            m[key] = m.get(key, 0.0) + row[key]
+        archived.add(day)
+        changed = True
+    if changed:
+        mdata["days_archived"] = sorted(archived)
+        _save_monthly(mdata)
+
+
+def _archive_finished_days_inplace(data: dict, now: datetime) -> bool:
+    """Nimmt abgeschlossene Tage (vor heute) aus `data['hours']` heraus, archiviert sie dauerhaft
+    (volle Aufloesung + Monatssumme) und mutiert `data` direkt (kuerzt 'hours'). True, wenn etwas
+    entfernt wurde - der Aufrufer muss `data` dann selbst speichern."""
+    today = now.date().isoformat()
+    hours = data.get("hours", {})
+    finished: dict[str, dict] = {}
+    for k in list(hours.keys()):
+        d = k[:10]
+        if len(d) == 10 and d < today:
+            finished.setdefault(d, {})[k] = hours.pop(k)
+    if not finished:
+        return False
+    _append_full_days_to_archive(finished)
+    # Sicherheitsnetz gegen Datenverlust: nachlesen, ob wirklich alles im Archiv angekommen ist,
+    # BEVOR es aus der heissen Datei verschwindet. Fehlt etwas (z.B. Schreibfehler), bleibt der
+    # betroffene Slot lieber (faelschlich als "aktueller Tag" markiert) in hours stehen, statt
+    # unwiederbringlich weg zu sein - lieber einmal zu vorsichtig als einen Messwert zu verlieren.
+    for day, buckets in finished.items():
+        stored = _load_archive_month(day[:7]).get(day, {})
+        missing = [k for k in buckets if k not in stored]
+        if missing:
+            log.error("history.json: %d Slot(e) von %s liessen sich im Archiv nicht verifizieren "
+                      "- bleiben sicherheitshalber in der laufenden Datei", len(missing), day)
+            for k in missing:
+                hours[k] = buckets[k]
+    _sum_days_into_monthly(finished)
+    return True
+
+
+def _day_buckets(day: str, hot_hours: dict | None = None) -> dict:
+    """Alle Viertelstunden-Buckets EINES Tages: aus der 'heissen' Datei, falls dort (noch) vorhanden
+    (normalerweise nur der laufende Tag), sonst aus dem dauerhaften Monats-Archiv. `hot_hours` optional
+    vorab geladen uebergeben, wenn man mehrere Tage hintereinander abfragt (spart wiederholtes Laden)."""
+    hot_hours = _load_history().get("hours", {}) if hot_hours is None else hot_hours
+    found = {k: v for k, v in hot_hours.items() if k[:10] == day}
+    return found if found else _load_archive_month(day[:7]).get(day, {})
+
+
+def archive_finished_days(now: datetime | None = None) -> None:
+    """Oeffentlicher Einstieg fuer Aufrufer, die history.json noch nicht geladen haben (z.B. der
+    Monatsueberblick als Sicherheitsnetz). Im Normalbetrieb erledigt das schon jeder Regeltick von
+    selbst (siehe _log_energy_sample) - hier billig, wenn nichts zu tun ist."""
+    now = now or datetime.now()
+    with _HISTORY_LOCK:
+        data = _load_history()
+        if _archive_finished_days_inplace(data, now):
+            _dump_json(HISTORY_PATH, data, indent=2, backup=True)
 
 
 def _slot_key(dt: datetime) -> str:
@@ -471,22 +591,19 @@ def _log_energy_sample(system: dict | None, now: datetime | None = None,
                     "pv": p["pv"], "load": p["load"], "grid": p["grid"],
                     "bc": p["bc"], "bd": p["bd"]}
 
-    # Rollierend alte Slots verwerfen
-    keep_from = now.timestamp() - _HISTORY_KEEP_DAYS * 86400
-    for k in list(hours.keys()):
-        try:
-            if datetime.fromisoformat(k).timestamp() < keep_from:
-                del hours[k]
-        except ValueError:
-            log.warning("history.json: unbekannter Schluessel %r bleibt erhalten", k)
+    # Abgeschlossene Tage (vor heute) dauerhaft archivieren (volle Aufloesung + Monatssumme) und
+    # aus der heissen Datei entfernen - inkl. Nachlese-Sicherheitsnetz (siehe dort). Das ist der
+    # einzige Ort, an dem hours nennenswert schrumpft, und zwar bewusst jede Nacht um Mitternacht.
+    archived_now = _archive_finished_days_inplace(data, now)
 
-    # Notbremse: schrumpft der Verlauf in EINEM Schritt auf weniger als die Haelfte, ohne dass eine
-    # Zeitluecke (Ausfall/Uhrensprung) dahintersteckt, ist das ein Fehler - dann nicht speichern.
+    # Notbremse: schrumpft der Verlauf DANEBEN (also nicht durch die taegliche Archivierung oben
+    # erklaert) drastisch, ohne dass eine Zeitluecke dahintersteckt, ist das ein Fehler - dann
+    # nicht speichern. n_before ist jetzt klein (nur der laufende Tag), darum ein kleinerer Schwellwert.
     try:
         gap_s = (now - datetime.fromisoformat(prev_ts)).total_seconds() if prev_ts else 0.0
     except ValueError:
         gap_s = 0.0
-    if n_before >= 100 and len(hours) < n_before * 0.5:
+    if not archived_now and n_before >= 20 and len(hours) < n_before * 0.5:
         if abs(gap_s) <= 86400:
             log.error("history.json: Verlauf waere von %d auf %d Slots geschrumpft (ohne Zeitluecke) - "
                       "NICHT gespeichert, Sicherung bleibt erhalten", n_before, len(hours))
@@ -499,8 +616,19 @@ def _log_energy_sample(system: dict | None, now: datetime | None = None,
 
 
 def history_keys() -> set:
-    """Alle vorhandenen Viertelstunden-Slots (Schluessel) in history.json."""
-    return set(_load_history().get("hours", {}).keys())
+    """Alle vorhandenen Viertelstunden-Slots (Schluessel) - heisse Datei UND dauerhaftes Archiv -
+    damit z.B. der VRM-Nachhol-Import weiss, was schon (irgendwo) vorliegt und nichts doppelt holt."""
+    keys = set(_load_history().get("hours", {}).keys())
+    try:
+        if os.path.isdir(HISTORY_ARCHIVE_DIR):
+            for fn in os.listdir(HISTORY_ARCHIVE_DIR):
+                if fn.endswith(".json"):
+                    for day_buckets in _load_json_recovering(
+                            os.path.join(HISTORY_ARCHIVE_DIR, fn), lambda: {"days": {}}).get("days", {}).values():
+                        keys |= set(day_buckets.keys())
+    except OSError:
+        pass
+    return keys
 
 
 def import_history_slots(slots: dict) -> int:
@@ -549,7 +677,7 @@ def energy_history_for_day(day: str, now: datetime | None = None) -> list:
         d0 = datetime.strptime(day, "%Y-%m-%d")
     except (ValueError, TypeError):
         return []
-    hours = _load_history().get("hours", {})
+    hours = _day_buckets(day)
     end = d0.replace(hour=23, minute=45)
     t = d0.replace(hour=0, minute=0)
     out = []
@@ -574,9 +702,19 @@ def energy_history_today(now: datetime | None = None) -> list:
 
 
 def energy_min_day() -> str | None:
-    """Frühester Tag, für den Verlaufsdaten vorliegen (YYYY-MM-DD) oder None."""
+    """Frühester Tag, für den Verlaufsdaten vorliegen (YYYY-MM-DD) oder None - heisse Datei UND
+    dauerhaftes Archiv (das reicht potenziell bis zur Inbetriebnahme zurück)."""
     hours = _load_history().get("hours", {})
     days = {k[:10] for k in hours.keys() if len(k) >= 10}
+    try:
+        if os.path.isdir(HISTORY_ARCHIVE_DIR):
+            months = sorted(fn[:-5] for fn in os.listdir(HISTORY_ARCHIVE_DIR) if fn.endswith(".json"))
+            if months:
+                earliest = _load_archive_month(months[0])
+                if earliest:
+                    days.add(min(earliest.keys()))
+    except OSError:
+        pass
     return min(days) if days else None
 
 
@@ -584,26 +722,24 @@ def energy_week_summary(now: datetime | None = None, days: int = 7, offset_weeks
     """Tagesweise Bilanz (Solar/Verbrauch/Netz/Kosten) einer 7-Tage-Woche fuer
     den Wochenrueckblick. offset_weeks=0 ist die aktuelle Woche (bis heute),
     1 die davor usw. - so bleibt die Statistik blaetterbar, statt beim naechsten
-    Tag aus der Anzeige zu verschwinden (Rohdaten bleiben ohnehin
-    _HISTORY_KEEP_DAYS Tage erhalten). Kosten sind so genau wie der Preis, der
+    Tag aus der Anzeige zu verschwinden (Rohdaten bleiben dauerhaft erhalten,
+    siehe history_archive/). Kosten sind so genau wie der Preis, der
     beim jeweiligen Sample gerade bekannt war (siehe log_energy_sample) - bei
     Tagen vor Einfuehrung dieser Auswertung fehlen sie und stehen als 0."""
     now = now or datetime.now()
-    hours = _load_history().get("hours", {})
+    hot_hours = _load_history().get("hours", {})
     end_day = now.date() - timedelta(days=days * offset_weeks)
     day_keys = [(end_day - timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
     per_day = {d: {"solar": 0.0, "verbrauch": 0.0, "import": 0.0, "export": 0.0, "cost_ct": 0.0}
                for d in day_keys}
-    for k, b in hours.items():
-        d = k[:10]
-        if d not in per_day:
-            continue
-        row = per_day[d]
-        row["solar"] += b.get("solar", 0.0)
-        row["verbrauch"] += b.get("verbrauch", 0.0)
-        row["import"] += b.get("g_load", 0.0) + b.get("g_batt", 0.0)
-        row["export"] += b.get("s_grid", 0.0) + b.get("b_grid", 0.0)
-        row["cost_ct"] += b.get("grid_cost_ct", 0.0)
+    for d in day_keys:
+        for b in _day_buckets(d, hot_hours).values():
+            row = per_day[d]
+            row["solar"] += b.get("solar", 0.0)
+            row["verbrauch"] += b.get("verbrauch", 0.0)
+            row["import"] += b.get("g_load", 0.0) + b.get("g_batt", 0.0)
+            row["export"] += b.get("s_grid", 0.0) + b.get("b_grid", 0.0)
+            row["cost_ct"] += b.get("grid_cost_ct", 0.0)
     corr = get_grid_correction(now)
     today_iso = now.date().isoformat()
     if today_iso in per_day and (corr["import"] or corr["export"]):
@@ -649,46 +785,6 @@ def _load_monthly() -> dict:
 
 def _save_monthly(data: dict):
     _dump_json(MONTHLY_PATH, data, indent=2, backup=True)
-
-
-def archive_finished_days(now: datetime | None = None):
-    """Schreibt abgeschlossene Tage aus der (nur _HISTORY_KEEP_DAYS=35 Tage
-    rollierenden) history.json dauerhaft in ein separates Monats-Archiv
-    (monthly_summary.json) fort - damit der Monatsueberblick auch nach Jahren
-    noch Daten hat, nicht nur die letzten 35 Tage. Jeder Tag wird GENAU EINMAL
-    archiviert (days_archived-Liste als Schutz gegen Doppelzaehlung); wird bei
-    jedem Regeltick UND beim Abruf des Monatsueberblicks aufgerufen (billig,
-    kein Aufwand wenn nichts Neues zu archivieren ist)."""
-    now = now or datetime.now()
-    today = now.date().isoformat()
-    data = _load_monthly()
-    archived = set(data.get("days_archived", []))
-    hours = _load_history().get("hours", {})
-    per_day: dict[str, dict] = {}
-    for k, b in hours.items():
-        d = k[:10]
-        if d >= today or d in archived:
-            continue
-        row = per_day.setdefault(d, {"solar": 0.0, "verbrauch": 0.0, "import": 0.0,
-                                      "export": 0.0, "cost_ct": 0.0, "batt_charge": 0.0, "batt_discharge": 0.0})
-        row["solar"] += b.get("solar", 0.0)
-        row["verbrauch"] += b.get("verbrauch", 0.0)
-        row["import"] += b.get("g_load", 0.0) + b.get("g_batt", 0.0)
-        row["export"] += b.get("s_grid", 0.0) + b.get("b_grid", 0.0)
-        row["cost_ct"] += b.get("grid_cost_ct", 0.0)
-        row["batt_charge"] += b.get("s_batt", 0.0) + b.get("g_batt", 0.0)         # Solar+Netz -> Akku
-        row["batt_discharge"] += b.get("b_load", 0.0) + b.get("b_grid", 0.0)      # Akku -> Verbrauch+Netz
-    if not per_day:
-        return
-    months = data.setdefault("months", {})
-    for d, row in per_day.items():
-        m = months.setdefault(d[:7], {"solar": 0.0, "verbrauch": 0.0, "import": 0.0,
-                                       "export": 0.0, "cost_ct": 0.0, "batt_charge": 0.0, "batt_discharge": 0.0})
-        for key in row:
-            m[key] = m.get(key, 0.0) + row[key]         # get() statt [] - aeltere Monate im Archiv kennen neue Felder noch nicht
-        archived.add(d)
-    data["days_archived"] = sorted(archived)
-    _save_monthly(data)
 
 
 def contract_fixed_cost_eur(cfg: dict, days: float) -> float:
@@ -884,8 +980,7 @@ def _load_solar_log() -> dict:
 
 def _solar_actual_for_day(day: str) -> float:
     """Realer Tagesertrag (kWh) aus der integrierten PV-Leistung."""
-    hours = _load_history().get("hours", {})
-    return round(sum(b.get("solar", 0.0) for k, b in hours.items() if k[:10] == day), 2)
+    return round(sum(b.get("solar", 0.0) for b in _day_buckets(day).values()), 2)
 
 
 def solar_measured_today(now: datetime | None = None) -> float:
@@ -902,9 +997,7 @@ _SOC_FULL_THRESHOLD = 99.0
 
 def _solar_socmax_for_day(day: str):
     """Höchster erreichter Batterie-SOC des Tages (aus der History) oder None."""
-    hours = _load_history().get("hours", {})
-    vals = [b.get("soc_max") for k, b in hours.items()
-            if k[:10] == day and b.get("soc_max") is not None]
+    vals = [b.get("soc_max") for b in _day_buckets(day).values() if b.get("soc_max") is not None]
     return max(vals) if vals else None
 
 
@@ -915,9 +1008,10 @@ def _finalize_vrm(e: dict):
         e["vrm_deviation_pct"] = round((actual - vrm_kwh) / vrm_kwh * 100, 1)
 
 
-def _restored_days() -> set:
-    """Tage, fuer die history.json aus dem VRM nachgeholte Slots enthaelt."""
-    return {k[:10] for k, b in _load_history().get("hours", {}).items() if b.get("restored")}
+def _day_is_restored(day: str) -> bool:
+    """True, wenn (mindestens) ein Slot dieses Tages aus dem VRM nachgeholt wurde -
+    heisse Datei oder dauerhaftes Archiv."""
+    return any(b.get("restored") for b in _day_buckets(day).values())
 
 
 def _finalize_solar_days(days: dict, now: datetime):
@@ -926,9 +1020,8 @@ def _finalize_solar_days(days: dict, now: datetime):
     today = now.date().isoformat()
     # Tage, deren Verlauf nachtraeglich aus dem VRM ergaenzt wurde (Datenverlust), EINMAL neu abschliessen -
     # sonst bleibt ein damals falsch (z. B. 0 kWh) festgehaltener Ertrag stehen.
-    restored = _restored_days()
     for day, e in days.items():
-        if day < today and day in restored and not e.get("vrm_refixed"):
+        if day < today and not e.get("vrm_refixed") and _day_is_restored(day):
             e["actual"] = None
             e["vrm_refixed"] = True
         if day < today and e.get("actual") is None:
@@ -999,13 +1092,13 @@ def recent_solar_average(days: int = 7, now: datetime | None = None) -> float | 
     now = now or datetime.now()
     today = now.date()
     want = {(today - timedelta(days=i)).isoformat() for i in range(1, days + 1)}
+    hot_hours = _load_history().get("hours", {})
     slots: dict[str, int] = {}
     sums: dict[str, float] = {}
-    for k, b in _load_history().get("hours", {}).items():
-        d = k[:10]
-        if d in want:
-            slots[d] = slots.get(d, 0) + 1
-            sums[d] = sums.get(d, 0.0) + b.get("solar", 0.0)
+    for d in want:
+        buckets = _day_buckets(d, hot_hours)
+        slots[d] = len(buckets)
+        sums[d] = sum(b.get("solar", 0.0) for b in buckets.values())
     vals = [sums[d] for d in want if slots.get(d, 0) >= 80]      # nur (fast) lückenlose Tage
     if len(vals) < 3:
         return None
@@ -1083,17 +1176,30 @@ def price_slots(day: str):
 
 def backfill_prices_from_history() -> int:
     """Rechnet fuer Tage OHNE Tibber-Originalpreise aus dem Verlauf zurueck: Preis = Bezugskosten / Bezugsmenge (nur Slots mit
-    Netzbezug). Idempotent; laeuft beim Start. Rueckgabe: Anzahl neu gefuellter Slots."""
+    Netzbezug). Idempotent; laeuft beim Start (heisse Datei UND dauerhaftes Archiv). Rueckgabe: Anzahl neu gefuellter Slots."""
     per_day: dict[str, dict[int, float]] = {}
-    for key, b in _load_history().get("hours", {}).items():
-        imp = b.get("g_load", 0.0) + b.get("g_batt", 0.0)
-        cost = b.get("grid_cost_ct", 0.0)
-        if imp > 0.005 and cost > 0 and len(key) >= 16:
-            try:
-                slot = int(key[11:13]) * 4 + int(key[14:16]) // 15
-            except ValueError:
-                continue
-            per_day.setdefault(key[:10], {})[slot] = round(cost / imp, 2)
+
+    def _scan(items):
+        for key, b in items:
+            imp = b.get("g_load", 0.0) + b.get("g_batt", 0.0)
+            cost = b.get("grid_cost_ct", 0.0)
+            if imp > 0.005 and cost > 0 and len(key) >= 16:
+                try:
+                    slot = int(key[11:13]) * 4 + int(key[14:16]) // 15
+                except ValueError:
+                    continue
+                per_day.setdefault(key[:10], {})[slot] = round(cost / imp, 2)
+
+    _scan(_load_history().get("hours", {}).items())
+    try:
+        if os.path.isdir(HISTORY_ARCHIVE_DIR):
+            for fn in os.listdir(HISTORY_ARCHIVE_DIR):
+                if fn.endswith(".json"):
+                    for day_buckets in _load_json_recovering(
+                            os.path.join(HISTORY_ARCHIVE_DIR, fn), lambda: {"days": {}}).get("days", {}).values():
+                        _scan(day_buckets.items())
+    except OSError:
+        pass
     filled = 0
     with _PRICE_LOCK:
         days = _price_days()
@@ -1129,8 +1235,7 @@ def price_history(days: int = 90) -> dict:
 def energy_grid_charge_buckets(day: str) -> dict:
     """{slot_key 'YYYY-MM-DDTHH:MM': gemessene Netz→Batterie-kWh} eines Tages.
     Basis für die tatsächliche (statt geschätzte) Lademenge in den Ladevorgängen."""
-    hours = _load_history().get("hours", {})
-    return {k: round(b.get("g_batt", 0.0), 4) for k, b in hours.items() if k[:10] == day}
+    return {k: round(b.get("g_batt", 0.0), 4) for k, b in _day_buckets(day).items()}
 
 
 def active_ev(now: datetime | None = None):
@@ -1338,17 +1443,33 @@ def savings(cfg: dict, now: datetime | None = None, keep_days: int = 60) -> dict
     if fixed_mode and fixed <= 0:
         return {"available": False, "reason": "Kein fester Preis eingetragen."}
     by_day: dict = {}
-    for k, b in _load_history().get("hours", {}).items():
+
+    def _index_bucket(k, b):
         try:
             idx = int(k[11:13]) * 4 + int(k[14:16]) // 15
         except ValueError:
-            continue
+            return
         by_day.setdefault(k[:10], []).append((idx, b))
+
+    for k, b in _load_history().get("hours", {}).items():
+        _index_bucket(k, b)
     pdays = _price_days()
     data = _load_json_recovering(SAVINGS_PATH, lambda: {"days": {}})
     if not isinstance(data, dict):
         data = {"days": {}}
     saved = data.setdefault("days", {})
+    # Tage, die noch nicht "eingefroren" sind, aber (normal - schon archiviert) nicht mehr in der
+    # heissen Datei stehen: gezielt aus dem dauerhaften Archiv nachladen, statt bei jedem Aufruf
+    # das ganze Archiv zu durchsuchen. Bewusst begrenzter Rueckblick (z.B. nach laengerer
+    # Ausfallzeit) - genau wie zuvor, als die heisse Datei selbst nur begrenzt weit zurueckreichte.
+    d = now.date() - timedelta(days=1)
+    oldest = now.date() - timedelta(days=VRM_RESTORE_LOOKBACK_DAYS)
+    while d >= oldest:
+        day = d.isoformat()
+        if day not in saved and day not in by_day:
+            for k, b in _day_buckets(day).items():
+                _index_bucket(k, b)
+        d -= timedelta(days=1)
     changed = False
     live = None
     for day in sorted(by_day):
