@@ -93,7 +93,7 @@ def main():
     prices7 = [21.0] * 4 + [50.0] * 8 + [30.0] * 12                        # 18-19 Uhr 21ct, 19-21 Uhr 50ct (Peak), danach 30ct
     entries7 = make_prices(now, prices7)
     p7 = Params(battery_usable_kwh=20.0, daily_usage_kwh=24.0, min_peak_soc=40.0,
-                evening_comfort_soc=65.0, valley_price_ratio=0.65,
+                evening_comfort_soc=65.0, valley_min_saving_ct=15.0,
                 morning_peak_end=9, evening_peak_start=19, evening_peak_end=21)
     d7 = scenario("Guenstig-Vorkauf, SOC 46% (Sicherheit erfuellt, Komfort nicht)", soc=46,
                   price_entries=entries7, solar_today_raw=0, solar_tom_raw=90, state=PersistentState(), now=now, params=p7)

@@ -31,7 +31,7 @@ EVENING_PEAK_START = 19
 EVENING_PEAK_END = 21
 MIN_PEAK_SOC = 40
 EVENING_COMFORT_SOC = 0.0     # 0 = aus. Sonst: Komfort-Ziel-SOC vor dem Abend-Peak, siehe Params.evening_comfort_soc
-VALLEY_PRICE_RATIO = 0.65
+VALLEY_MIN_SAVING_CT = 15.0    # Mindestersparnis (ct/kWh) ggue. dem erwarteten Abend-Peak-Preis, damit der Vorkauf greift
 PEAK_AVOID_PRICE = 37.0
 NIGHT_SAFETY_SOC = 30.0
 TARGET_SAFE_SOC = 35.0
@@ -59,7 +59,7 @@ class Params:
     evening_peak_end: int = EVENING_PEAK_END
     min_peak_soc: float = MIN_PEAK_SOC
     evening_comfort_soc: float = EVENING_COMFORT_SOC
-    valley_price_ratio: float = VALLEY_PRICE_RATIO
+    valley_min_saving_ct: float = VALLEY_MIN_SAVING_CT
     peak_avoid_price: float = PEAK_AVOID_PRICE
     night_safety_soc: float = NIGHT_SAFETY_SOC
     target_safe_soc: float = TARGET_SAFE_SOC
@@ -339,9 +339,9 @@ def decide(soc: float, price_entries: list, solar_today_raw: float,
         if (p.evening_comfort_soc > p.min_peak_soc
                 and p.morning_peak_end <= hour_now < p.evening_peak_start):
             evening_avg = _avg_price_on_day(slots_all, now.date(), p.evening_peak_start, p.evening_peak_end)
-            if evening_avg is not None and now_price <= evening_avg * p.valley_price_ratio:
+            if evening_avg is not None and now_price <= evening_avg - p.valley_min_saving_ct:
                 peak_target = p.evening_comfort_soc
-                valley_note = f" – günstig ({now_price:.1f} ≤ {p.valley_price_ratio * 100:.0f} % von {evening_avg:.1f} ct)"
+                valley_note = f" – günstig ({now_price:.1f} ct, {evening_avg - now_price:.1f} ct billiger als der Abend-Peak)"
         needs, kwh, reason = calc_peak_protection(soc, hour_now, solar_today, solar_tom, p, target_soc=peak_target)
         if needs:
             grid_need = kwh
