@@ -670,20 +670,22 @@ def archive_finished_days(now: datetime | None = None):
         if d >= today or d in archived:
             continue
         row = per_day.setdefault(d, {"solar": 0.0, "verbrauch": 0.0, "import": 0.0,
-                                      "export": 0.0, "cost_ct": 0.0})
+                                      "export": 0.0, "cost_ct": 0.0, "batt_charge": 0.0, "batt_discharge": 0.0})
         row["solar"] += b.get("solar", 0.0)
         row["verbrauch"] += b.get("verbrauch", 0.0)
         row["import"] += b.get("g_load", 0.0) + b.get("g_batt", 0.0)
         row["export"] += b.get("s_grid", 0.0) + b.get("b_grid", 0.0)
         row["cost_ct"] += b.get("grid_cost_ct", 0.0)
+        row["batt_charge"] += b.get("s_batt", 0.0) + b.get("g_batt", 0.0)         # Solar+Netz -> Akku
+        row["batt_discharge"] += b.get("b_load", 0.0) + b.get("b_grid", 0.0)      # Akku -> Verbrauch+Netz
     if not per_day:
         return
     months = data.setdefault("months", {})
     for d, row in per_day.items():
         m = months.setdefault(d[:7], {"solar": 0.0, "verbrauch": 0.0, "import": 0.0,
-                                       "export": 0.0, "cost_ct": 0.0})
+                                       "export": 0.0, "cost_ct": 0.0, "batt_charge": 0.0, "batt_discharge": 0.0})
         for key in row:
-            m[key] += row[key]
+            m[key] = m.get(key, 0.0) + row[key]         # get() statt [] - aeltere Monate im Archiv kennen neue Felder noch nicht
         archived.add(d)
     data["days_archived"] = sorted(archived)
     _save_monthly(data)
@@ -726,7 +728,8 @@ def monthly_overview(now: datetime | None = None, limit_months: int = 120) -> di
     hours = _load_history().get("hours", {})
     archived_days = set(data.get("days_archived", []))
     cur = dict(months.get(cur_key) or {"solar": 0.0, "verbrauch": 0.0, "import": 0.0,
-                                       "export": 0.0, "cost_ct": 0.0})
+                                       "export": 0.0, "cost_ct": 0.0, "batt_charge": 0.0, "batt_discharge": 0.0})
+    cur.setdefault("batt_charge", 0.0); cur.setdefault("batt_discharge", 0.0)   # aeltere Archiv-Monate kennen die Felder noch nicht
     for k, b in hours.items():
         if k[:7] != cur_key or k[:10] in archived_days:      # archivierte Tage stecken schon in `cur`
             continue
@@ -735,6 +738,8 @@ def monthly_overview(now: datetime | None = None, limit_months: int = 120) -> di
         cur["import"] += b.get("g_load", 0.0) + b.get("g_batt", 0.0)
         cur["export"] += b.get("s_grid", 0.0) + b.get("b_grid", 0.0)
         cur["cost_ct"] += b.get("grid_cost_ct", 0.0)
+        cur["batt_charge"] += b.get("s_batt", 0.0) + b.get("g_batt", 0.0)
+        cur["batt_discharge"] += b.get("b_load", 0.0) + b.get("b_grid", 0.0)
     corr = get_grid_correction(now)
     if corr["import"] or corr["export"]:
         cur["import"] += corr["import"]
@@ -753,8 +758,25 @@ def monthly_overview(now: datetime | None = None, limit_months: int = 120) -> di
             "import": round(m["import"], 2), "export": round(m["export"], 2),
             "cost_eur": round(m["cost_ct"] / 100.0, 2), "autarky": autarky,
             "cost_incl_fees_eur": cost_incl_fees_eur(load_config(), m["cost_ct"] / 100.0, days),
+            "batt_charge_kwh": round(m.get("batt_charge", 0.0), 2), "batt_discharge_kwh": round(m.get("batt_discharge", 0.0), 2),
         })
     return {"months": rows}
+
+
+def battery_cycle_stats(now: datetime | None = None) -> dict:
+    """Lebenslaufende Akku-Nutzung: Durchsatz (geladen/entladen) und daraus die 'aequivalenten Vollzyklen'
+    (Durchsatz / nutzbare Kapazitaet - ein Vollzyklus = einmal die ganze Kapazitaet ein- UND ausgeladen).
+    Nutzt dasselbe dauerhafte Monats-Archiv wie monatsuebersicht (waechst nie ueber die 35-Tage-Grenze
+    von history.json hinaus zurueck) + den laufenden Monat live dazu."""
+    now = now or datetime.now()
+    mo = monthly_overview(now, limit_months=10_000)
+    charge = sum(m.get("batt_charge_kwh", 0.0) for m in mo["months"])
+    discharge = sum(m.get("batt_discharge_kwh", 0.0) for m in mo["months"])
+    cap = float((load_config() or {}).get("battery_usable_kwh") or 0.0)
+    cycles = round((charge + discharge) / 2.0 / cap, 1) if cap > 0 else None
+    first_month = min((m["month"] for m in mo["months"]), default=None)
+    return {"charge_kwh": round(charge, 1), "discharge_kwh": round(discharge, 1),
+            "battery_usable_kwh": cap, "equivalent_full_cycles": cycles, "since_month": first_month}
 
 
 def energy_grid_today(now: datetime | None = None) -> dict:

@@ -24,6 +24,18 @@
   <div class="table-scroll"><table id="log-table"></table></div>
 </div>
 
+<div class="card">
+  <h2>Akku-Nutzung &amp; Lebensdauer</h2>
+  <div class="muted" style="margin-bottom:12px">
+    Wie viel Energie insgesamt durch den Akku geflossen ist, umgerechnet in <b>äquivalente Vollzyklen</b>
+    (einmal die ganze nutzbare Kapazität ein- und wieder ausgeladen = 1 Zyklus). Nützlich als grobe Kennzahl
+    für den Verschleiß, z.B. im Vergleich mit der vom Hersteller angegebenen Zyklenzahl. Zählt seit Einführung
+    dieser Auswertung – ältere Nutzung vor diesem Datum steckt nicht mit drin.
+  </div>
+  <div id="cyc-msg" class="muted"></div>
+  <div id="cyc-body" class="sysgrid" style="display:none"></div>
+</div>
+
 {% endblock %}
 {% block scripts %}
 <script>
@@ -65,5 +77,25 @@ async function load() {
 }
 load();
 setInterval(load, 30000);
+
+async function loadCycles() {
+  let c;
+  try { c = await (await fetch('/api/battery-cycles')).json(); }
+  catch (e) { $('cyc-msg').textContent = 'Fehler beim Laden.'; return; }
+  if (!c.battery_usable_kwh || c.equivalent_full_cycles == null) {
+    $('cyc-msg').textContent = 'Noch keine nutzbare Akkukapazität eingetragen (Einstellungen → Anlage & Speicher).';
+    return;
+  }
+  $('cyc-msg').textContent = '';
+  const tile = (t, big, sub) => `<div class="systile"><div class="systile-t">${t}</div><div class="systile-v">${big}</div><div class="systile-s">${sub}</div></div>`;
+  const since = c.since_month ? `${c.since_month.slice(5, 7)}/${c.since_month.slice(0, 4)}` : '–';
+  $('cyc-body').style.display = '';
+  $('cyc-body').innerHTML =
+    tile('Äquivalente Vollzyklen', c.equivalent_full_cycles, `seit ${since}`) +
+    tile('Geladen', c.charge_kwh.toFixed(0) + ' kWh', 'Solar + Netz → Akku') +
+    tile('Entladen', c.discharge_kwh.toFixed(0) + ' kWh', 'Akku → Verbrauch + Netz') +
+    tile('Nutzbare Kapazität', c.battery_usable_kwh + ' kWh', 'aus den Einstellungen');
+}
+loadCycles();
 </script>
 {% endblock %}

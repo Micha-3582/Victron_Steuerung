@@ -935,6 +935,12 @@ def api_watchdog():
     return jsonify(store.battery_watchdog_state())
 
 
+@app.route("/api/battery-cycles")
+def api_battery_cycles():
+    """Lebenslaufende Akku-Nutzung: Durchsatz und daraus die aequivalenten Vollzyklen (siehe store.battery_cycle_stats)."""
+    return jsonify(store.battery_cycle_stats())
+
+
 def _next15(iso):
     return (datetime.fromisoformat(iso) + timedelta(minutes=15)).isoformat(timespec="minutes")
 
