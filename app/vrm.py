@@ -281,7 +281,9 @@ def daily_solar() -> dict[str, float]:
 
 
 # ---------------------------------------------------------------- Akku-Lebenslauf (Zyklen) seit Installation
-_LIFETIME_CHUNK_DAYS = 366
+_LIFETIME_CHUNK_DAYS = 350          # VRM liefert bei "interval=days" ueber genau 365 Tage STILLSCHWEIGEND leere
+                                     # Daten zurueck (kein Fehler!) - 27.09.2026 gefunden: 365 Tage gehen noch,
+                                     # 366 kommt komplett leer. Bewusst mit Sicherheitsabstand, nicht bis 365.
 _EARLIEST_POSSIBLE = datetime(2013, 1, 1)         # kein Victron-ESS ist aelter - Anfrage startet spaetestens hier
 
 
