@@ -1097,6 +1097,7 @@ def api_week():
     return jsonify({
         **store.energy_week_summary(offset_weeks=offset),
         "tariff_mode": cfg.get("tariff_mode", "tibber"),
+        "has_contract_fees": bool(store.contract_fixed_cost_eur(cfg, 1)) or bool(float(cfg.get("vat_percent", 0) or 0)),
     })
 
 

@@ -609,17 +609,20 @@ def energy_week_summary(now: datetime | None = None, days: int = 7, offset_weeks
     if today_iso in per_day and (corr["import"] or corr["export"]):
         per_day[today_iso]["import"] += corr["import"]
         per_day[today_iso]["export"] += corr["export"]
+    cfg = load_config()
     days_out = []
     totals = {"solar": 0.0, "verbrauch": 0.0, "import": 0.0, "export": 0.0, "cost_ct": 0.0}
     for d in day_keys:
         row = per_day[d]
         autarky = (round(max(0.0, min(100.0, (1 - row["import"] / row["verbrauch"]) * 100)), 0)
                    if row["verbrauch"] > 0 else None)
+        day_cost = round(row["cost_ct"] / 100.0, 2)
         days_out.append({
             "day": d,
             "solar": round(row["solar"], 2), "verbrauch": round(row["verbrauch"], 2),
             "import": round(row["import"], 2), "export": round(row["export"], 2),
-            "cost_eur": round(row["cost_ct"] / 100.0, 2), "autarky": autarky,
+            "cost_eur": day_cost, "autarky": autarky,
+            "cost_incl_fees_eur": cost_incl_fees_eur(cfg, day_cost, 1),
         })
         for key in totals:
             totals[key] += row[key]
@@ -627,11 +630,13 @@ def energy_week_summary(now: datetime | None = None, days: int = 7, offset_weeks
                       if totals["verbrauch"] > 0 else None)
     min_day = energy_min_day()
     can_go_older = bool(min_day) and min_day < day_keys[0]
+    total_cost = round(totals["cost_ct"] / 100.0, 2)
     return {
         "days": days_out,
         "totals": {"solar": round(totals["solar"], 2), "verbrauch": round(totals["verbrauch"], 2),
                    "import": round(totals["import"], 2), "export": round(totals["export"], 2),
-                   "cost_eur": round(totals["cost_ct"] / 100.0, 2), "autarky": total_autarky},
+                   "cost_eur": total_cost, "autarky": total_autarky,
+                   "cost_incl_fees_eur": cost_incl_fees_eur(cfg, total_cost, len(day_keys))},
         "offset_weeks": offset_weeks,
         "can_go_older": can_go_older,
     }

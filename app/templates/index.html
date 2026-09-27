@@ -1266,8 +1266,9 @@ function renderWeek(data) {
     : first.slice(8, 10) + '.' + first.slice(5, 7) + '. – ' + last.slice(8, 10) + '.' + last.slice(5, 7) + '.';
   if (!data || !data.days || !data.days.length) { t.innerHTML = ''; return; }
   const showCost = data.tariff_mode !== 'fixed' || data.totals.cost_eur > 0;
+  const showFees = showCost && data.has_contract_fees;
   const head = `<tr class="thead"><td>Tag</td><td>Solar</td><td>Verbrauch</td>` +
-    `<td>Netzbezug</td><td>Autarkie</td>${showCost ? '<td>Kosten</td>' : ''}</tr>`;
+    `<td>Netzbezug</td><td>Autarkie</td>${showCost ? '<td>Kosten</td>' : ''}${showFees ? '<td>Gesamt inkl. Gebühren</td>' : ''}</tr>`;
   // "Heute" ist per Konstruktion immer der letzte Tag der aktuellen Woche
   // (offset 0) - nicht ueber Datumsvergleich mit der (evtl. im Hintergrund
   // veralteten) Browser-Uhr ermitteln, das lief nach Mitternacht sonst
@@ -1283,6 +1284,7 @@ function renderWeek(data) {
       <td>${d.import.toFixed(1)} kWh</td>
       <td>${d.autarky != null ? Math.round(d.autarky) + ' %' : '–'}</td>
       ${showCost ? `<td>${d.cost_eur.toFixed(2)} €</td>` : ''}
+      ${showFees ? `<td>${(d.cost_incl_fees_eur || 0).toFixed(2)} €</td>` : ''}
     </tr>`;
   }).join('');
   const tot = data.totals;
@@ -1293,6 +1295,7 @@ function renderWeek(data) {
     <td>${tot.import.toFixed(1)} kWh</td>
     <td>${tot.autarky != null ? Math.round(tot.autarky) + ' %' : '–'}</td>
     ${showCost ? `<td>${tot.cost_eur.toFixed(2)} €</td>` : ''}
+    ${showFees ? `<td>${(tot.cost_incl_fees_eur || 0).toFixed(2)} €</td>` : ''}
   </tr>`;
   t.innerHTML = head + rows + totalRow;
   markWeekRow();
