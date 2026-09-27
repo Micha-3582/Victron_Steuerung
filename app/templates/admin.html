@@ -626,21 +626,33 @@
     </table>
   </div>
   <div class="muted" id="users-msg" style="margin-top:8px"></div>
-  <hr style="border-color:var(--border);margin:16px 0">
-  <b>Neuer Benutzer</b>
-  <div class="grid2" style="margin-top:8px">
-    <div><label>Benutzername</label><input id="nu-username" autocomplete="off" placeholder="z.B. marion oder demo"></div>
-    <div><label>Passwort</label><div class="pw-wrap"><input id="nu-password" type="password" autocomplete="new-password"><button type="button" class="pw-toggle" data-for="nu-password" aria-label="Passwort anzeigen" title="Passwort anzeigen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
-    <div id="nu-expires-wrap"><label>Ablauf <span class="muted" style="font-weight:normal">(optional)</span> <span class="qhelp" role="button" tabindex="0" data-help="Ab diesem Tag funktioniert der Zugang nicht mehr - praktisch für einen befristeten Demo-Zugang. Leer lassen = unbegrenzt gültig. Nicht möglich, solange der Zugang Benutzerverwaltung=Schreiben hat.">?</span></label><input id="nu-expires" type="date"></div>
+</div>
+
+<div class="card{{ ' ro-locked' if user_perms.user_management == 'read' else '' }}" data-tab="system" data-area="user_management">
+  <button type="button" id="nu-toggle" style="all:unset;cursor:pointer;display:flex;align-items:center;gap:8px;width:100%">
+    <h2 style="margin:0"><svg class="h2i" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Neuer Benutzer</h2>
+    <svg id="nu-toggle-chevron" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-left:auto;transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+  <div id="nu-form" style="display:none;margin-top:14px">
+    <div class="grid2">
+      <div><label>Benutzername</label><input id="nu-username" autocomplete="off" placeholder="z.B. marion oder demo"></div>
+      <div><label>Passwort</label><div class="pw-wrap"><input id="nu-password" type="password" autocomplete="new-password"><button type="button" class="pw-toggle" data-for="nu-password" aria-label="Passwort anzeigen" title="Passwort anzeigen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
+      <div id="nu-expires-wrap"><label>Ablauf <span class="muted" style="font-weight:normal">(optional)</span> <span class="qhelp" role="button" tabindex="0" data-help="Ab diesem Tag funktioniert der Zugang nicht mehr - praktisch für einen befristeten Demo-Zugang. Leer lassen = unbegrenzt gültig. Nicht möglich, solange der Zugang Benutzerverwaltung=Schreiben hat.">?</span></label><input id="nu-expires" type="date"></div>
+    </div>
+    <div class="hint" style="margin-top:12px">
+      Für jeden Bereich einzeln <b>Kein Zugriff</b>, <b>Lesen</b> oder <b>Schreiben</b> festlegen. „Lesen“ zeigt die
+      Seite/Karte mit allen echten Werten, nur Zugangsdaten (Tibber-Token, VRM/Tuya/Telegram) bleiben ausschließlich
+      bei „Schreiben“ sichtbar. Die Vorlagen unten füllen die Liste nur vor – danach ist jedes Feld einzeln änderbar.
+    </div>
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <span class="muted">Vorlage:</span>
+      <button type="button" class="ghost" data-preset="admin">Admin (alles)</button>
+      <button type="button" class="ghost" data-preset="user">Benutzer (Dashboard + Geräte)</button>
+      <button type="button" class="ghost" data-preset="demo">Demo (alles ansehen)</button>
+    </div>
+    <div id="nu-matrix" style="margin-top:10px"></div>
+    <div style="margin-top:12px"><button id="btn-nu-add">Benutzer anlegen</button></div>
   </div>
-  <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-    <span class="muted">Vorlage:</span>
-    <button type="button" class="ghost" data-preset="admin">Admin (alles)</button>
-    <button type="button" class="ghost" data-preset="user">Benutzer (Dashboard + Geräte)</button>
-    <button type="button" class="ghost" data-preset="demo">Demo (alles ansehen)</button>
-  </div>
-  <div id="nu-matrix" style="margin-top:10px"></div>
-  <div style="margin-top:12px"><button id="btn-nu-add">Benutzer anlegen</button></div>
 </div>
 {% endif %}
 </div>
@@ -1080,6 +1092,11 @@ function syncNuExpires() {
   if (isFullAdmin) exp.value = '';
   document.getElementById('nu-expires-wrap').style.opacity = isFullAdmin ? '.5' : '1';
 }
+document.getElementById('nu-toggle').addEventListener('click', () => {
+  const form = document.getElementById('nu-form'), open = form.style.display !== 'none';
+  form.style.display = open ? 'none' : '';
+  document.getElementById('nu-toggle-chevron').style.transform = open ? '' : 'rotate(180deg)';
+});
 document.querySelectorAll('[data-preset]').forEach(btn => btn.addEventListener('click', () => renderNuMatrix(btn.dataset.preset)));
 document.getElementById('btn-nu-add').addEventListener('click', async () => {
   const msg = document.getElementById('users-msg');
@@ -1099,6 +1116,7 @@ document.getElementById('btn-nu-add').addEventListener('click', async () => {
     document.getElementById('nu-username').value = '';
     document.getElementById('nu-password').value = '';
     document.getElementById('nu-expires').value = '';
+    document.getElementById('nu-toggle').click();               // Karte nach dem Anlegen wieder einklappen
     msg.textContent = 'Angelegt ✓'; setTimeout(() => msg.textContent = '', 3000);
     loadUsers();
   } catch (e) { msg.textContent = 'Fehler beim Anlegen.'; }
