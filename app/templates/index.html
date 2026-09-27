@@ -17,6 +17,8 @@
     <button id="e-prev" class="ghost daytab" title="Vorheriger Tag">◀</button>
     <span id="e-day" style="min-width:78px;text-align:center;font-size:14px">Heute</span>
     <button id="e-next" class="ghost daytab" title="Nächster Tag">▶</button>
+    <button id="e-pick" type="button" class="ghost daytab" title="Tag auswählen">📅</button>
+    <input type="date" id="e-datepick" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
     <span class="muted" style="margin-left:auto" id="energy-hint">Verbrauch &amp; Solar, Batterie-SOC. Baut sich im Lauf des Tages auf.</span>
   </div>
   <div class="chart-scroll">
@@ -660,6 +662,14 @@ $('e-prev').addEventListener('click', () => shiftEnergyDay(-1));
 $('e-next').addEventListener('click', () => shiftEnergyDay(1));
 $('f-prev').addEventListener('click', () => shiftEnergyDay(-1));
 $('f-next').addEventListener('click', () => shiftEnergyDay(1));
+$('e-pick').addEventListener('click', () => {
+  const inp = $('e-datepick');
+  inp.min = energyMinDay || todayStr();
+  inp.max = fcForDay(tomorrowStr()) ? tomorrowStr() : todayStr();
+  inp.value = energyDay || todayStr();
+  try { inp.showPicker(); } catch (e) { inp.focus(); inp.click(); }   // showPicker() nicht ueberall verfuegbar (aeltere Browser)
+});
+$('e-datepick').addEventListener('change', () => { if ($('e-datepick').value) loadEnergyDay($('e-datepick').value); });
 
 /* --- Drag-Auswahl --- */
 function slotAtX(clientX) {
