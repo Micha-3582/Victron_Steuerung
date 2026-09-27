@@ -38,7 +38,8 @@ import updater
 import vrm
 import vrm_import
 import weather
-from auth import ROLES, UserError, UserStore, is_expired, new_secret_key
+import auth
+from auth import UserError, UserStore, is_expired, new_secret_key
 from datasources import build_fixed_price_entries, fetch_tibber_prices
 from logic import ESS_CHARGE, ESS_IDLE, Params, Slot, decide, merge_into_windows
 from logic import _parse_iso as logic_parse_iso
@@ -107,25 +108,107 @@ def note_failed_attempt(ip: str) -> None:
 def _deny(msg: str, code: int = 403):
     if request.path.startswith("/api/"):
         return jsonify(error=msg), code
+    if request.endpoint == "index":
+        # Sonderfall: kein Zugriff aufs Dashboard selbst - ein redirect("index") liefe
+        # sonst in eine Endlosschleife. Kommt nur bei sehr eigenwillig zusammengestellten
+        # Rechten vor (Dashboard komplett ohne Zugriff).
+        return msg, code
     return redirect(url_for("index"))
 
 
-# Nur fuer Rolle "admin" sichtbar/erreichbar (Seite + API) - Einstellungen, Zugangsdaten,
-# Geraeteverwaltung, sicherheitsrelevante ESS-Register. Alles andere (Dashboard, Regeln,
-# Automatik, Watchdog, Report ...) bleibt fuer "user"/"demo" lesbar.
-ADMIN_ONLY_ENDPOINTS = {
-    "setup", "admin",
-    "api_config",
-    "api_ess_min_soc", "api_ess_grid_setpoint",
-    "api_notify_info", "api_vrm_info", "api_tuya_info",
-    "api_weather_location",
-    "api_pv_calibration",
-    "api_check_update",
-    "api_users", "api_users_item",
+# Jeder Endpunkt gehoert zu genau einem Rechte-Bereich (siehe auth.AREAS). GET/HEAD
+# braucht "read" auf diesen Bereich, alles andere (POST/PATCH/DELETE) "write". Endpunkte,
+# die hier fehlen, sind nur mit Benutzerverwaltung=write erreichbar (sicherer Standard fuer
+# neue/vergessene Routen) - ausser sie stehen in ALWAYS_ALLOWED (eigenes Konto, Ab-/Anmelden).
+ALWAYS_ALLOWED_ENDPOINTS = {"api_update_own_account"}
+ENDPOINT_AREA = {
+    # Dashboard: Status/Verlauf ansehen (read) - Geraete schalten/Override/Ladetermine (write)
+    "index": "dashboard", "solar_log_page": "dashboard", "api_solar_log": "dashboard",
+    "watchdog_page": "dashboard", "api_watchdog": "dashboard", "api_alarms": "dashboard",
+    "api_battery_cycles": "dashboard", "api_status": "dashboard", "api_history": "dashboard",
+    "api_week": "dashboard", "api_month": "dashboard", "api_live": "dashboard",
+    "api_version": "dashboard", "api_override": "dashboard", "api_ev_add": "dashboard",
+    "api_ev_modify": "dashboard", "api_shelly_list": "dashboard", "api_shelly_switch": "dashboard",
+    "report_page": "dashboard", "api_report": "dashboard", "api_savings": "dashboard",
+    "api_plan_sim": "dashboard", "api_price_history": "dashboard", "api_weather": "dashboard",
+    "api_vrm_forecast": "dashboard", "api_vrm_forecast_history": "dashboard",
+    # Regeln
+    "rules_page": "rules", "rules_log_page": "rules", "api_rules_get": "rules",
+    "api_rules_add": "rules", "api_rules_modify": "rules",
+    # Automatik (Ueberschuss)
+    "automation_page": "automation", "automation_log_page": "automation",
+    "api_shelly_auto": "automation", "api_shelly_auto_order": "automation",
+    "api_automation_log": "automation", "api_automation_unread": "automation",
+    "api_automation_log_read": "automation", "api_automation_log_clear": "automation",
+    "api_automation_save": "automation",
+    # Einstellungen, je Karte/Reiter ein eigener Bereich
+    "api_ess_min_soc": "settings_anlage", "api_ess_grid_setpoint": "settings_anlage",
+    "api_grid_adjust": "settings_anlage", "api_test": "settings_anlage",
+    "api_pv_calibration": "settings_tarif",
+    "api_weather_location": "settings_wetter", "api_weather_search": "settings_wetter",
+    "api_notify_info": "settings_meldungen", "api_notify_credentials": "settings_meldungen",
+    "api_notify_detect": "settings_meldungen", "api_notify_settings": "settings_meldungen",
+    "api_notify_test": "settings_meldungen",
+    "api_vrm_info": "settings_vrm", "api_vrm_credentials": "settings_vrm", "api_vrm_restore": "settings_vrm",
+    "api_tuya_info": "settings_geraete", "api_tuya_credentials": "settings_geraete",
+    "api_tuya_scan": "settings_geraete", "api_tuya_add": "settings_geraete",
+    "api_shelly_icons": "settings_geraete", "api_shelly_order": "settings_geraete",
+    "api_shelly_scan": "settings_geraete", "api_tasmota_scan": "settings_geraete",
+    "api_shelly_add": "settings_geraete", "api_shelly_modify": "settings_geraete",
+    "api_check_update": "settings_system", "api_update": "settings_system",
+    "setup": "settings_anlage",
+    # "admin" (die Seite selbst) steht bewusst NICHT hier - wer irgendeinen Einstellungsbereich
+    # lesen darf, soll die Seite oeffnen koennen; welche Karten er darin sieht, entscheidet
+    # admin.html pro Karte anhand von user_perms. Siehe Sonderfall in _require_login.
+    # Benutzerverwaltung
+    "api_users": "user_management", "api_users_item": "user_management",
 }
-# Schreibende Aktionen (POST/PATCH/DELETE/PUT), die Rolle "user" zusaetzlich zum
-# Lesen darf - alles Weitere ist fuer "user" wie fuer "demo" nur lesend erreichbar.
-WRITE_ALLOWED_FOR_USER = {"api_shelly_switch", "api_override", "api_update_own_account"}
+# /api/config ist ein einziger Sammel-Endpunkt fuer fast alle Einstellungsbereiche -
+# hier wird nicht der Endpunkt, sondern jedes einzelne Config-Feld einem Bereich zugeordnet
+# (siehe api_config: GET blendet fremde Felder nicht aus, PATCH prueft nur veraenderte Felder).
+FIELD_AREA = {}
+for _f in ("cerbo_host", "cerbo_port", "has_pv_inverter", "has_mppt", "battery_usable_kwh",
+           "daily_usage_kwh", "pv_reserve_kwh", "battery_install_date", "battery_expected_cycles",
+           "scan_networks"):
+    FIELD_AREA[_f] = "settings_anlage"
+FIELD_AREA["pv_inverters"] = "settings_solar"
+for _f in ("tibber_token", "tariff_mode", "fixed_price_ct", "max_charge_soc", "absolute_cheap_price",
+           "pv_tom_morning_factor", "morning_peak_start", "morning_peak_end", "evening_peak_start",
+           "evening_peak_end", "min_peak_soc", "peak_avoid_price", "evening_comfort_soc",
+           "valley_min_saving_ct", "night_safety_soc", "target_safe_soc", "hysterese_soc",
+           "contract_fee_month_eur", "grid_fee_day_eur", "meter_fee_day_eur",
+           "section14a_credit_day_eur", "vat_percent", "smart_planner_enabled", "pv_auto_calibration"):
+    FIELD_AREA[_f] = "settings_tarif"
+for _f in ("app_display_name", "show_live_values", "show_energy_chart", "show_flow_chart",
+           "show_week_overview", "show_month_overview", "show_tibber_card", "show_override_card",
+           "show_price_plan", "show_charge_log", "show_ev_card", "show_shelly_card",
+           "show_weather_card", "show_plansim_card", "show_savings_card", "tile_order",
+           "chart_energy_hourly", "chart_flow_hourly"):
+    FIELD_AREA[_f] = "settings_anzeige"
+for _f in ("dry_run", "poll_seconds", "energy_sample_seconds", "manual_override", "web_port"):
+    FIELD_AREA[_f] = "settings_system"
+for _f in ("surplus_enabled", "surplus_dry_run", "surplus_min_soc"):
+    FIELD_AREA[_f] = "automation"
+for _f in surplus.DEFAULTS:
+    FIELD_AREA["surplus_" + _f] = "automation"
+for _f in ("rules_enabled", "rules_dry_run", "rules_manual_hold_min", "rules_failsafe_min"):
+    FIELD_AREA[_f] = "rules"
+# Config-Felder ohne Eintrag hier (sollte es keine geben) faellt api_config auf "settings_anlage"
+# zurueck - sicherer als sie komplett ungeprueft durchzulassen.
+
+
+def _perms():
+    return getattr(g, "perms", {})
+
+
+AREA_LABEL = {a: label for a, label, _ in auth.AREAS}
+
+
+def _check_area(area: str, need: str):
+    if not auth.has_level(_perms(), area, need):
+        verb = "sehen" if need == "read" else "ändern"
+        return _deny(f"Dieses Konto darf „{AREA_LABEL.get(area, area)}“ nicht {verb}.")
+    return None
 
 
 @app.before_request
@@ -145,20 +228,31 @@ def _require_login():
         return redirect(url_for("login", next=request.path))
     g.user = username
     g.user_display = user["username"]
-    g.role = user.get("role") or "admin"
+    g.perms = auth.normalize_permissions(user.get("permissions"))
 
-    if g.role != "admin":
-        if request.endpoint in ADMIN_ONLY_ENDPOINTS:
+    if request.endpoint in ALWAYS_ALLOWED_ENDPOINTS or request.endpoint == "api_config":
+        return None                                    # api_config prueft jedes Feld einzeln selbst (siehe dort)
+    if request.endpoint == "admin":
+        settings_areas = [a for a in auth.AREA_IDS if a.startswith("settings_") or a == "user_management"]
+        if not any(auth.has_level(g.perms, a, "read") for a in settings_areas):
             return _deny("Kein Zugriff mit diesem Konto.")
-        if request.method not in ("GET", "HEAD", "OPTIONS"):
-            if g.role == "demo" or request.endpoint not in WRITE_ALLOWED_FOR_USER:
-                return _deny("Dieses Konto darf nichts ändern (nur lesen).")
-    return None
+        return None                                    # welche Karten sichtbar sind, entscheidet admin.html je Bereich
+    area = ENDPOINT_AREA.get(request.endpoint)
+    if area is None:
+        if not auth.is_full_admin(g.perms):
+            return _deny("Kein Zugriff mit diesem Konto.")
+        return None
+    need = "read" if request.method in ("GET", "HEAD", "OPTIONS") else "write"
+    return _check_area(area, need)
 
 
 @app.context_processor
 def inject_role():
-    return {"user_role": getattr(g, "role", "admin")}
+    perms = _perms()
+    settings_areas = [a for a in auth.AREA_IDS if a.startswith("settings_") or a == "user_management"]
+    can_see_admin = any(perms.get(a, "none") != "none" for a in settings_areas)
+    return {"user_role": "admin" if auth.is_full_admin(perms) else "custom", "user_perms": perms,
+            "can_see_admin": can_see_admin}
 
 
 @app.route("/create-account", methods=["GET", "POST"])
@@ -284,22 +378,22 @@ def api_update_own_account():
 
 
 def _user_out(u: dict) -> dict:
-    return {"username": u["username"], "role": u.get("role") or "admin",
+    return {"username": u["username"], "permissions": auth.normalize_permissions(u.get("permissions")),
             "created": u.get("created"), "last_login": u.get("last_login"),
             "expires": u.get("expires"), "is_me": u["username"].strip().lower() == g.user}
 
 
 @app.route("/api/users", methods=["GET", "POST"])
 def api_users():
-    """Benutzerverwaltung (nur Admin) - Liste sowie Neuanlage mit Rolle (admin/user/demo)
-    und optionalem Ablaufdatum (z.B. fuer einen zeitlich befristeten Demo-Zugang)."""
+    """Benutzerverwaltung (braucht Benutzerverwaltung=Schreiben) - Liste sowie Neuanlage mit
+    frei waehlbaren Rechten je Bereich (siehe auth.AREAS) und optionalem Ablaufdatum."""
     if request.method == "GET":
-        return jsonify(users=[_user_out(u) for u in users.list()], roles=list(ROLES))
+        return jsonify(users=[_user_out(u) for u in users.list()], areas=auth.AREAS, presets=auth.PRESETS)
     body = request.json or {}
-    role = body.get("role") or "user"
+    permissions = auth.normalize_permissions(body.get("permissions") or auth.PRESETS["user"])
     expires = (body.get("expires") or "").strip() or None
     try:
-        u = users.create(body.get("username") or "", body.get("password") or "", role=role, expires=expires)
+        u = users.create(body.get("username") or "", body.get("password") or "", permissions=permissions, expires=expires)
     except UserError as exc:
         return jsonify(error=str(exc)), 400
     return jsonify(ok=True, user=_user_out(u))
@@ -307,9 +401,9 @@ def api_users():
 
 @app.route("/api/users/<username>", methods=["PATCH", "DELETE"])
 def api_users_item(username):
-    """Rolle/Ablauf/Passwort eines Benutzers aendern oder den Benutzer loeschen (nur Admin).
-    Der letzte Admin kann weder degradiert noch geloescht werden - sonst sperrt man sich
-    versehentlich selbst aus."""
+    """Rechte/Ablauf/Passwort eines Benutzers aendern oder den Benutzer loeschen (braucht
+    Benutzerverwaltung=Schreiben). Mindestens ein Zugang muss die Benutzerverwaltung behalten -
+    sonst sperrt man sich versehentlich selbst aus."""
     if request.method == "DELETE":
         try:
             users.delete(username)
@@ -319,8 +413,8 @@ def api_users_item(username):
 
     body = request.json or {}
     try:
-        if "role" in body:
-            users.set_role(username, body["role"])
+        if "permissions" in body:
+            users.set_permissions(username, body["permissions"])
         if "expires" in body:
             users.set_expires(username, (body.get("expires") or "").strip() or None)
         if body.get("password"):
@@ -1359,6 +1453,11 @@ def api_ess_grid_setpoint():
         return jsonify(error=str(e)), 400
 
 
+# Felder, deren Wert nie an den Browser zurueckgeht (nur schreiben, nie lesen) - unabhaengig
+# von Bereichsrechten, damit ein Zugangs-Token niemals irgendwo im Klartext ankommt.
+SECRET_FIELDS = {"tibber_token"}
+
+
 @app.route("/api/config", methods=["GET", "POST"])
 def api_config():
     if request.method == "GET":
@@ -1373,6 +1472,11 @@ def api_config():
         cfg.setdefault("fixed_price_ct", 32.0)
         cfg.setdefault("pv_inverters", [])
         cfg.setdefault("app_display_name", "Victron Steuerung")
+        for f in SECRET_FIELDS:
+            has_write = auth.has_level(g.perms, FIELD_AREA.get(f, "settings_anlage"), "write")
+            cfg[f + "_set"] = bool(cfg.get(f))
+            if not has_write:
+                cfg[f] = ""
         return jsonify(cfg)
     body = request.get_json(silent=True) or {}
     cfg = store.load_config()
@@ -1398,10 +1502,17 @@ def api_config():
     if not (isinstance(body.get("tile_order", []), list)
             and all(isinstance(k, str) for k in body.get("tile_order", []))):
         body.pop("tile_order", None)          # Kachelreihenfolge: nur Liste von Textschluesseln
+    denied = []
     for key in allowed:
-        if key in body:
-            cfg[key] = body[key]
+        if key not in body:
+            continue
+        if body[key] != cfg.get(key) and not auth.has_level(g.perms, FIELD_AREA.get(key, "settings_anlage"), "write"):
+            denied.append(key)         # dieses Feld darf dieses Konto nicht aendern - stillschweigend uebergehen,
+            continue                   # sonst wuerde das gemeinsame "Speichern" ueber alle Reiter hinweg immer scheitern
+        cfg[key] = body[key]
     store.save_config(cfg)
+    if denied:
+        log.info("api_config: %s hat keine Schreibrechte fuer %s - Feld(er) uebersprungen", g.user, ", ".join(denied))
     # Sofort einen Regel-Durchlauf anstoßen, damit Preise/Status gleich erscheinen
     # (der periodische Thread schläft sonst bis zu poll_seconds).
     threading.Thread(target=ctrl.safe_tick, daemon=True).start()

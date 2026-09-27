@@ -225,7 +225,7 @@
 {% block scripts %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
-const USER_ROLE = {{ user_role | tojson }};   // 'admin' | 'user' | 'demo' - siehe Einstellungen -> Konto -> Weitere Benutzer
+const DASHBOARD_LEVEL = {{ (user_perms.dashboard or 'none') | tojson }};   // 'none' | 'read' | 'write' - siehe Einstellungen -> System -> Weitere Benutzer
 const LEVEL_COLORS = {
   VERY_CHEAP: '#35c07a', CHEAP: '#35c07a', NORMAL: '#4da3ff',
   EXPENSIVE: '#f0a63c', VERY_EXPENSIVE: '#e5544a'
@@ -247,16 +247,16 @@ function applyTileOrder(order) {
   const keys = Object.keys(ORDER_IDS), given = (order || []).filter(k => keys.includes(k));
   [...given, ...keys.filter(k => !given.includes(k))].forEach((k, i) => { const el = $(ORDER_IDS[k]); if (el) el.style.order = i; });
 }
-// Eingeschraenkte Konten (siehe Einstellungen -> Konto -> Weitere Benutzer): "user" darf nur
-// Geraete schalten + Override, "demo" gar nichts. Beide duerfen keine Ladetermine anlegen
-// (serverseitig ohnehin gesperrt - hier nur, damit es nicht erst mit einem Fehler auffaellt).
-if (USER_ROLE !== 'admin') {
+// Eingeschraenkte Konten (siehe Einstellungen -> System -> Weitere Benutzer): "Schreiben" auf
+// Dashboard darf Geraete schalten, Override setzen und Ladetermine anlegen, "Lesen" nur ansehen.
+// Hier nur die passenden Bedienelemente ausblenden - die eigentliche Sperre sitzt serverseitig.
+if (DASHBOARD_LEVEL !== 'write') {
   document.addEventListener('DOMContentLoaded', () => {
     const evCard = $('ev-card'); if (evCard) evCard.style.display = 'none';
     const selBtn = $('btn-select'); if (selBtn) selBtn.style.display = 'none';
   });
 }
-if (USER_ROLE === 'demo') {
+if (DASHBOARD_LEVEL === 'read') {
   document.addEventListener('DOMContentLoaded', () => {
     const ov = $('override'); if (ov) ov.disabled = true;
     const hint = $('override-hint'); if (hint) hint.textContent = 'Demo-Zugang: nur Ansicht, kein Schalten möglich.';
@@ -1442,7 +1442,7 @@ function showToast(text, isErr) {
   clearTimeout(t._h); t._h = setTimeout(() => { t.style.opacity = '0'; }, isErr ? 7000 : 3000);
 }
 async function shellySwitch(id, on, el) {
-  if (USER_ROLE === 'demo') { showToast('Demo-Zugang: nur Ansicht, kein Schalten möglich.'); return; }
+  if (DASHBOARD_LEVEL !== 'write') { showToast('Dieses Konto darf nur ansehen, nicht schalten.'); return; }
   el.disabled = true;
   try {
     const r = await fetch('/api/shelly/' + encodeURIComponent(id) + '/switch', { method: 'POST',

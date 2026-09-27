@@ -37,6 +37,7 @@
   .chip input { display:none; }
   .chip span { border:1px solid var(--border); border-radius:999px; padding:1px 8px; font-size:12px; color:var(--muted); }
   .chip input:checked + span { background:var(--accent); border-color:var(--accent); color:#14171c; font-weight:600; }
+  .ro-locked { opacity: .65; pointer-events: none; }
   /* Passwortfelder mit Auge zum Kontrollieren der Eingabe (wie beim Login) */
   .pw-wrap { position: relative; }
   .pw-wrap input { padding-right: 42px; width: 100%; }
@@ -591,8 +592,9 @@
   <div id="shelly-found" style="display:flex;flex-direction:column;gap:2px;margin-top:8px"></div>
 </div>
 
-<div class="card">
+<div class="card" data-tab="system" data-area="always">
   <h2><svg class="h2i" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Konto &amp; Zugang</h2>
+  <div class="hint" style="margin-bottom:10px">Dein eigenes Konto - das darf jeder für sich selbst ändern, unabhängig von den sonstigen Rechten.</div>
   <div class="grid2">
     <div><label>Benutzername <span class="qhelp" role="button" tabindex="0" data-help="Name, mit dem du dich an dieser App anmeldest. Zum Ändern brauchst du dein aktuelles Passwort.">?</span></label><input id="acc-username" autocomplete="username"></div>
     <div><label>Aktuelles Passwort <span class="qhelp" role="button" tabindex="0" data-help="Dein aktuelles Passwort. Es wird bei jeder Änderung an Konto oder Passwort zur Bestätigung gebraucht.">?</span></label><div class="pw-wrap"><input id="pw-current" type="password" autocomplete="current-password"><button type="button" class="pw-toggle" data-for="pw-current" aria-label="Passwort anzeigen" title="Passwort anzeigen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
@@ -606,18 +608,18 @@
   </div>
 </div>
 
-<div class="card" data-tab="system">
+{% if user_perms.user_management != 'none' %}
+<div class="card{{ ' ro-locked' if user_perms.user_management == 'read' else '' }}" data-tab="system" data-area="user_management">
   <h2><svg class="h2i" viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/><path d="M2 21v-2a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v2"/><path d="M17 11a4 4 0 1 0 0-8"/><path d="M23 21v-2a4.5 4.5 0 0 0-3-4.2"/></svg>Weitere Benutzer</h2>
   <div class="hint" style="margin-bottom:10px">
-    Zusätzliche Zugänge mit eingeschränkten Rechten – z.B. für Familie oder eine Vorführung mit deinen echten Daten,
-    ohne dass dabei etwas verändert werden kann.
-    <b>Admin</b>: alles wie du. <b>Benutzer</b>: Dashboard ansehen + Geräte ein/ausschalten, keine Einstellungen/Regeln.
-    <b>Demo</b>: alles nur ansehen, nichts lässt sich schalten oder ändern.
+    Zusätzliche Zugänge – für jeden Bereich einzeln <b>Kein Zugriff</b>, <b>Lesen</b> oder <b>Schreiben</b> festlegen.
+    „Lesen“ zeigt die Seite/Karte mit allen echten Werten, nur Zugangsdaten (Tibber-Token, VRM/Tuya/Telegram) bleiben
+    ausschließlich bei „Schreiben“ sichtbar. Die Knöpfe oben füllen nur eine Vorlage vor – danach ist jedes Feld einzeln änderbar.
   </div>
   <div class="table-scroll">
     <table id="users-table" style="width:100%;border-collapse:collapse">
       <thead><tr>
-        <th style="text-align:left">Benutzername</th><th style="text-align:left">Rolle</th>
+        <th style="text-align:left">Benutzername</th><th style="text-align:left">Rechte</th>
         <th style="text-align:left">Ablauf</th><th style="text-align:left">Letzter Login</th><th></th>
       </tr></thead>
       <tbody id="users-body"></tbody>
@@ -625,15 +627,22 @@
   </div>
   <div class="muted" id="users-msg" style="margin-top:8px"></div>
   <hr style="border-color:var(--border);margin:16px 0">
-  <div class="grid2">
+  <b>Neuer Benutzer</b>
+  <div class="grid2" style="margin-top:8px">
     <div><label>Benutzername</label><input id="nu-username" autocomplete="off" placeholder="z.B. marion oder demo"></div>
     <div><label>Passwort</label><div class="pw-wrap"><input id="nu-password" type="password" autocomplete="new-password"><button type="button" class="pw-toggle" data-for="nu-password" aria-label="Passwort anzeigen" title="Passwort anzeigen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
-    <div><label>Rolle <span class="qhelp" role="button" tabindex="0" data-help="Admin = alles wie dein eigenes Konto. Benutzer = Dashboard + Geräte schalten, keine Einstellungen/Regeln. Demo = nur ansehen, nichts schaltbar - ideal um die Steuerung mit echten Daten vorzuführen.">?</span></label>
-      <select id="nu-role"><option value="user">Benutzer (Dashboard + Geräte)</option><option value="demo">Demo (nur ansehen)</option><option value="admin">Admin (alles)</option></select></div>
-    <div id="nu-expires-wrap"><label>Ablauf <span class="muted" style="font-weight:normal">(optional)</span> <span class="qhelp" role="button" tabindex="0" data-help="Ab diesem Tag funktioniert der Zugang nicht mehr - praktisch für einen befristeten Demo-Zugang. Leer lassen = unbegrenzt gültig. Für Admin-Zugänge nicht möglich - die sollen nie versehentlich aussperren.">?</span></label><input id="nu-expires" type="date"></div>
+    <div id="nu-expires-wrap"><label>Ablauf <span class="muted" style="font-weight:normal">(optional)</span> <span class="qhelp" role="button" tabindex="0" data-help="Ab diesem Tag funktioniert der Zugang nicht mehr - praktisch für einen befristeten Demo-Zugang. Leer lassen = unbegrenzt gültig. Nicht möglich, solange der Zugang Benutzerverwaltung=Schreiben hat.">?</span></label><input id="nu-expires" type="date"></div>
   </div>
+  <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <span class="muted">Vorlage:</span>
+    <button type="button" class="ghost" data-preset="admin">Admin (alles)</button>
+    <button type="button" class="ghost" data-preset="user">Benutzer (Dashboard + Geräte)</button>
+    <button type="button" class="ghost" data-preset="demo">Demo (alles ansehen)</button>
+  </div>
+  <div id="nu-matrix" style="margin-top:10px"></div>
   <div style="margin-top:12px"><button id="btn-nu-add">Benutzer anlegen</button></div>
 </div>
+{% endif %}
 </div>
 
 {% endblock %}
@@ -657,6 +666,7 @@ function collectPvInverters() {
   })).filter(p => p.name && !isNaN(p.unit));
 }
 
+window.USER_PERMS = {{ user_perms | tojson }};   // Rechte je Bereich dieses Kontos - siehe Einstellungen -> System -> Weitere Benutzer
 const PARAM_KEYS = ['battery_usable_kwh','daily_usage_kwh','pv_reserve_kwh',
   'max_charge_soc','absolute_cheap_price','pv_tom_morning_factor',
   'morning_peak_start','morning_peak_end',
@@ -754,7 +764,12 @@ async function init() {
   document.getElementById('pv_auto_calibration').checked = !!cfg.pv_auto_calibration;
   document.getElementById('smart_planner_enabled').checked = cfg.smart_planner_enabled !== false;
   document.getElementById(cfg.tariff_mode === 'fixed' ? 'tariff_fixed' : 'tariff_tibber').checked = true;
-  document.getElementById('tibber_token').value = cfg.tibber_token || '';
+  const tokenEl = document.getElementById('tibber_token');
+  tokenEl.value = cfg.tibber_token || '';
+  // Kein Schreibrecht auf "Tarif & Laden": Token kommt nie im Klartext an (siehe api_config) -
+  // Platzhalter macht trotzdem klar, ob einer hinterlegt ist, statt "leer" vorzutaeuschen.
+  tokenEl.placeholder = (cfg.tibber_token_set && !cfg.tibber_token) ? '•••• hinterlegt (nur bei Schreibrecht sichtbar)' : '';
+  window.tibberTokenSet = !!cfg.tibber_token_set;
   document.getElementById('fixed_price_ct').value = cfg.fixed_price_ct ?? '';
   updateTariffFields();
   PARAM_KEYS.forEach(k => { const el = document.getElementById(k); if (el) el.value = cfg[k] ?? ''; });
@@ -789,7 +804,7 @@ function updateTariffFields() {
   // ECHTEN dynamischen Tarif - ohne Tibber-Token kann die App gar keine
   // stundenscharfen Preise abrufen, die Felder waeren wirkungslos/irrefuehrend.
   // Also erst zeigen, wenn "Tibber" gewaehlt UND ein Token eingetragen ist.
-  const dynamicActive = !fixed && document.getElementById('tibber_token').value.trim().length > 0;
+  const dynamicActive = !fixed && (document.getElementById('tibber_token').value.trim().length > 0 || window.tibberTokenSet);
   document.getElementById('dynamic-pricing-cards').hidden = !dynamicActive;
   // Tibber-Kachel ohne dynamischen Tarif nur eine leere "Status"-Huelle (siehe
   // index.html isFixedTariff) - Schalter dafuer gesperrt/ausgegraut und erzwungen
@@ -948,37 +963,82 @@ document.querySelectorAll('.pw-toggle[data-for]').forEach(btn => {
   });
 });
 
-/* ---- Weitere Benutzer (Rechteverwaltung) ---- */
-const ROLE_LABEL = { admin: 'Admin', user: 'Benutzer', demo: 'Demo' };
+{% if user_perms.user_management != 'none' %}
+/* ---- Weitere Benutzer: Rechte-Baukasten (pro Bereich Kein Zugriff/Lesen/Schreiben) ---- */
+// Lokale Kopie noetig: das gemeinsame escH() weiter unten ist ein "const" und damit hier
+// (zeitlich vor seiner Definition) noch nicht nutzbar.
+const escHUsers = t => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const LEVEL_LABEL = { none: 'Kein Zugriff', read: 'Lesen', write: 'Schreiben' };
+let AREAS_META = [], PRESETS_META = {};
 function fmtLogin(ts) { return ts ? new Date(ts * 1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) : 'noch nie'; }
+function matrixHtml(idPrefix, perms) {
+  return `<table style="width:100%;border-collapse:collapse;font-size:14px">${AREAS_META.map(([id, label, desc]) => `
+    <tr style="border-top:1px solid var(--border)">
+      <td style="padding:5px 8px 5px 0;white-space:nowrap">${label} <span class="qhelp" role="button" tabindex="0" data-help="${escHUsers(desc)}">?</span></td>
+      <td style="padding:5px 0;text-align:right"><select data-area="${id}" id="${idPrefix}-${id}" style="padding:3px 6px">${
+        Object.entries(LEVEL_LABEL).map(([v, l]) => `<option value="${v}" ${(perms[id] || 'none') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
+    </tr>`).join('')}</table>`;
+}
+function readMatrix(idPrefix) {
+  const perms = {};
+  AREAS_META.forEach(([id]) => { perms[id] = document.getElementById(`${idPrefix}-${id}`).value; });
+  return perms;
+}
+function summarizePerms(perms) {
+  for (const [name, p] of Object.entries(PRESETS_META)) {
+    if (AREAS_META.every(([id]) => (perms[id] || 'none') === (p[id] || 'none'))) {
+      return { admin: 'Admin (alles)', user: 'Benutzer (Dashboard + Geräte)', demo: 'Demo (alles ansehen)' }[name] || name;
+    }
+  }
+  const n = AREAS_META.filter(([id]) => perms[id] === 'write').length;
+  const r = AREAS_META.filter(([id]) => perms[id] === 'read').length;
+  return `Benutzerdefiniert (${n}× schreiben, ${r}× lesen)`;
+}
 async function loadUsers() {
   const msg = document.getElementById('users-msg');
   try {
     const r = await fetch('/api/users');
     const d = await r.json();
+    AREAS_META = d.areas; PRESETS_META = d.presets;
     const body = document.getElementById('users-body');
     body.innerHTML = '';
     for (const u of d.users) {
+      const perms = u.permissions;
+      const isFullAdmin = perms.user_management === 'write';
       const tr = document.createElement('tr');
       tr.style.borderTop = '1px solid var(--border)';
-      const roleSel = `<select data-u="${u.username}" class="u-role" ${u.is_me ? 'disabled' : ''} style="padding:4px 6px">${
-        Object.entries(ROLE_LABEL).map(([v, l]) => `<option value="${v}" ${u.role === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
-      const isAdmin = u.role === 'admin';
       tr.innerHTML = `
         <td style="padding:6px 4px">${u.username}${u.is_me ? ' <span class="muted">(du)</span>' : ''}</td>
-        <td style="padding:6px 4px">${roleSel}</td>
-        <td style="padding:6px 4px">${isAdmin
-          ? '<span class="muted" title="Ein Admin-Zugang läuft nie ab">– läuft nie ab –</span>'
+        <td style="padding:6px 4px">${escHUsers(summarizePerms(perms))}</td>
+        <td style="padding:6px 4px">${isFullAdmin
+          ? '<span class="muted" title="Ein Zugang mit Benutzerverwaltung läuft nie ab">– läuft nie ab –</span>'
           : `<input type="date" class="u-expires" data-u="${u.username}" value="${u.expires || ''}" style="padding:4px 6px">`}</td>
         <td style="padding:6px 4px" class="muted">${fmtLogin(u.last_login)}</td>
         <td style="padding:6px 4px;white-space:nowrap">
+          <button type="button" class="ghost u-edit" data-u="${u.username}" title="Rechte bearbeiten">🛠️</button>
           <button type="button" class="ghost u-pw" data-u="${u.username}" title="Neues Passwort setzen">🔑</button>
           ${u.is_me ? '' : `<button type="button" class="danger u-del" data-u="${u.username}" title="Löschen">✕</button>`}
         </td>`;
       body.appendChild(tr);
+      const editRow = document.createElement('tr');
+      editRow.className = 'u-editrow'; editRow.dataset.u = u.username; editRow.style.display = 'none';
+      editRow.innerHTML = `<td colspan="5" style="padding:8px 4px 16px;background:var(--card2);border-radius:8px">
+        <div style="max-width:480px">${matrixHtml('ue-' + u.username, perms)}</div>
+        <div style="margin-top:10px"><button type="button" class="u-save-perms" data-u="${u.username}">Rechte speichern</button>
+        <button type="button" class="ghost u-edit-cancel" data-u="${u.username}" style="margin-left:8px">Abbrechen</button></div></td>`;
+      body.appendChild(editRow);
     }
-    body.querySelectorAll('.u-role').forEach(el => el.addEventListener('change', async () => { await patchUser(el.dataset.u, { role: el.value }); loadUsers(); }));
     body.querySelectorAll('.u-expires').forEach(el => el.addEventListener('change', () => patchUser(el.dataset.u, { expires: el.value })));
+    body.querySelectorAll('.u-edit').forEach(el => el.addEventListener('click', () => {
+      body.querySelector(`.u-editrow[data-u="${CSS.escape(el.dataset.u)}"]`).style.display = '';
+    }));
+    body.querySelectorAll('.u-edit-cancel').forEach(el => el.addEventListener('click', () => {
+      body.querySelector(`.u-editrow[data-u="${CSS.escape(el.dataset.u)}"]`).style.display = 'none';
+    }));
+    body.querySelectorAll('.u-save-perms').forEach(el => el.addEventListener('click', async () => {
+      await patchUser(el.dataset.u, { permissions: readMatrix('ue-' + el.dataset.u) });
+      loadUsers();
+    }));
     body.querySelectorAll('.u-pw').forEach(el => el.addEventListener('click', async () => {
       const pw = await uiDialog({ title: 'Neues Passwort', message: `Neues Passwort für „${el.dataset.u}“.`, label: 'Passwort', type: 'password', okText: 'Setzen' });
       if (pw === null) return;
@@ -988,12 +1048,13 @@ async function loadUsers() {
     body.querySelectorAll('.u-del').forEach(el => el.addEventListener('click', async () => {
       if (!confirm(`Benutzer „${el.dataset.u}“ wirklich löschen?`)) return;
       try {
-        const r = await fetch('/api/users/' + encodeURIComponent(el.dataset.u), { method: 'DELETE' });
-        const d = await r.json();
-        if (!r.ok) { msg.textContent = d.error || 'Fehler'; return; }
+        const r2 = await fetch('/api/users/' + encodeURIComponent(el.dataset.u), { method: 'DELETE' });
+        const d2 = await r2.json();
+        if (!r2.ok) { msg.textContent = d2.error || 'Fehler'; return; }
         loadUsers();
       } catch (e) { msg.textContent = 'Fehler beim Löschen.'; }
     }));
+    renderNuMatrix('user');
   } catch (e) { msg.textContent = 'Fehler beim Laden der Benutzer.'; }
 }
 async function patchUser(username, body) {
@@ -1007,27 +1068,31 @@ async function patchUser(username, body) {
     msg.textContent = 'Gespeichert ✓'; setTimeout(() => msg.textContent = '', 3000);
   } catch (e) { msg.textContent = 'Fehler beim Speichern.'; }
 }
-function syncNuExpires() {
-  const isAdmin = document.getElementById('nu-role').value === 'admin';
-  const exp = document.getElementById('nu-expires');
-  exp.disabled = isAdmin;
-  if (isAdmin) exp.value = '';
-  document.getElementById('nu-expires-wrap').style.opacity = isAdmin ? '.5' : '1';
+function renderNuMatrix(presetName) {
+  document.getElementById('nu-matrix').innerHTML = matrixHtml('nu', PRESETS_META[presetName] || {});
+  syncNuExpires();
+  document.querySelectorAll('#nu-matrix select').forEach(el => el.addEventListener('change', syncNuExpires));
 }
-document.getElementById('nu-role').addEventListener('change', syncNuExpires);
-syncNuExpires();
+function syncNuExpires() {
+  const isFullAdmin = document.getElementById('nu-user_management')?.value === 'write';
+  const exp = document.getElementById('nu-expires');
+  exp.disabled = isFullAdmin;
+  if (isFullAdmin) exp.value = '';
+  document.getElementById('nu-expires-wrap').style.opacity = isFullAdmin ? '.5' : '1';
+}
+document.querySelectorAll('[data-preset]').forEach(btn => btn.addEventListener('click', () => renderNuMatrix(btn.dataset.preset)));
 document.getElementById('btn-nu-add').addEventListener('click', async () => {
   const msg = document.getElementById('users-msg');
   const username = document.getElementById('nu-username').value.trim();
   const password = document.getElementById('nu-password').value;
-  const role = document.getElementById('nu-role').value;
+  const permissions = readMatrix('nu');
   const expires = document.getElementById('nu-expires').value;
   if (!username) { msg.textContent = 'Benutzername eingeben.'; return; }
   if (password.length < 8) { msg.textContent = 'Passwort: mind. 8 Zeichen.'; return; }
   try {
     const r = await fetch('/api/users', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, role, expires }),
+      body: JSON.stringify({ username, password, permissions, expires }),
     });
     const d = await r.json();
     if (!r.ok) { msg.textContent = d.error || 'Fehler'; return; }
@@ -1039,6 +1104,7 @@ document.getElementById('btn-nu-add').addEventListener('click', async () => {
   } catch (e) { msg.textContent = 'Fehler beim Anlegen.'; }
 });
 loadUsers();
+{% endif %}
 
 /* Eigener Dialog im App-Design (statt Browser-prompt/confirm) */
 function uiDialog({ title, message, label, value = '', type = 'text', okText = 'OK' }) {
@@ -1452,6 +1518,20 @@ const ADMIN_TABS = [
     const h = (c.querySelector('h2')?.textContent || '').replace(/\s+/g, ' ').trim();
     const t = ADMIN_TABS.find(t => t.match.some(m => h.startsWith(m)));
     c.dataset.tab = t ? t.id : 'system';
+  });
+  // Jede Karte auf ihren Rechte-Bereich pruefen: "none" -> ganz ausblenden (Reiter entfaellt
+  // dann automatisch mangels Karte), "read" -> sichtbar aber gesperrt (ro-locked). Karten mit
+  // eigenem data-area (Konto = immer, Weitere Benutzer = user_management) laufen separat.
+  const TAB_AREA = { anlage: 'settings_anlage', tarif: 'settings_tarif', solar: 'settings_solar',
+    vrm: 'settings_vrm', wetter: 'settings_wetter', meldungen: 'settings_meldungen',
+    geraete: 'settings_geraete', anzeige: 'settings_anzeige', system: 'settings_system' };
+  cards.forEach(c => {
+    if (c.dataset.tab === '*') return;
+    const area = c.dataset.area === 'always' ? null : (c.dataset.area || TAB_AREA[c.dataset.tab]);
+    if (!area) return;
+    const level = (window.USER_PERMS || {})[area] || 'none';
+    if (level === 'none') { c.dataset.tab = '__hidden'; c.style.display = 'none'; }
+    else if (level === 'read') { c.classList.add('ro-locked'); }
   });
   // Reiterleiste klebt direkt UNTER der (ebenfalls klebenden) Kopfzeile - deren Hoehe ist je nach Bildschirm verschieden
   const setHdr = () => document.documentElement.style.setProperty('--hdr-h', (document.querySelector('header')?.offsetHeight || 56) + 'px');

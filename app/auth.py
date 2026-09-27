@@ -19,9 +19,50 @@ from datetime import date
 from werkzeug.security import check_password_hash, generate_password_hash
 
 MIN_PASSWORD_LEN = 8
-ROLES = ("admin", "user", "demo")
-# admin: alles. user: Dashboard + Geraete schalten (z.B. Ehepartner). demo: nur lesen,
-# nichts schaltbar - fuer Vorfuehrungen mit echten Daten, ohne dass etwas veraendert werden kann.
+LEVELS = ("none", "read", "write")
+_LEVEL_ORDER = {"none": 0, "read": 1, "write": 2}
+
+# Rechte-Baukasten: pro Bereich einzeln "Kein Zugriff" / "Lesen" / "Schreiben".
+# "Lesen" zeigt die Seite/Karte inkl. aller Werte (Zugangsdaten/Tokens ausgenommen -
+# die bleiben ausschliesslich bei "Schreiben" sichtbar), "Schreiben" erlaubt Aendern.
+AREAS = [
+    ("dashboard", "Dashboard", "Live-Werte, Verlauf, Preis/Ladeplan. Schreiben = Geräte schalten, Sofort-laden-Override, Ladetermine anlegen."),
+    ("rules", "Regeln", "Die Seite „Regeln“ (Wenn/Dann-Schaltungen)."),
+    ("automation", "Automatik", "Überschuss-Automatik (Geräte bei PV-Überschuss zuschalten)."),
+    ("settings_anlage", "Einstellungen: Anlage", "Cerbo-Zugang, Batteriekapazität, Inbetriebnahme-Datum."),
+    ("settings_solar", "Einstellungen: Solar", "PV-Wechselrichter (einzeln erfasst)."),
+    ("settings_tarif", "Einstellungen: Tarif & Laden", "Tibber/fester Tarif, Ladestrategie, Vertragskosten. Der Tibber-Zugangs-Token ist nur bei „Schreiben“ sichtbar."),
+    ("settings_vrm", "Einstellungen: VRM", "Victron-VRM-Anbindung. Zugangsdaten nur bei „Schreiben“ sichtbar."),
+    ("settings_wetter", "Einstellungen: Wetter", "Standort für die Wettervorhersage."),
+    ("settings_meldungen", "Einstellungen: Meldungen", "Telegram-Benachrichtigungen. Bot-Token nur bei „Schreiben“ sichtbar."),
+    ("settings_geraete", "Einstellungen: Geräte", "Shelly/Tuya/Tasmota-Geräteverwaltung. Zugangsdaten nur bei „Schreiben“ sichtbar."),
+    ("settings_anzeige", "Einstellungen: Dashboard-Kacheln", "Welche Kacheln das Dashboard zeigt und in welcher Reihenfolge."),
+    ("settings_system", "Einstellungen: System", "Trockenlauf, Abfrage-Intervalle, App-Update."),
+    ("user_management", "Benutzerverwaltung", "Andere Zugänge anlegen/ändern/löschen. Mindestens ein Zugang muss „Schreiben“ behalten."),
+]
+AREA_IDS = [a[0] for a in AREAS]
+
+PRESETS = {
+    "admin": {a: "write" for a in AREA_IDS},
+    "user": {a: ("write" if a == "dashboard" else "none") for a in AREA_IDS},
+    "demo": {a: ("none" if a == "user_management" else "read") for a in AREA_IDS},
+}
+
+
+def normalize_permissions(perms: dict | None) -> dict:
+    """Vervollstaendigt/bereinigt ein Rechte-Dict: unbekannte Bereiche raus, fehlende = 'none'."""
+    perms = perms or {}
+    return {a: (perms.get(a) if perms.get(a) in LEVELS else "none") for a in AREA_IDS}
+
+
+def has_level(perms: dict, area: str, need: str) -> bool:
+    return _LEVEL_ORDER.get((perms or {}).get(area, "none"), 0) >= _LEVEL_ORDER[need]
+
+
+def is_full_admin(perms: dict) -> bool:
+    """Kann Benutzer verwalten - die einzige Faehigkeit, die nie ganz verschwinden darf
+    (sonst kaeme niemand mehr an die Benutzerverwaltung heran)."""
+    return (perms or {}).get("user_management") == "write"
 
 
 class UserError(Exception):
@@ -72,7 +113,19 @@ class UserStore:
                 self._users = {}
         else:
             self._users = {}
+        for u in self._users.values():
+            self._migrate(u)
         self._stamp = stamp
+
+    @staticmethod
+    def _migrate(user: dict) -> None:
+        """Alte Datensaetze (nur `role`, oder noch aelter: gar nichts) auf das
+        Rechte-Baukasten-Modell heben - einmalig beim Einlesen, ohne extra Migrationsschritt."""
+        if "permissions" in user:
+            user["permissions"] = normalize_permissions(user["permissions"])
+            return
+        role = user.pop("role", None) or "admin"
+        user["permissions"] = dict(PRESETS.get(role, PRESETS["admin"]))
 
     def _sync(self) -> None:
         if self._file_stamp() != self._stamp:
@@ -108,14 +161,18 @@ class UserStore:
             for u in self._users.values():
                 d = dict(u)
                 d.pop("pw_hash", None)
-                d.setdefault("role", "admin")
+                d["permissions"] = normalize_permissions(d.get("permissions"))
                 out.append(d)
             return sorted(out, key=lambda d: d.get("created") or 0)
 
-    def admin_count(self) -> int:
+    def full_admin_count(self) -> int:
         with self._lock:
             self._sync()
-            return sum(1 for u in self._users.values() if (u.get("role") or "admin") == "admin")
+            return self._full_admin_count_locked()
+
+    def _full_admin_count_locked(self) -> int:
+        """Wie full_admin_count(), aber ohne erneut den Lock zu holen (nur intern, Lock ist schon gehalten)."""
+        return sum(1 for u in self._users.values() if is_full_admin(u.get("permissions")))
 
     def verify(self, username: str, password: str):
         """Gibt den Benutzer zurueck oder None. Aktualisiert last_login. Ein
@@ -133,16 +190,16 @@ class UserStore:
             self._write()
             return dict(user)
 
-    def create(self, username: str, password: str, role: str = "admin", expires: str | None = None) -> dict:
+    def create(self, username: str, password: str, permissions: dict | None = None,
+               expires: str | None = None) -> dict:
         key = _norm(username)
         if not key:
             raise UserError("Benutzername darf nicht leer sein.")
         if len(password or "") < MIN_PASSWORD_LEN:
             raise UserError(f"Passwort muss mindestens {MIN_PASSWORD_LEN} Zeichen haben.")
-        if role not in ROLES:
-            role = "admin"
-        if role == "admin":
-            expires = None                            # Admins laufen nie ab
+        perms = normalize_permissions(permissions if permissions is not None else PRESETS["admin"])
+        if is_full_admin(perms):
+            expires = None                            # Volladmins laufen nie ab
         with self._lock:
             self._sync()
             if key in self._users:
@@ -152,27 +209,27 @@ class UserStore:
                 "pw_hash": generate_password_hash(password),
                 "created": time.time(),
                 "last_login": None,
-                "role": role,
+                "permissions": perms,
                 "expires": expires or None,          # "YYYY-MM-DD" oder None (unbegrenzt)
             }
             self._users[key] = user
             self._write()
             return dict(user)
 
-    def set_role(self, username: str, role: str) -> dict:
-        if role not in ROLES:
-            raise UserError("Unbekannte Rolle.")
+    def set_permissions(self, username: str, permissions: dict) -> dict:
         key = _norm(username)
         with self._lock:
             self._sync()
             user = self._users.get(key)
             if not user:
                 raise UserError("Benutzer nicht gefunden.")
-            if (user.get("role") or "admin") == "admin" and role != "admin" and self._admin_count_locked() <= 1:
-                raise UserError("Der letzte Administrator kann nicht degradiert werden.")
-            user["role"] = role
-            if role == "admin":
-                user["expires"] = None                # Admins laufen nie ab - Rollenwechsel raeumt ein gesetztes Datum mit auf
+            new_perms = normalize_permissions(permissions)
+            was_full_admin = is_full_admin(user.get("permissions"))
+            if was_full_admin and not is_full_admin(new_perms) and self._full_admin_count_locked() <= 1:
+                raise UserError("Mindestens ein Zugang muss die Benutzerverwaltung („Schreiben“) behalten.")
+            user["permissions"] = new_perms
+            if is_full_admin(new_perms):
+                user["expires"] = None                # Volladmins laufen nie ab
             self._write()
             return dict(user)
 
@@ -183,8 +240,8 @@ class UserStore:
             user = self._users.get(key)
             if not user:
                 raise UserError("Benutzer nicht gefunden.")
-            if expires and (user.get("role") or "admin") == "admin":
-                raise UserError("Ein Admin-Zugang kann nicht ablaufen.")
+            if expires and is_full_admin(user.get("permissions")):
+                raise UserError("Ein Zugang mit Benutzerverwaltung („Schreiben“) kann nicht ablaufen.")
             user["expires"] = expires or None
             self._write()
             return dict(user)
@@ -196,14 +253,10 @@ class UserStore:
             user = self._users.get(key)
             if not user:
                 raise UserError("Benutzer nicht gefunden.")
-            if (user.get("role") or "admin") == "admin" and self._admin_count_locked() <= 1:
-                raise UserError("Der letzte Administrator kann nicht gelöscht werden.")
+            if is_full_admin(user.get("permissions")) and self._full_admin_count_locked() <= 1:
+                raise UserError("Der letzte Zugang mit Benutzerverwaltung kann nicht gelöscht werden.")
             del self._users[key]
             self._write()
-
-    def _admin_count_locked(self) -> int:
-        """Wie admin_count(), aber ohne erneut den Lock zu holen (nur intern, Lock ist schon gehalten)."""
-        return sum(1 for u in self._users.values() if (u.get("role") or "admin") == "admin")
 
     def update_password(self, username: str, password: str) -> dict:
         key = _norm(username)
