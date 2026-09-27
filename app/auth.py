@@ -141,6 +141,8 @@ class UserStore:
             raise UserError(f"Passwort muss mindestens {MIN_PASSWORD_LEN} Zeichen haben.")
         if role not in ROLES:
             role = "admin"
+        if role == "admin":
+            expires = None                            # Admins laufen nie ab
         with self._lock:
             self._sync()
             if key in self._users:
@@ -169,6 +171,8 @@ class UserStore:
             if (user.get("role") or "admin") == "admin" and role != "admin" and self._admin_count_locked() <= 1:
                 raise UserError("Der letzte Administrator kann nicht degradiert werden.")
             user["role"] = role
+            if role == "admin":
+                user["expires"] = None                # Admins laufen nie ab - Rollenwechsel raeumt ein gesetztes Datum mit auf
             self._write()
             return dict(user)
 
@@ -179,6 +183,8 @@ class UserStore:
             user = self._users.get(key)
             if not user:
                 raise UserError("Benutzer nicht gefunden.")
+            if expires and (user.get("role") or "admin") == "admin":
+                raise UserError("Ein Admin-Zugang kann nicht ablaufen.")
             user["expires"] = expires or None
             self._write()
             return dict(user)

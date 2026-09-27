@@ -630,7 +630,7 @@
     <div><label>Passwort</label><div class="pw-wrap"><input id="nu-password" type="password" autocomplete="new-password"><button type="button" class="pw-toggle" data-for="nu-password" aria-label="Passwort anzeigen" title="Passwort anzeigen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
     <div><label>Rolle <span class="qhelp" role="button" tabindex="0" data-help="Admin = alles wie dein eigenes Konto. Benutzer = Dashboard + Geräte schalten, keine Einstellungen/Regeln. Demo = nur ansehen, nichts schaltbar - ideal um die Steuerung mit echten Daten vorzuführen.">?</span></label>
       <select id="nu-role"><option value="user">Benutzer (Dashboard + Geräte)</option><option value="demo">Demo (nur ansehen)</option><option value="admin">Admin (alles)</option></select></div>
-    <div><label>Ablauf <span class="muted" style="font-weight:normal">(optional)</span> <span class="qhelp" role="button" tabindex="0" data-help="Ab diesem Tag funktioniert der Zugang nicht mehr - praktisch für einen befristeten Demo-Zugang. Leer lassen = unbegrenzt gültig.">?</span></label><input id="nu-expires" type="date"></div>
+    <div id="nu-expires-wrap"><label>Ablauf <span class="muted" style="font-weight:normal">(optional)</span> <span class="qhelp" role="button" tabindex="0" data-help="Ab diesem Tag funktioniert der Zugang nicht mehr - praktisch für einen befristeten Demo-Zugang. Leer lassen = unbegrenzt gültig. Für Admin-Zugänge nicht möglich - die sollen nie versehentlich aussperren.">?</span></label><input id="nu-expires" type="date"></div>
   </div>
   <div style="margin-top:12px"><button id="btn-nu-add">Benutzer anlegen</button></div>
 </div>
@@ -963,10 +963,13 @@ async function loadUsers() {
       tr.style.borderTop = '1px solid var(--border)';
       const roleSel = `<select data-u="${u.username}" class="u-role" ${u.is_me ? 'disabled' : ''} style="padding:4px 6px">${
         Object.entries(ROLE_LABEL).map(([v, l]) => `<option value="${v}" ${u.role === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+      const isAdmin = u.role === 'admin';
       tr.innerHTML = `
         <td style="padding:6px 4px">${u.username}${u.is_me ? ' <span class="muted">(du)</span>' : ''}</td>
         <td style="padding:6px 4px">${roleSel}</td>
-        <td style="padding:6px 4px"><input type="date" class="u-expires" data-u="${u.username}" value="${u.expires || ''}" style="padding:4px 6px"></td>
+        <td style="padding:6px 4px">${isAdmin
+          ? '<span class="muted" title="Ein Admin-Zugang läuft nie ab">– läuft nie ab –</span>'
+          : `<input type="date" class="u-expires" data-u="${u.username}" value="${u.expires || ''}" style="padding:4px 6px">`}</td>
         <td style="padding:6px 4px" class="muted">${fmtLogin(u.last_login)}</td>
         <td style="padding:6px 4px;white-space:nowrap">
           <button type="button" class="ghost u-pw" data-u="${u.username}" title="Neues Passwort setzen">🔑</button>
@@ -974,7 +977,7 @@ async function loadUsers() {
         </td>`;
       body.appendChild(tr);
     }
-    body.querySelectorAll('.u-role').forEach(el => el.addEventListener('change', () => patchUser(el.dataset.u, { role: el.value })));
+    body.querySelectorAll('.u-role').forEach(el => el.addEventListener('change', async () => { await patchUser(el.dataset.u, { role: el.value }); loadUsers(); }));
     body.querySelectorAll('.u-expires').forEach(el => el.addEventListener('change', () => patchUser(el.dataset.u, { expires: el.value })));
     body.querySelectorAll('.u-pw').forEach(el => el.addEventListener('click', async () => {
       const pw = await uiDialog({ title: 'Neues Passwort', message: `Neues Passwort für „${el.dataset.u}“.`, label: 'Passwort', type: 'password', okText: 'Setzen' });
@@ -1004,6 +1007,15 @@ async function patchUser(username, body) {
     msg.textContent = 'Gespeichert ✓'; setTimeout(() => msg.textContent = '', 3000);
   } catch (e) { msg.textContent = 'Fehler beim Speichern.'; }
 }
+function syncNuExpires() {
+  const isAdmin = document.getElementById('nu-role').value === 'admin';
+  const exp = document.getElementById('nu-expires');
+  exp.disabled = isAdmin;
+  if (isAdmin) exp.value = '';
+  document.getElementById('nu-expires-wrap').style.opacity = isAdmin ? '.5' : '1';
+}
+document.getElementById('nu-role').addEventListener('change', syncNuExpires);
+syncNuExpires();
 document.getElementById('btn-nu-add').addEventListener('click', async () => {
   const msg = document.getElementById('users-msg');
   const username = document.getElementById('nu-username').value.trim();
