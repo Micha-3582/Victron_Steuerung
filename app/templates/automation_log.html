@@ -50,9 +50,23 @@ function uiConfirm(title, message, okText) {
     document.addEventListener('keydown', onKey); document.body.appendChild(ov); ov.querySelector('.dlg-no').focus();
   });
 }
+function showToast(text, isErr) {
+  let t = $('log-toast');
+  if (!t) {
+    t = document.createElement('div'); t.id = 'log-toast';
+    t.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:1200;max-width:min(92vw,520px);padding:12px 18px;border-radius:12px;'
+      + 'background:var(--card);border:1px solid var(--border);box-shadow:0 8px 30px rgba(0,0,0,.5);font-size:14px;line-height:1.4;transition:opacity .25s;opacity:0';
+    document.body.appendChild(t);
+  }
+  t.textContent = text; t.style.borderColor = isErr ? '#e5544a' : 'var(--border)'; t.style.opacity = '1';
+  clearTimeout(t._h); t._h = setTimeout(() => { t.style.opacity = '0'; }, isErr ? 7000 : 3000);
+}
 $('btn-clear').addEventListener('click', async () => {
   if (!await uiConfirm('Logbuch leeren?', 'Alle Einträge dieses Logbuchs werden endgültig gelöscht. Das lässt sich nicht rückgängig machen.', 'Alles löschen')) return;
-  try { await fetch('/api/automation/log/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ module: MODULE }) }); } catch (e) { /* egal */ }
+  try {
+    const r = await fetch('/api/automation/log/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ module: MODULE }) });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); showToast(d.error || `Leeren fehlgeschlagen (HTTP ${r.status}).`, true); }
+  } catch (e) { showToast('Leeren fehlgeschlagen – Server nicht erreichbar.', true); }
   await load(); if (window.refreshLogBadges) window.refreshLogBadges();
 });
 window.LOG_OPEN = MODULE;                                   // dieses Logbuch ist offen: sein Zaehler bleibt aus
