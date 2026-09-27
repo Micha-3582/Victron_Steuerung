@@ -766,17 +766,38 @@ def monthly_overview(now: datetime | None = None, limit_months: int = 120) -> di
 def battery_cycle_stats(now: datetime | None = None) -> dict:
     """Lebenslaufende Akku-Nutzung: Durchsatz (geladen/entladen) und daraus die 'aequivalenten Vollzyklen'
     (Durchsatz / nutzbare Kapazitaet - ein Vollzyklus = einmal die ganze Kapazitaet ein- UND ausgeladen).
-    Nutzt dasselbe dauerhafte Monats-Archiv wie monatsuebersicht (waechst nie ueber die 35-Tage-Grenze
-    von history.json hinaus zurueck) + den laufenden Monat live dazu."""
+    Holt die komplette Historie vom Victron-VRM (seit der eingetragenen Inbetriebnahme, siehe Einstellungen ->
+    Anlage, sonst seit dem ersten VRM-Datenpunkt) - nur wenn das nicht klappt (kein VRM-Zugang, Fehler), gilt
+    ersatzweise das eigene, dauerhafte Monats-Archiv (waechst nie ueber die 35-Tage-Grenze von history.json
+    hinaus zurueck, kennt aber logischerweise nichts von vor Einfuehrung dieser Auswertung)."""
+    import vrm                          # spaet importieren (vrm importiert nichts von hier)
     now = now or datetime.now()
+    cfg = load_config()
+    cap = float((cfg or {}).get("battery_usable_kwh") or 0.0)
+    install_date = cfg.get("battery_install_date")
+    start = None
+    if install_date:
+        try:
+            start = datetime.fromisoformat(install_date)
+        except ValueError:
+            start = None
+    lt = None
+    try:
+        lt = vrm.battery_lifetime_kwh(now, start)
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("Akku-Lebenslauf vom VRM nicht abrufbar, nutze eigene Historie: %s", e)
+    if lt:
+        cycles = round((lt["charge_kwh"] + lt["discharge_kwh"]) / 2.0 / cap, 1) if cap > 0 else None
+        return {"charge_kwh": lt["charge_kwh"], "discharge_kwh": lt["discharge_kwh"], "battery_usable_kwh": cap,
+                "equivalent_full_cycles": cycles, "since_month": lt["since"][:7], "since_date": lt["since"], "source": "vrm"}
     mo = monthly_overview(now, limit_months=10_000)
     charge = sum(m.get("batt_charge_kwh", 0.0) for m in mo["months"])
     discharge = sum(m.get("batt_discharge_kwh", 0.0) for m in mo["months"])
-    cap = float((load_config() or {}).get("battery_usable_kwh") or 0.0)
     cycles = round((charge + discharge) / 2.0 / cap, 1) if cap > 0 else None
     first_month = min((m["month"] for m in mo["months"]), default=None)
     return {"charge_kwh": round(charge, 1), "discharge_kwh": round(discharge, 1),
-            "battery_usable_kwh": cap, "equivalent_full_cycles": cycles, "since_month": first_month}
+            "battery_usable_kwh": cap, "equivalent_full_cycles": cycles, "since_month": first_month,
+            "since_date": (first_month + "-01") if first_month else None, "source": "lokal"}
 
 
 def energy_grid_today(now: datetime | None = None) -> dict:

@@ -1291,7 +1291,7 @@ def api_config():
                "has_pv_inverter", "has_mppt", "tariff_mode",
                "fixed_price_ct", "pv_inverters",
                "contract_fee_month_eur", "grid_fee_day_eur", "meter_fee_day_eur",
-               "section14a_credit_day_eur", "vat_percent"] + list(Params().__dict__.keys())
+               "section14a_credit_day_eur", "vat_percent", "battery_install_date"] + list(Params().__dict__.keys())
     allowed = allowed + ["surplus_" + k for k in surplus.DEFAULTS]     # einstellbare Automatik-Werte
     if "scan_networks" in body:
         try:

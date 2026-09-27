@@ -86,12 +86,13 @@ async function loadCycles() {
     $('cyc-msg').textContent = 'Noch keine nutzbare Akkukapazität eingetragen (Einstellungen → Anlage & Speicher).';
     return;
   }
-  $('cyc-msg').textContent = '';
+  $('cyc-msg').textContent = c.source === 'vrm' ? '' :
+    'Hinweis: Ohne VRM-Zugang zählt nur, was diese App selbst seit ihrer Einführung gemessen hat (nicht die ganze Lebenszeit des Akkus).';
   const tile = (t, big, sub) => `<div class="systile"><div class="systile-t">${t}</div><div class="systile-v">${big}</div><div class="systile-s">${sub}</div></div>`;
-  const since = c.since_month ? `${c.since_month.slice(5, 7)}/${c.since_month.slice(0, 4)}` : '–';
+  const since = c.since_date ? `${c.since_date.slice(8, 10)}.${c.since_date.slice(5, 7)}.${c.since_date.slice(0, 4)}` : '–';
   $('cyc-body').style.display = '';
   $('cyc-body').innerHTML =
-    tile('Äquivalente Vollzyklen', c.equivalent_full_cycles, `seit ${since}`) +
+    tile('Äquivalente Vollzyklen', c.equivalent_full_cycles, `seit ${since}${c.source === 'vrm' ? ' (VRM-Verlauf)' : ''}`) +
     tile('Geladen', c.charge_kwh.toFixed(0) + ' kWh', 'Solar + Netz → Akku') +
     tile('Entladen', c.discharge_kwh.toFixed(0) + ' kWh', 'Akku → Verbrauch + Netz') +
     tile('Nutzbare Kapazität', c.battery_usable_kwh + ' kWh', 'aus den Einstellungen');

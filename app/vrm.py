@@ -280,6 +280,48 @@ def daily_solar() -> dict[str, float]:
             return dict(_daily_cache["data"])
 
 
+# ---------------------------------------------------------------- Akku-Lebenslauf (Zyklen) seit Installation
+_LIFETIME_CHUNK_DAYS = 366
+_EARLIEST_POSSIBLE = datetime(2013, 1, 1)         # kein Victron-ESS ist aelter - Anfrage startet spaetestens hier
+
+
+def battery_lifetime_kwh(now: datetime | None = None, start: datetime | None = None) -> dict | None:
+    """Geladene/entladene Akku-Energie (kWh) ueber die GESAMTE VRM-Historie (nicht nur, was diese App selbst
+    seit ihrer Einfuehrung gemessen hat) - taeglich aufsummiert in handhabbaren Zeitabschnitten. `start`:
+    bekanntes Inbetriebnahme-Datum (Einstellungen -> Anlage), sonst wird ab _EARLIEST_POSSIBLE gesucht und das
+    erste Datum mit Daten als 'since' gemeldet. None ohne VRM-Zugang oder bei Fehlern (Aufrufer faellt dann auf
+    die eigene, kuerzere Historie zurueck)."""
+    c = load_credentials()
+    if not (c.get("token") and c.get("installation_id")):
+        return None
+    now = now or datetime.now()
+    charge = discharge = 0.0
+    since = start.date() if start else None
+    try:
+        t = start or _EARLIEST_POSSIBLE
+        while t < now:
+            t2 = min(now, t + timedelta(days=_LIFETIME_CHUNK_DAYS))
+            data = _request(c, {"type": "kwh", "interval": "days", "start": int(t.timestamp()), "end": int(t2.timestamp())})
+            rec = data.get("records") if isinstance(data, dict) else None
+            if isinstance(rec, dict):
+                for code in ("Pb", "Gb"):                    # Solar/Netz -> Akku
+                    for ts, v in _points(rec, code):
+                        charge += v
+                        d = datetime.fromtimestamp(ts).date()
+                        since = d if (since is None or d < since) and start is None else since
+                for code in ("Bc", "Bg"):                    # Akku -> Verbrauch/Netz
+                    for ts, v in _points(rec, code):
+                        discharge += v
+                        d = datetime.fromtimestamp(ts).date()
+                        since = d if (since is None or d < since) and start is None else since
+            t = t2
+    except VrmError:
+        return None
+    if since is None:
+        return None
+    return {"charge_kwh": round(charge, 1), "discharge_kwh": round(discharge, 1), "since": since.isoformat()}
+
+
 # ---------------------------------------------------------------- VRM als Steuerquelle (mit Rueckfall auf Open-Meteo)
 MAX_AGE_H = 3          # aeltere Prognosewerte (z. B. nach laengerem VRM-Ausfall) gelten nicht mehr
 

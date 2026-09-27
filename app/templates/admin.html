@@ -266,6 +266,9 @@
     <div><label>Nutzbare Akkukapazität (kWh)
         <span class="qhelp" role="button" tabindex="0" data-help="Nicht die „Nennkapazität“ aus dem Datenblatt, sondern die „Usable Capacity“. Nicht angegeben: ca. 95 % der Nennkapazität ansetzen.">?</span>
       </label><input id="battery_usable_kwh" type="number" step="0.1"></div>
+    <div><label>Akku in Betrieb seit
+        <span class="qhelp" role="button" tabindex="0" data-help="Datum der Inbetriebnahme des Akkus. Wird für die Vollzyklen-Berechnung auf der Batterie-Watchdog-Seite genutzt, um die komplette Nutzung aus dem VRM-Verlauf zu holen (nicht nur, was diese App selbst seit ihrer Einführung gemessen hat). Optional - ohne Angabe zählt sie erst ab dem ersten Tag, den diese App kennt.">?</span>
+      </label><input id="battery_install_date" type="date"></div>
     <div><label>Tagesverbrauch (kWh) <span class="qhelp" role="button" tabindex="0" data-help="Durchschnittlicher Stromverbrauch deines Hauses pro Tag in kWh. Damit rechnet die Steuerung, wie viel Energie bis zum nächsten Mittag gebraucht wird. Einen guten Wert liefert der Tagesverlauf im Dashboard oder der Betriebsbericht.">?</span></label><input id="daily_usage_kwh" type="number" step="0.1"></div>
     <div><label>Ladestrom beim Netzladen (A)
         <span class="qhelp" role="button" tabindex="0" data-help="VictronConnect/VEConfigure → Ladegerät → Ladestrom. Direkt ablesen, keine Umrechnung nötig.">?</span>
@@ -696,6 +699,7 @@ async function init() {
   document.getElementById('fixed_price_ct').value = cfg.fixed_price_ct ?? '';
   updateTariffFields();
   PARAM_KEYS.forEach(k => { const el = document.getElementById(k); if (el) el.value = cfg[k] ?? ''; });
+  document.getElementById('battery_install_date').value = cfg.battery_install_date || '';
   (cfg.pv_inverters || []).forEach(addPvInverter);
   // Ladestrom war bisher nur als W gespeichert - grob mit der gewaehlten
   // Systemspannung zurueckrechnen, exakter Wert kommt beim naechsten Speichern
@@ -772,6 +776,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     fixed_price_ct: numDE(document.getElementById('fixed_price_ct').value),
     pv_inverters: collectPvInverters(),
     charge_power_w: Math.round(numDE(document.getElementById('charge_current_a').value) * parseInt(document.getElementById('battery_voltage_v').value)),
+    battery_install_date: document.getElementById('battery_install_date').value || null,
   };
   PARAM_KEYS.forEach(k => { const v = numDE(document.getElementById(k).value); if (!isNaN(v)) body[k] = v; });
   await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'},
