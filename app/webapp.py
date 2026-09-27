@@ -74,7 +74,7 @@ def inject_app_display_name():
     return {"app_display_name": store.load_config().get("app_display_name") or "Victron Steuerung"}
 
 
-PUBLIC_ENDPOINTS = {"login", "create_account", "static", "service_worker", "manifest"}
+PUBLIC_ENDPOINTS = {"login", "create_account", "logout", "static", "service_worker", "manifest"}
 
 _attempts: dict[str, list] = {}
 _attempts_lock = threading.Lock()
