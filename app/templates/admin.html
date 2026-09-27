@@ -39,6 +39,7 @@
   .chip input:checked + span { background:var(--accent); border-color:var(--accent); color:#14171c; font-weight:600; }
   .ro-locked { opacity: .65; pointer-events: none; }
   .ro-locked .qhelp { pointer-events: auto; }   /* Tooltips bleiben auch in gesperrten Karten lesbar */
+  .ro-locked summary { pointer-events: auto; }  /* Aufklapp-Dreiecke (Anleitungen etc.) bleiben bedienbar, der Inhalt bleibt gesperrt */
   /* Passwortfelder mit Auge zum Kontrollieren der Eingabe (wie beim Login) */
   .pw-wrap { position: relative; }
   .pw-wrap input { padding-right: 42px; width: 100%; }
