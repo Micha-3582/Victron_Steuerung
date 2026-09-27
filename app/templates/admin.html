@@ -310,6 +310,18 @@
     <div><label>Mindest-SOC vor Peak (%) <span class="qhelp" role="button" tabindex="0" data-help="Ladestand in Prozent, den der Akku vor einer Verbrauchsspitze mindestens haben soll. Reicht die Vorhersage nicht dafür, lädt die Steuerung vorher in den günstigsten Zeiten nach. Nie niedriger als der minimale Akkustand am Cerbo.">?</span></label><input id="min_peak_soc" type="number" min="0" max="100"></div>
     <div><label>Notbrems-Preislimit (ct/kWh) <span class="qhelp" role="button" tabindex="0" data-help="Höchster Preis in ct/kWh, zu dem für den Peak-Schutz notfalls noch geladen wird. Ist der Strom teurer, wartet die Steuerung auf günstigere Zeiten.">?</span></label><input id="peak_avoid_price" type="number" step="0.5"></div>
   </div>
+  <details class="help" style="margin-top:14px">
+    <summary>Günstig-Vorkauf vor dem Abend-Peak (optional)</summary>
+    <div class="help-body">
+      Ist es JETZT deutlich günstiger als der zu erwartende Preis während des Abend-Peaks selbst, zielt die
+      Steuerung statt auf „Mindest-SOC vor Peak“ auf das höhere Komfort-Ziel unten und lädt den Überschuss
+      gleich mit ein – statt nur die knappe Sicherheit herzustellen. 0 = ausgeschaltet (Standard).
+    </div>
+  </details>
+  <div class="grid2" style="margin-top:10px">
+    <div><label>Komfort-Ziel vor Abend-Peak (%) <span class="qhelp" role="button" tabindex="0" data-help="Höherer Ziel-Ladestand, auf den bei einem günstigen Preis vor dem Abend-Peak zusätzlich geladen wird (statt nur auf das Mindest-SOC vor Peak). 0 = ausgeschaltet: dann gilt weiter nur das Mindest-SOC vor Peak.">?</span></label><input id="evening_comfort_soc" type="number" min="0" max="100"></div>
+    <div><label>Preisverhältnis für Vorkauf <span class="qhelp" role="button" tabindex="0" data-help="Der Vorkauf greift nur, wenn der aktuelle Preis höchstens so viel wie dieser Anteil des erwarteten Abend-Peak-Preises beträgt, z. B. 0,65 = jetzt höchstens 65 % dessen, was der Strom während des Abend-Peaks voraussichtlich kostet. Kleinerer Wert = strenger (nur bei einem sehr deutlichen Preisunterschied).">?</span></label><input id="valley_price_ratio" type="number" min="0.1" max="1" step="0.05"></div>
+  </div>
 </div>
 
 <div class="card">
@@ -545,6 +557,7 @@ const PARAM_KEYS = ['battery_usable_kwh','daily_usage_kwh','pv_reserve_kwh',
   'max_charge_soc','absolute_cheap_price','pv_tom_morning_factor',
   'morning_peak_start','morning_peak_end',
   'evening_peak_start','evening_peak_end','min_peak_soc','peak_avoid_price',
+  'evening_comfort_soc','valley_price_ratio',
   'night_safety_soc','target_safe_soc','hysterese_soc'];
 
 // Muss exakt zu TILE_IDS in index.html passen (Schluessel = Config-Feld/Checkbox-ID).

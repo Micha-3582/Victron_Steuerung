@@ -30,6 +30,8 @@ MORNING_PEAK_END = 9
 EVENING_PEAK_START = 19
 EVENING_PEAK_END = 21
 MIN_PEAK_SOC = 40
+EVENING_COMFORT_SOC = 0.0     # 0 = aus. Sonst: Komfort-Ziel-SOC vor dem Abend-Peak, siehe Params.evening_comfort_soc
+VALLEY_PRICE_RATIO = 0.65
 PEAK_AVOID_PRICE = 37.0
 NIGHT_SAFETY_SOC = 30.0
 TARGET_SAFE_SOC = 35.0
@@ -56,6 +58,8 @@ class Params:
     evening_peak_start: int = EVENING_PEAK_START
     evening_peak_end: int = EVENING_PEAK_END
     min_peak_soc: float = MIN_PEAK_SOC
+    evening_comfort_soc: float = EVENING_COMFORT_SOC
+    valley_price_ratio: float = VALLEY_PRICE_RATIO
     peak_avoid_price: float = PEAK_AVOID_PRICE
     night_safety_soc: float = NIGHT_SAFETY_SOC
     target_safe_soc: float = TARGET_SAFE_SOC
@@ -171,6 +175,12 @@ def _parse_iso(s: str) -> datetime:
     return dt
 
 
+def _avg_price_on_day(slots: list, day, h_from: int, h_to: int) -> float | None:
+    """Durchschnittspreis der Slots eines bestimmten Kalendertags in [h_from, h_to) Uhr, oder None ohne Daten."""
+    vals = [s.price for s in slots if s.start.date() == day and h_from <= s.start.hour < h_to]
+    return sum(vals) / len(vals) if vals else None
+
+
 def merge_into_windows(picked: list) -> str:
     if not picked:
         return ""
@@ -189,9 +199,11 @@ def merge_into_windows(picked: list) -> str:
     return ", ".join(windows)
 
 
-def calc_peak_protection(soc, hour_now, solar_today, solar_tom, p: Params):
+def calc_peak_protection(soc, hour_now, solar_today, solar_tom, p: Params, target_soc: float | None = None):
+    """target_soc: Standard = p.min_peak_soc (Sicherheitsziel); ein hoeherer Wert (z.B. p.evening_comfort_soc)
+    prueft stattdessen, ob DER hoehere Komfort-Zielwert bis zum Peak erreicht wird."""
     current_kwh = (soc / 100) * p.battery_usable_kwh
-    min_peak_kwh = (max(p.min_peak_soc, p.soc_floor_pct) / 100) * p.battery_usable_kwh      # nie unter der Cerbo-Untergrenze
+    min_peak_kwh = (max(p.min_peak_soc if target_soc is None else target_soc, p.soc_floor_pct) / 100) * p.battery_usable_kwh      # nie unter der Cerbo-Untergrenze
     hours_to_peak = None
     peak_label = ""
     pv_until_peak = 0.0
@@ -319,11 +331,21 @@ def decide(soc: float, price_entries: list, solar_today_raw: float,
     slot_filter = None
 
     if p.dynamic_pricing:
-        # Prio 1: Peak-Schutz
-        needs, kwh, reason = calc_peak_protection(soc, hour_now, solar_today, solar_tom, p)
+        # Prio 1: Peak-Schutz (Ziel ist normalerweise min_peak_soc; ist es JETZT vor dem Abend-Peak
+        # deutlich guenstiger als der zu erwartende Preis waehrend des Abend-Peaks selbst, zielt die
+        # Steuerung stattdessen auf das hoehere Komfort-Ziel und laedt den Ueberschuss mit ein)
+        peak_target = p.min_peak_soc
+        valley_note = ""
+        if (p.evening_comfort_soc > p.min_peak_soc
+                and p.morning_peak_end <= hour_now < p.evening_peak_start):
+            evening_avg = _avg_price_on_day(slots_all, now.date(), p.evening_peak_start, p.evening_peak_end)
+            if evening_avg is not None and now_price <= evening_avg * p.valley_price_ratio:
+                peak_target = p.evening_comfort_soc
+                valley_note = f" – günstig ({now_price:.1f} ≤ {p.valley_price_ratio * 100:.0f} % von {evening_avg:.1f} ct)"
+        needs, kwh, reason = calc_peak_protection(soc, hour_now, solar_today, solar_tom, p, target_soc=peak_target)
         if needs:
             grid_need = kwh
-            strategy = reason
+            strategy = reason + valley_note
             if hour_now < p.morning_peak_start:
                 slot_filter = lambda s: s.start.hour < p.morning_peak_start
             elif p.morning_peak_end <= hour_now < p.evening_peak_start:
