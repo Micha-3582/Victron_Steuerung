@@ -108,7 +108,11 @@
     tr.total td:first-child { color: var(--muted); text-transform: uppercase;
       font-size: 12px; letter-spacing: .04em; }
     /* Tabellen auf dem Handy horizontal scrollbar statt gequetscht */
-    .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin; scrollbar-color: #3a4252 transparent; }
+    .table-scroll::-webkit-scrollbar { height: 8px; }
+    .table-scroll::-webkit-scrollbar-track { background: transparent; }
+    .table-scroll::-webkit-scrollbar-thumb { background: #3a4252; border-radius: 4px; }
     @media (max-width: 640px) {
       #charge-log, #ev-list { table-layout: auto; font-size: 12px; }
       #charge-log { min-width: 0; }          /* passt meist ohne Scrollen */
@@ -141,7 +145,10 @@
     .sw-plan { background: transparent; border: 2px solid var(--plan); }
     /* Kurve mit Scroll (schmale Ansicht) + Drag-Auswahl */
     .chart-scroll { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch;
-      margin-top: 12px; max-width: 100%; }
+      margin-top: 12px; max-width: 100%; scrollbar-width: thin; scrollbar-color: #3a4252 transparent; }
+    .chart-scroll::-webkit-scrollbar { height: 8px; }
+    .chart-scroll::-webkit-scrollbar-track { background: transparent; }
+    .chart-scroll::-webkit-scrollbar-thumb { background: #3a4252; border-radius: 4px; }
     .chart-inner { height: 300px; width: 100%; }
     /* Handy: Kurve doppelt so breit -> ~12 h sichtbar, Rest seitlich scrollen.
        Feste CSS-Breite statt JS verhindert das Aufschaukeln von Chart.js. */
