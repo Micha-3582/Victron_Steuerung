@@ -1012,7 +1012,7 @@ function tilesHtml(idPrefix, tiles) {
   const allowed = tiles || TILES_META.map(([k]) => k);   // null = keine Einschraenkung -> alle angehakt
   return `<div style="margin-top:14px">
     <b>Dashboard-Kacheln für dieses Konto</b>
-    <div class="muted" style="margin:4px 0 8px">Zusätzlich zur globalen Einstellung (Einstellungen → Dashboard-Kacheln) einschränken, was <b>dieses eine Konto</b> auf dem Dashboard sieht. Alles angehakt = keine zusätzliche Einschränkung.</div>
+    <div class="muted" style="margin:4px 0 8px">Legt fest, was <b>dieses eine Konto</b> auf dem Dashboard überhaupt sehen darf (die Obergrenze) - innerhalb davon kann sich das Konto selbst in „Meine Ansicht" noch weiter einschränken. Alles angehakt = keine Einschränkung.</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px 18px">${TILES_META.map(([k, label]) => `
       <label class="chip" style="font-weight:normal"><input type="checkbox" id="${idPrefix}-tile-${k}" ${allowed.includes(k) ? 'checked' : ''}><span>${escHUsers(label)}</span></label>`).join('')}</div>
   </div>`;
