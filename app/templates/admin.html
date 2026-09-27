@@ -199,12 +199,30 @@
   <div class="muted" style="margin-bottom:10px">Optional: die festen Posten von deiner Stromrechnung, damit Telegram-Tagesbilanz und Monatsübersicht zusätzlich
     eine geschätzte <b>Gesamtsumme inkl. Gebühren</b> zeigen, vergleichbar mit der echten Rechnung. Wirkt sich auf nichts anderes aus
     (Netzkosten-Spalten, Ersparnis und die Ladesteuerung bleiben wie bisher) – leer/0 lassen, wenn nicht gebraucht.</div>
+  <details class="help" style="margin-bottom:12px">
+    <summary>Was trage ich hier ein? Zwei Vertragsarten, zwei Vorgehen</summary>
+    <div class="help-body">
+      Schau auf deine Rechnung: Stehen Netto- <b>und</b> Bruttobeträge nebeneinander, mit einer eigenen MwSt-Zeile
+      am Ende (typisch bei Tibber und anderen dynamischen Tarifen)? Oder steht nur <b>ein</b> Gesamtpreis,
+      schon inklusive allem (typisch bei einem klassischen Vertrag mit festem Preis pro kWh)?
+      <ol>
+        <li><b>Netto + eigene MwSt-Zeile (Tibber-Stil):</b> Trag hier die <b>Netto</b>beträge ein (Grundgebühr,
+          Netznutzung, Messstelle, §14a-Abzug) und bei „Mehrwertsteuer“ den Satz von der Rechnung (meist 19 %).
+          Die App rechnet dann: Verbrauch + Gebühren (beides netto), einmal MwSt drauf – genau wie auf der
+          Rechnung. Der „Preis pro kWh“ beim Stromtarif bleibt trotzdem der <b>Bruttopreis</b> (dafür gibt es dort
+          einen eigenen Hinweis).</li>
+        <li><b>Ein Gesamtpreis, alles inklusive (fester Tarif):</b> Trag die Beträge <b>brutto</b> ein, so wie sie auf
+          der Rechnung stehen (z. B. „Grundpreis 159 €/Jahr brutto“ → 13,25 €/Monat). Lass „Mehrwertsteuer“ dann auf
+          <b>0</b> – sonst rechnet die App die Steuer ein zweites Mal drauf, weil in den Beträgen schon alles drin ist.</li>
+      </ol>
+    </div>
+  </details>
   <div class="grid2">
-    <div><label>Grundgebühr (€/Monat) <span class="qhelp" role="button" tabindex="0" data-help="Feste monatliche Gebühr laut Vertrag (bei Tibber z.B. „Tibber Gebühr“). Wird gleichmäßig auf die Tage des Monats umgelegt.">?</span></label><input id="contract_fee_month_eur" type="number" step="0.01" min="0" placeholder="z.B. 5,03"></div>
-    <div><label>Netznutzungsgebühr (€/Tag) <span class="qhelp" role="button" tabindex="0" data-help="Tägliche Netznutzungsgebühr laut Vertrag/Rechnung, z.B. 0,22 €/Tag.">?</span></label><input id="grid_fee_day_eur" type="number" step="0.001" min="0" placeholder="z.B. 0,22"></div>
-    <div><label>Messstellengebühr (€/Tag) <span class="qhelp" role="button" tabindex="0" data-help="Tägliche Gebühr für den Zähler laut Vertrag/Rechnung, z.B. 0,0921 €/Tag.">?</span></label><input id="meter_fee_day_eur" type="number" step="0.0001" min="0" placeholder="z.B. 0,0921"></div>
-    <div><label>Reduzierung §14a EnWG (€/Tag) <span class="qhelp" role="button" tabindex="0" data-help="Nachlass auf die Netznutzungsgebühr für steuerbare Verbrauchseinrichtungen (§14a EnWG), z.B. 0,38 €/Tag laut Rechnung. Wird von den Gebühren abgezogen.">?</span></label><input id="section14a_credit_day_eur" type="number" step="0.001" min="0" placeholder="z.B. 0,38"></div>
-    <div><label>Mehrwertsteuer (%) <span class="qhelp" role="button" tabindex="0" data-help="Satz, mit dem die Rechnung auf Verbrauch + Gebühren einmal aufschlägt (in Deutschland aktuell 19 %). 0 = keine MwSt aufschlagen.">?</span></label><input id="vat_percent" type="number" step="1" min="0" max="100" placeholder="z.B. 19"></div>
+    <div><label>Grundgebühr (€/Monat) <span class="qhelp" role="button" tabindex="0" data-help="Feste monatliche/jährliche Gebühr laut Vertrag (bei Tibber z.B. „Tibber Gebühr“ netto; bei festem Tarif der „Grundpreis“ brutto, auf den Monat umgerechnet). Siehe Erklärung oben, welche Variante bei dir gilt. Wird gleichmäßig auf die Tage des Monats umgelegt.">?</span></label><input id="contract_fee_month_eur" type="number" step="0.01" min="0" placeholder="z.B. 5,03"></div>
+    <div><label>Netznutzungsgebühr (€/Tag) <span class="qhelp" role="button" tabindex="0" data-help="Tägliche Netznutzungsgebühr laut Vertrag/Rechnung, z.B. 0,22 €/Tag (netto bei Tibber-Stil, brutto bei festem Tarif - siehe Erklärung oben). Bei vielen festen Tarifen gibt es diese Zeile gar nicht extra, dann 0 lassen.">?</span></label><input id="grid_fee_day_eur" type="number" step="0.001" min="0" placeholder="z.B. 0,22"></div>
+    <div><label>Messstellengebühr (€/Tag) <span class="qhelp" role="button" tabindex="0" data-help="Tägliche Gebühr für den Zähler laut Vertrag/Rechnung, z.B. 0,0921 €/Tag (netto bei Tibber-Stil, brutto bei festem Tarif - siehe Erklärung oben). Bei vielen festen Tarifen gibt es diese Zeile gar nicht extra, dann 0 lassen.">?</span></label><input id="meter_fee_day_eur" type="number" step="0.0001" min="0" placeholder="z.B. 0,0921"></div>
+    <div><label>Reduzierung §14a EnWG (€/Tag) <span class="qhelp" role="button" tabindex="0" data-help="Nachlass auf die Netznutzungsgebühr für steuerbare Verbrauchseinrichtungen (§14a EnWG), z.B. 0,38 €/Tag laut Rechnung. Wird von den Gebühren abgezogen. Nur, wenn deine Rechnung diese Zeile tatsächlich zeigt, sonst 0 lassen.">?</span></label><input id="section14a_credit_day_eur" type="number" step="0.001" min="0" placeholder="z.B. 0,38"></div>
+    <div><label>Mehrwertsteuer (%) <span class="qhelp" role="button" tabindex="0" data-help="Nur bei Netto-Beträgen oben (Tibber-Stil) einen Satz eintragen, meist 19 % - die App schlägt ihn einmal auf Verbrauch + Gebühren auf. Sind die Beträge oben schon brutto/alles inklusive (fester Tarif), hier 0 lassen, sonst wird die Steuer doppelt gerechnet.">?</span></label><input id="vat_percent" type="number" step="1" min="0" max="100" placeholder="z.B. 19"></div>
   </div>
 </div>
 
