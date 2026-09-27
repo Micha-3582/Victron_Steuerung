@@ -60,22 +60,22 @@ def normalize_permissions(perms: dict | None) -> dict:
 # Dashboard-Kacheln) PRO BENUTZER weiter einschraenken lassen - muss zu TILE_IDS in
 # index.html bzw. TILE_DEFS in admin.html passen.
 DASHBOARD_TILES = [
-    ("show_live_values", "Live-Werte (Victron)"),
-    ("show_energy_chart", "Energie (Verlauf)"),
-    ("show_flow_chart", "Energieflüsse"),
-    ("show_week_overview", "Wochenrückblick"),
-    ("show_month_overview", "Monatsüberblick"),
-    ("show_tibber_card", "Tibber-Kachel"),
-    ("show_override_card", "Sofort laden (Override)"),
-    ("show_price_plan", "Strompreis & Ladeplan"),
-    ("show_charge_log", "Ladevorgänge (heute)"),
-    ("show_ev_card", "Manuelle Ladetermine"),
-    ("show_shelly_card", "Geräte (Shelly/Tasmota/Tuya)"),
-    ("show_savings_card", "Ersparnis"),
-    ("show_plansim_card", "Ladeplan-Simulation (Test)"),
-    ("show_weather_card", "Wetter"),
+    ("show_live_values", "Live-Werte (Victron)", "Momentanwerte von Netz/Verbrauch/Solar/Batterie."),
+    ("show_energy_chart", "Energie (Verlauf)", "Balken-Diagramm Verbrauch/Solar/Batterie-SOC."),
+    ("show_flow_chart", "Energieflüsse", "Woher der Strom kam und wohin er ging."),
+    ("show_week_overview", "Wochenrückblick", "Solar/Verbrauch/Netz/Autarkie/Kosten der letzten 7 Tage."),
+    ("show_month_overview", "Monatsüberblick", "Gleiche Werte je Kalendermonat, dauerhaft archiviert."),
+    ("show_tibber_card", "Tibber-Kachel", "Preis jetzt, ESS-Modus, Bilanz. Nur bei dynamischem Tarif verfügbar."),
+    ("show_override_card", "Sofort laden (Override)", "Erzwingt Netzladen unabhängig vom Preis."),
+    ("show_price_plan", "Strompreis & Ladeplan", "Preiskurve mit Ladeplan, manuelle Termine markieren."),
+    ("show_charge_log", "Ladevorgänge (heute)", "Protokoll geplanter/durchgeführter Ladungen."),
+    ("show_ev_card", "Manuelle Ladetermine", "Formular zum Anlegen eines Ladetermins."),
+    ("show_shelly_card", "Geräte (Shelly/Tasmota/Tuya)", "Schalter für smarte Steckdosen auf dem Dashboard."),
+    ("show_savings_card", "Ersparnis", "Was PV, Akku und Steuerung gegenüber „alles aus dem Netz“ sparen."),
+    ("show_plansim_card", "Ladeplan-Simulation (Test)", "Vorschlag des EMS-Planers im Vergleich zur bisherigen Steuerung – steuert nichts. Nur bei dynamischem Tarif."),
+    ("show_weather_card", "Wetter", "Wettervorhersage für den Standort (Standort im Reiter „Wetter“)."),
 ]
-DASHBOARD_TILE_KEYS = [k for k, _ in DASHBOARD_TILES]
+DASHBOARD_TILE_KEYS = [k for k, _, _ in DASHBOARD_TILES]
 
 
 def normalize_tiles(tiles) -> list | None:
@@ -87,6 +87,16 @@ def normalize_tiles(tiles) -> list | None:
         return None
     keep = [k for k in tiles if k in DASHBOARD_TILE_KEYS]
     return keep if len(keep) < len(DASHBOARD_TILE_KEYS) else None    # alles angehakt = keine Einschraenkung
+
+
+def normalize_tile_order(order) -> list | None:
+    """None = Standardreihenfolge. Sonst eine vollstaendige Reihenfolge aller bekannten Kacheln -
+    unbekannte Schluessel fallen raus, fehlende werden hinten angehaengt."""
+    if not isinstance(order, list):
+        return None
+    known = [k for k in order if k in DASHBOARD_TILE_KEYS]
+    result = known + [k for k in DASHBOARD_TILE_KEYS if k not in known]
+    return None if result == DASHBOARD_TILE_KEYS else result
 
 
 def has_level(perms: dict, area: str, need: str) -> bool:
@@ -274,6 +284,18 @@ class UserStore:
             if not user:
                 raise UserError("Benutzer nicht gefunden.")
             user["my_tiles"] = normalize_tiles(tiles)
+            self._write()
+            return dict(user)
+
+    def set_my_order(self, username: str, order) -> dict:
+        """Eigene Kachel-Reihenfolge des Kontos ("Meine Ansicht")."""
+        key = _norm(username)
+        with self._lock:
+            self._sync()
+            user = self._users.get(key)
+            if not user:
+                raise UserError("Benutzer nicht gefunden.")
+            user["my_order"] = normalize_tile_order(order)
             self._write()
             return dict(user)
 

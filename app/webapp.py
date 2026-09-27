@@ -233,14 +233,15 @@ def _require_login():
     g.perms = auth.normalize_permissions(user.get("permissions"))
     g.dashboard_tiles = auth.normalize_tiles(user.get("dashboard_tiles"))     # Admin-Obergrenze
     g.my_tiles = auth.normalize_tiles(user.get("my_tiles"))                   # eigene Wahl ("Meine Ansicht")
+    g.my_order = auth.normalize_tile_order(user.get("my_order"))              # eigene Reihenfolge ("Meine Ansicht")
 
     if request.endpoint in ALWAYS_ALLOWED_ENDPOINTS or request.endpoint == "api_config":
         return None                                    # api_config prueft jedes Feld einzeln selbst (siehe dort)
     if request.endpoint == "admin":
-        settings_areas = [a for a in auth.AREA_IDS if a.startswith("settings_") or a == "user_management"]
-        if not any(auth.has_level(g.perms, a, "read") for a in settings_areas):
-            return _deny("Kein Zugriff mit diesem Konto.")
-        return None                                    # welche Karten sichtbar sind, entscheidet admin.html je Bereich
+        # Jeder angemeldete Benutzer darf die Seite oeffnen - "Konto & Zugang" und "Meine Ansicht"
+        # sind fuer jeden da (unabhaengig von Bereichsrechten), alle anderen Karten blenden sich
+        # in admin.html einzeln je nach Bereich aus/sperren sich.
+        return None
     if request.endpoint == "api_my_tiles":
         # Die eigene Ansicht anpassen ist eine harmlose, rein persoenliche Einstellung - dafuer
         # reicht Lesezugriff aufs Dashboard, "Schreiben" (das waere Geraete schalten u.ae.) braucht
@@ -258,11 +259,10 @@ def _require_login():
 @app.context_processor
 def inject_role():
     perms = _perms()
-    settings_areas = [a for a in auth.AREA_IDS if a.startswith("settings_") or a == "user_management"]
-    can_see_admin = any(perms.get(a, "none") != "none" for a in settings_areas)
-    can_save_settings = any(perms.get(a) == "write" for a in settings_areas if a.startswith("settings_"))
+    settings_areas = [a for a in auth.AREA_IDS if a.startswith("settings_")]
+    can_save_settings = any(perms.get(a) == "write" for a in settings_areas)
     return {"user_role": "admin" if auth.is_full_admin(perms) else "custom", "user_perms": perms,
-            "can_see_admin": can_see_admin, "can_save_settings": can_save_settings}
+            "can_save_settings": can_save_settings}
 
 
 @app.route("/create-account", methods=["GET", "POST"])
@@ -1297,6 +1297,9 @@ def api_status():
           "show_savings_card": bool(cfg.get("show_savings_card", True)),
           "show_plansim_card": bool(cfg.get("show_plansim_card", True)) and cfg.get("tariff_mode") != "fixed",
           "tile_order": [k for k in (cfg.get("tile_order") or []) if isinstance(k, str)]}
+    my_order = getattr(g, "my_order", None)            # eigene Reihenfolge des Kontos selbst ("Meine Ansicht")
+    if my_order is not None:
+        ui["tile_order"] = my_order
     for restriction in (admin_tiles, my_tiles):
         if restriction is not None:
             for k in auth.DASHBOARD_TILE_KEYS:
@@ -1324,11 +1327,16 @@ def api_my_tiles():
     globalen Einstellung und einer moeglichen Admin-Obergrenze (siehe Weitere Benutzer) sehen will -
     rein persoenlich, wirkt sich auf niemand sonst aus."""
     if request.method == "GET":
+        user = users.get(g.user) or {}
         return jsonify(tiles=auth.DASHBOARD_TILES, my_tiles=getattr(g, "my_tiles", None),
+                       my_order=auth.normalize_tile_order(user.get("my_order")),
                        admin_tiles=getattr(g, "dashboard_tiles", None))
     body = request.json or {}
     try:
-        users.set_my_tiles(g.user, body.get("my_tiles"))
+        if "my_tiles" in body:
+            users.set_my_tiles(g.user, body.get("my_tiles"))
+        if "my_order" in body:
+            users.set_my_order(g.user, body.get("my_order"))
     except UserError as exc:
         return jsonify(error=str(exc)), 400
     return jsonify(ok=True)

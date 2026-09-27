@@ -127,8 +127,17 @@
 <div class="card">
   <h2><svg class="h2i" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Kacheln</h2>
   <div class="muted" style="margin-bottom:12px">Jede Dashboard-Kachel einzeln ein-/ausblendbar und mit ▲▼ in der Reihenfolge verschiebbar –
-    so lässt sich die Startseite auf das Wesentliche zuschneiden. (Erst mit „Speichern“ übernommen.)</div>
+    so lässt sich die Startseite auf das Wesentliche zuschneiden (für <b>alle</b> Konten). (Erst mit „Speichern“ übernommen.)</div>
   <div id="tile-toggles" style="display:flex;flex-direction:column;gap:10px"></div>
+</div>
+
+<div class="card" data-tab="anzeige" data-area="personal">
+  <h2><svg class="h2i" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Meine Ansicht</h2>
+  <div class="muted" style="margin-bottom:12px">Nur für <b>dein eigenes</b> Konto: welche der oben freigegebenen Kacheln du zusätzlich für dich
+    aus-/einblendest und in welcher Reihenfolge. Wirkt sich auf niemand sonst aus. Alles angehakt = wie voreingestellt.</div>
+  <div id="my-tile-toggles" style="display:flex;flex-direction:column;gap:10px"></div>
+  <div style="margin-top:12px"><button id="my-tiles-save">Speichern</button>
+  <span id="my-tiles-msg" class="muted" style="margin-left:12px"></span></div>
 </div>
 
 <div class="card">
@@ -741,6 +750,55 @@ function renderTileToggles() {
   TILE_DEFS.forEach(t => { if (t.key in checks) document.getElementById(t.key).checked = checks[t.key]; });
 }
 renderTileToggles();
+
+/* ---- "Meine Ansicht": genau dieselben Regler (Kippschalter + ▲▼), aber je Konto fuer sich selbst -
+   nutzt /api/my-tiles statt /api/config und wirkt sich nie auf andere Konten aus. */
+let myTileDefs = [], myTileOrder = [], myAdminCeiling = null;
+function moveMyTile(key, dir) {
+  const i = myTileOrder.indexOf(key), j = i + dir;
+  if (i < 0 || j < 0 || j >= myTileOrder.length) return;
+  [myTileOrder[i], myTileOrder[j]] = [myTileOrder[j], myTileOrder[i]];
+  renderMyTileToggles();
+}
+function renderMyTileToggles() {
+  const checks = {};
+  myTileDefs.forEach(t => { const el = document.getElementById('my-' + t.key); if (el) checks[t.key] = el.checked; });
+  const defs = myTileOrder.map(k => myTileDefs.find(t => t.key === k)).filter(Boolean);
+  document.getElementById('my-tile-toggles').innerHTML = defs.map((t, i) => {
+    const lockedOut = myAdminCeiling && !myAdminCeiling.includes(t.key);   // Admin hat diese Kachel komplett gesperrt
+    return `<div style="display:flex;align-items:center;gap:14px;${lockedOut ? 'opacity:.5' : ''}">
+      <label class="switch" style="margin:0"><input type="checkbox" id="my-${t.key}" ${lockedOut ? 'disabled' : ''}><span class="slider"></span></label>
+      <div style="flex:1;min-width:0"><b>${t.label}</b><div class="muted">${t.hint}${lockedOut ? ' · <span title="Vom Admin gesperrt">vom Admin gesperrt</span>' : ''}</div></div>
+      <button type="button" class="ghost" onclick="moveMyTile('${t.key}', -1)" ${i === 0 ? 'disabled' : ''} title="Weiter nach oben">▲</button>
+      <button type="button" class="ghost" onclick="moveMyTile('${t.key}', 1)" ${i === defs.length - 1 ? 'disabled' : ''} title="Weiter nach unten">▼</button>
+    </div>`;
+  }).join('');
+  myTileDefs.forEach(t => { if (t.key in checks) document.getElementById('my-' + t.key).checked = checks[t.key]; });
+}
+async function loadMyTiles() {
+  let d; try { d = await (await fetch('/api/my-tiles')).json(); } catch (e) { return; }
+  myTileDefs = d.tiles.map(([key, label, hint]) => ({ key, label, hint }));
+  myAdminCeiling = d.admin_tiles;
+  myTileOrder = (d.my_order && d.my_order.length ? d.my_order : myTileDefs.map(t => t.key));
+  renderMyTileToggles();
+  const allowed = new Set(myAdminCeiling || myTileDefs.map(t => t.key));
+  myTileDefs.forEach(t => {
+    const el = document.getElementById('my-' + t.key);
+    if (el) el.checked = allowed.has(t.key) && (!d.my_tiles || d.my_tiles.includes(t.key));
+  });
+}
+document.getElementById('my-tiles-save').addEventListener('click', async () => {
+  const msg = document.getElementById('my-tiles-msg');
+  const boxes = myTileDefs.map(t => document.getElementById('my-' + t.key)).filter(el => el && !el.disabled);
+  const checked = boxes.filter(el => el.checked).map(el => el.id.slice(3));
+  const my_tiles = checked.length === boxes.length ? null : checked;   // alles an = keine Einschraenkung
+  const my_order = myTileOrder;
+  try {
+    await shellyApi('/api/my-tiles', 'POST', { my_tiles, my_order });
+    savedToast('Gespeichert ✓');
+  } catch (e) { msg.textContent = e.message; msg.style.color = '#e5544a'; setTimeout(() => { msg.style.color = ''; msg.textContent = ''; }, 6000); }
+});
+loadMyTiles();
 
 async function loadMinSoc() {
   const m = document.getElementById('ess_min_soc_msg'), inp = document.getElementById('ess_min_soc');
@@ -1577,7 +1635,7 @@ const ADMIN_TABS = [
     geraete: 'settings_geraete', anzeige: 'settings_anzeige', system: 'settings_system' };
   cards.forEach(c => {
     if (c.dataset.tab === '*') return;
-    const area = c.dataset.area === 'always' ? null : (c.dataset.area || TAB_AREA[c.dataset.tab]);
+    const area = (c.dataset.area === 'always' || c.dataset.area === 'personal') ? null : (c.dataset.area || TAB_AREA[c.dataset.tab]);
     if (!area) return;
     const level = (window.USER_PERMS || {})[area] || 'none';
     if (level === 'none') { c.dataset.tab = '__hidden'; c.style.display = 'none'; }

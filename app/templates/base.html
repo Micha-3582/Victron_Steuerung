@@ -237,7 +237,7 @@
       {% if user_perms.dashboard != 'none' %}<a href="/">Dashboard</a>{% endif %}
       {% if user_perms.automation != 'none' %}<a href="/automation">Automatik</a>{% endif %}
       {% if user_perms.rules != 'none' %}<a href="/rules">Regeln</a>{% endif %}
-      {% if can_see_admin %}<a href="/admin">Einstellungen</a>{% endif %}
+      <a href="/admin">Einstellungen</a>
       <form action="/logout" method="post" style="display:inline;margin:0">
         <button type="submit" class="ghost logout-btn">
           <span class="logout-full">Abmelden</span>
