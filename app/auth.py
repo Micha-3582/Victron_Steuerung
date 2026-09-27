@@ -253,6 +253,7 @@ class UserStore:
             return dict(user)
 
     def set_dashboard_tiles(self, username: str, tiles) -> dict:
+        """Admin-Obergrenze: was dieses Konto ueberhaupt sehen KANN (siehe Weitere Benutzer)."""
         key = _norm(username)
         with self._lock:
             self._sync()
@@ -260,6 +261,19 @@ class UserStore:
             if not user:
                 raise UserError("Benutzer nicht gefunden.")
             user["dashboard_tiles"] = normalize_tiles(tiles)
+            self._write()
+            return dict(user)
+
+    def set_my_tiles(self, username: str, tiles) -> dict:
+        """Eigene Wahl des Kontos selbst ("Meine Ansicht") - schraenkt innerhalb der Admin-
+        Obergrenze (dashboard_tiles) weiter ein, kann sie aber nie ueberschreiben/erweitern."""
+        key = _norm(username)
+        with self._lock:
+            self._sync()
+            user = self._users.get(key)
+            if not user:
+                raise UserError("Benutzer nicht gefunden.")
+            user["my_tiles"] = normalize_tiles(tiles)
             self._write()
             return dict(user)
 

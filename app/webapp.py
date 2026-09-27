@@ -133,6 +133,7 @@ ENDPOINT_AREA = {
     "report_page": "dashboard", "api_report": "dashboard", "api_savings": "dashboard",
     "api_plan_sim": "dashboard", "api_price_history": "dashboard", "api_weather": "dashboard",
     "api_vrm_forecast": "dashboard", "api_vrm_forecast_history": "dashboard",
+    # "api_my_tiles" bewusst NICHT hier - braucht nur Lesezugriff auch fuer sein POST (siehe Sonderfall unten)
     # Regeln
     "rules_page": "rules", "rules_log_page": "rules", "api_rules_get": "rules",
     "api_rules_add": "rules", "api_rules_modify": "rules",
@@ -230,7 +231,8 @@ def _require_login():
     g.user = username
     g.user_display = user["username"]
     g.perms = auth.normalize_permissions(user.get("permissions"))
-    g.dashboard_tiles = auth.normalize_tiles(user.get("dashboard_tiles"))
+    g.dashboard_tiles = auth.normalize_tiles(user.get("dashboard_tiles"))     # Admin-Obergrenze
+    g.my_tiles = auth.normalize_tiles(user.get("my_tiles"))                   # eigene Wahl ("Meine Ansicht")
 
     if request.endpoint in ALWAYS_ALLOWED_ENDPOINTS or request.endpoint == "api_config":
         return None                                    # api_config prueft jedes Feld einzeln selbst (siehe dort)
@@ -239,6 +241,11 @@ def _require_login():
         if not any(auth.has_level(g.perms, a, "read") for a in settings_areas):
             return _deny("Kein Zugriff mit diesem Konto.")
         return None                                    # welche Karten sichtbar sind, entscheidet admin.html je Bereich
+    if request.endpoint == "api_my_tiles":
+        # Die eigene Ansicht anpassen ist eine harmlose, rein persoenliche Einstellung - dafuer
+        # reicht Lesezugriff aufs Dashboard, "Schreiben" (das waere Geraete schalten u.ae.) braucht
+        # man dafuer nicht extra.
+        return _check_area("dashboard", "read")
     area = ENDPOINT_AREA.get(request.endpoint)
     if area is None:
         if not auth.is_full_admin(g.perms):
@@ -1267,7 +1274,8 @@ def api_status():
         prices = list(ctrl.prices)
     charge = store.list_charge_sessions()
     cfg = store.load_config()
-    my_tiles = getattr(g, "dashboard_tiles", None)     # zusaetzliche Einschraenkung dieses Kontos (Einstellungen -> Weitere Benutzer)
+    admin_tiles = getattr(g, "dashboard_tiles", None)  # Admin-Obergrenze (Einstellungen -> Weitere Benutzer)
+    my_tiles = getattr(g, "my_tiles", None)            # eigene Wahl des Kontos selbst ("Meine Ansicht")
     ui = {"chart_energy_hourly": bool(cfg.get("chart_energy_hourly", False)),
           "chart_flow_hourly": bool(cfg.get("chart_flow_hourly", False)),
           # Alle Dashboard-Kacheln einzeln ein-/ausblendbar (Einstellungen ->
@@ -1289,10 +1297,11 @@ def api_status():
           "show_savings_card": bool(cfg.get("show_savings_card", True)),
           "show_plansim_card": bool(cfg.get("show_plansim_card", True)) and cfg.get("tariff_mode") != "fixed",
           "tile_order": [k for k in (cfg.get("tile_order") or []) if isinstance(k, str)]}
-    if my_tiles is not None:
-        for k in auth.DASHBOARD_TILE_KEYS:
-            if k not in my_tiles:
-                ui[k] = False
+    for restriction in (admin_tiles, my_tiles):
+        if restriction is not None:
+            for k in auth.DASHBOARD_TILE_KEYS:
+                if k not in restriction:
+                    ui[k] = False
     return jsonify({
         "status": status,
         "ui": ui,
@@ -1307,6 +1316,22 @@ def api_status():
         "battery_watchdog": store.battery_watchdog_state(),
         "now": datetime.now().isoformat(timespec="seconds"),
     })
+
+
+@app.route("/api/my-tiles", methods=["GET", "POST"])
+def api_my_tiles():
+    """"Meine Ansicht": jedes Konto darf selbst waehlen, welche Dashboard-Kacheln es zusaetzlich zur
+    globalen Einstellung und einer moeglichen Admin-Obergrenze (siehe Weitere Benutzer) sehen will -
+    rein persoenlich, wirkt sich auf niemand sonst aus."""
+    if request.method == "GET":
+        return jsonify(tiles=auth.DASHBOARD_TILES, my_tiles=getattr(g, "my_tiles", None),
+                       admin_tiles=getattr(g, "dashboard_tiles", None))
+    body = request.json or {}
+    try:
+        users.set_my_tiles(g.user, body.get("my_tiles"))
+    except UserError as exc:
+        return jsonify(error=str(exc)), 400
+    return jsonify(ok=True)
 
 
 @app.route("/api/history")

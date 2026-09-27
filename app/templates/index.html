@@ -3,6 +3,10 @@
 
 <div id="banner"></div>
 
+<div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+  <button type="button" id="my-view-btn" class="ghost" style="font-size:13px">⚙ Meine Ansicht</button>
+</div>
+
 <div class="dash" id="dashboard">
 <div class="card full" id="live-card" style="margin-bottom:14px">
   <h2>Live-Werte (Victron)</h2>
@@ -264,6 +268,48 @@ if (DASHBOARD_LEVEL === 'read') {
     const hint = $('override-hint'); if (hint) hint.textContent = 'Demo-Zugang: nur Ansicht, kein Schalten möglich.';
   });
 }
+
+/* ---- "Meine Ansicht": jedes Konto darf selbst waehlen, welche Kacheln es zusaetzlich zur
+   globalen Einstellung (und einer moeglichen Admin-Obergrenze) sehen will - rein persoenlich. */
+const myViewEscH = t => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+async function openMyViewDialog() {
+  let d;
+  try { d = await (await fetch('/api/my-tiles')).json(); } catch (e) { return; }
+  const admin = d.admin_tiles;                     // Obergrenze des Admins (null = keine) - kann man nicht ueberschreiten
+  const mine = d.my_tiles;                          // eigene bisherige Wahl (null = alles an)
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px';
+  ov.innerHTML = `<div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;width:100%;max-width:420px;max-height:80vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.5)">
+    <h3 style="margin:0 0 8px;font-size:17px">⚙ Meine Ansicht</h3>
+    <div class="muted" style="margin-bottom:12px">Welche Kacheln du auf deinem Dashboard sehen willst. Wirkt sich nur auf dein eigenes Konto aus. Alles angehakt = wie voreingestellt.</div>
+    <div id="my-view-list" style="display:flex;flex-direction:column;gap:6px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+      <button class="ghost" id="my-view-cancel">Abbrechen</button><button id="my-view-save">Speichern</button></div></div>`;
+  const list = ov.querySelector('#my-view-list');
+  list.innerHTML = d.tiles.map(([key, label]) => {
+    const lockedOut = admin && !admin.includes(key);       // Admin hat diese Kachel fuer mich komplett gesperrt
+    const checked = lockedOut ? false : (mine ? mine.includes(key) : true);
+    return `<label style="display:flex;align-items:center;gap:10px;${lockedOut ? 'opacity:.5' : ''}">
+      <input type="checkbox" data-tile="${key}" ${checked ? 'checked' : ''} ${lockedOut ? 'disabled' : ''}>
+      <span>${myViewEscH(label)}${lockedOut ? ' <span class="muted">(vom Admin gesperrt)</span>' : ''}</span></label>`;
+  }).join('');
+  const close = () => ov.remove();
+  ov.addEventListener('mousedown', e => { if (e.target === ov) close(); });
+  ov.querySelector('#my-view-cancel').onclick = close;
+  ov.querySelector('#my-view-save').onclick = async () => {
+    const boxes = [...list.querySelectorAll('input[data-tile]:not(:disabled)')];
+    const checkedKeys = boxes.filter(b => b.checked).map(b => b.dataset.tile);
+    const my_tiles = checkedKeys.length === boxes.length ? null : checkedKeys;   // alles an = keine Einschraenkung
+    try {
+      await fetch('/api/my-tiles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ my_tiles }) });
+    } catch (e) { /* egal, laedt beim naechsten Mal einfach nochmal den alten Stand */ }
+    close();
+    load();
+  };
+  document.body.appendChild(ov);
+}
+document.getElementById('my-view-btn')?.addEventListener('click', openMyViewDialog);
+
 let shellyEnabled = true, weatherEnabled = true, plansimEnabled = true, savingsEnabled = true;
 function applyTileVisibility(ui) {
   applyTileOrder(ui.tile_order);
