@@ -1308,7 +1308,9 @@ async function loadTuyaInfo() {
   let t; try { t = await (await fetch('/api/tuya')).json(); } catch (e) { return; }
   const sel = document.getElementById('tuya-region');
   sel.innerHTML = Object.entries(t.regions).map(([k, v]) => `<option value="${k}">${escH(v)}</option>`).join('');
-  sel.value = t.region; document.getElementById('tuya-key').value = t.api_key;
+  sel.value = t.region;
+  const keyEl = document.getElementById('tuya-key');
+  keyEl.value = t.api_key; keyEl.placeholder = (t.api_key_set && !t.api_key) ? '•••• hinterlegt (nur bei Schreibrecht sichtbar)' : '';
   document.getElementById('tuya-secret').placeholder = t.configured ? '(gespeichert – leer lassen = unverändert)' : '';
   document.getElementById('tuya-setup').open = !t.configured;
 }
@@ -1382,7 +1384,9 @@ loadTuyaInfo();
 function vrmMsg(t, err) { const m = document.getElementById('vrm-msg'); m.textContent = t; m.style.color = err ? '#e5544a' : ''; }
 async function loadVrmInfo() {
   let v; try { v = await (await fetch('/api/vrm')).json(); } catch (e) { return; }
-  document.getElementById('vrm-inst').value = v.installation_id || '';
+  const instEl = document.getElementById('vrm-inst');
+  instEl.value = v.installation_id || '';
+  instEl.placeholder = (v.installation_id_set && !v.installation_id) ? '•••• hinterlegt (nur bei Schreibrecht sichtbar)' : '';
   document.getElementById('vrm-token').placeholder = v.configured ? '(gespeichert – leer lassen = unverändert)' : '';
   document.getElementById('vrm-setup').open = !v.configured;
 }
@@ -1470,7 +1474,9 @@ wxLoad();
 function ntMsg(t, err) { const m = document.getElementById('nt-msg'); m.textContent = t; m.style.color = err ? '#e5544a' : ''; }
 async function ntLoad() {
   let n; try { n = await (await fetch('/api/notify')).json(); } catch (e) { return; }
-  document.getElementById('nt-chat').value = n.chat_id || '';
+  const chatEl = document.getElementById('nt-chat');
+  chatEl.value = n.chat_id || '';
+  chatEl.placeholder = (n.chat_id_set && !n.chat_id) ? '•••• hinterlegt (nur bei Schreibrecht sichtbar)' : '';
   document.getElementById('nt-token').placeholder = n.has_token ? '(gespeichert – leer lassen = unverändert)' : '123456:ABC…';
   document.getElementById('notify-setup').open = !n.configured;
   document.getElementById('nt-lowsoc').value = n.low_soc; document.getElementById('nt-hour').value = n.summary_hour;

@@ -1474,6 +1474,19 @@ def api_ess_grid_setpoint():
 SECRET_FIELDS = {"tibber_token", "cerbo_host"}
 
 
+def _masked(d: dict, area: str, fields) -> dict:
+    """Ersetzt die genannten Felder in `d` durch "" + ein "<feld>_set"-Flag, wenn das
+    angemeldete Konto auf `area` kein Schreibrecht hat - fuer Kennungen, die zwar keine
+    Passwoerter sind (Access-ID, Chat-ID, Installations-ID, IP-Bereiche), aber trotzdem
+    nicht vor jedem Nur-Lese-Konto (z.B. Demo) im Klartext stehen sollen."""
+    if not auth.has_level(g.perms, area, "write"):
+        for f in fields:
+            if d.get(f):
+                d[f + "_set"] = True
+                d[f] = ""
+    return d
+
+
 @app.route("/api/config", methods=["GET", "POST"])
 def api_config():
     if request.method == "GET":
@@ -1855,7 +1868,8 @@ def api_shelly_auto_order():
 
 @app.route("/api/notify", methods=["GET"])
 def api_notify_info():
-    return jsonify({**notify.credentials_public(), **notify.settings_public(store.load_config())})
+    d = {**notify.credentials_public(), **notify.settings_public(store.load_config())}
+    return jsonify(_masked(d, "settings_meldungen", ["chat_id"]))
 
 
 @app.route("/api/notify/credentials", methods=["POST"])
@@ -1999,7 +2013,7 @@ def api_weather_search():
 
 @app.route("/api/vrm", methods=["GET"])
 def api_vrm_info():
-    return jsonify(vrm.credentials_public())           # ohne Token
+    return jsonify(_masked(vrm.credentials_public(), "settings_vrm", ["installation_id"]))    # ohne Token
 
 
 @app.route("/api/vrm/credentials", methods=["POST"])
@@ -2044,7 +2058,7 @@ def api_vrm_forecast():
 
 @app.route("/api/tuya", methods=["GET"])
 def api_tuya_info():
-    return jsonify(tuya.credentials_public())          # ohne Secret
+    return jsonify(_masked(tuya.credentials_public(), "settings_geraete", ["api_key", "networks"]))   # ohne Secret
 
 
 @app.route("/api/tuya/credentials", methods=["POST"])
