@@ -19,6 +19,25 @@ ESS_MODE_UNIT, ESS_MODE_REG = 100, 2900   # Holding: 9=laden, 10=idle
 GRID_SP_UNIT, GRID_SP_REG = 100, 2700     # Holding int16: ESS 'Sollwert Netz' (W); negativ = leicht einspeisen
 MIN_SOC_UNIT, MIN_SOC_REG = 100, 2901     # Holding: ESS 'Minimaler SOC (es sei denn, Netz faellt aus)', Wert = %*10
 
+# Alarme (aus der offiziellen Victron Modbus-TCP-Registerliste, github.com/victronenergy/dbus_modbustcp -
+# NOCH NICHT am Cerbo verifiziert wie die Register oben, insbesondere die Unit-ID des Multiplus/VE.Bus kann
+# je nach Anlage/Venus-Version abweichen ("seit Venus 2.60 dynamisch vergeben") - vor Nutzung gegenpruefen.
+VEBUS_UNIT = 227                          # Cerbo GX VE.Bus-Port (Multiplus/Quattro) - Vorbelegung, ggf. anpassen
+ALARM_REGS = {                            # alle rein lesend (Input-Register), 0=Ok, 2=Alarm (teils 1=Warnung)
+    "vebus_error": (VEBUS_UNIT, 32),          # 0=kein Fehler, sonst VE.Bus-Fehlercode 1-26
+    "vebus_high_temp": (VEBUS_UNIT, 34),
+    "vebus_low_battery": (VEBUS_UNIT, 35),
+    "vebus_overload": (VEBUS_UNIT, 36),
+    "vebus_grid_lost": (VEBUS_UNIT, 64),      # 0=Ok, 2=Netz weg (nicht 1)
+    "battery_low_voltage": (SOC_BMS_UNIT, 268),
+    "battery_high_voltage": (SOC_BMS_UNIT, 269),
+    "battery_low_soc": (SOC_BMS_UNIT, 272),
+    "battery_low_temp": (SOC_BMS_UNIT, 273),
+    "battery_high_temp": (SOC_BMS_UNIT, 274),
+    "battery_cell_imbalance": (SOC_BMS_UNIT, 322),
+    "battery_internal_failure": (SOC_BMS_UNIT, 323),
+}
+
 
 def _call(fn, address, unit):
     """Versionsrobust: neuere pymodbus nutzen device_id=, aeltere slave=."""
@@ -153,6 +172,25 @@ class Cerbo:
             return rr.registers[0]
         finally:
             c.close()
+
+    def read_alarms(self):
+        """Alarmregister von Multiplus/Quattro (VE.Bus) und Batterie (BMS), siehe ALARM_REGS.
+        Liest jedes einzeln und gibt trotzdem alle uebrigen zurueck, wenn eins fehlschlaegt (z.B. falsche
+        Unit-ID) - der Fehler steht dann als Text beim jeweiligen Schluessel unter 'errors'."""
+        out, errors = {}, {}
+        c = self._client()
+        try:
+            for name, (unit, reg) in ALARM_REGS.items():
+                try:
+                    rr = _call(c.read_input_registers, reg, unit)
+                    if rr.isError():
+                        raise IOError(str(rr))
+                    out[name] = rr.registers[0]
+                except Exception as e:                       # noqa: BLE001
+                    errors[name] = str(e)
+        finally:
+            c.close()
+        return {"values": out, "errors": errors}
 
     def read_min_soc(self):
         """Minimaler SOC (ESS, in %) - dieselbe Einstellung wie im VRM-Portal 'Minimaler SOC'."""

@@ -935,6 +935,21 @@ def api_watchdog():
     return jsonify(store.battery_watchdog_state())
 
 
+@app.route("/api/alarms")
+def api_alarms():
+    """Diagnose: Alarmregister von Multiplus (VE.Bus) und Batterie (BMS) roh auslesen (siehe victron.ALARM_REGS).
+    Noch nicht am echten Cerbo verifiziert - dient erstmal dazu, das gemeinsam mit Michael zu pruefen, bevor
+    daraus eine feste Anzeige/Meldung wird."""
+    cfg = store.load_config()
+    if not store.is_configured(cfg):
+        return jsonify(error="Cerbo ist noch nicht eingerichtet"), 400
+    try:
+        cerbo = Cerbo(cfg["cerbo_host"], cfg.get("cerbo_port", 502))
+        return jsonify(ok=True, **cerbo.read_alarms())
+    except Exception as e:                                   # noqa: BLE001
+        return jsonify(error=str(e)), 400
+
+
 @app.route("/api/battery-cycles")
 def api_battery_cycles():
     """Lebenslaufende Akku-Nutzung: Durchsatz und daraus die aequivalenten Vollzyklen (siehe store.battery_cycle_stats)."""
