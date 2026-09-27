@@ -656,6 +656,7 @@
       <button type="button" class="ghost" data-preset="demo">Demo (alles ansehen)</button>
     </div>
     <div id="nu-matrix" style="margin-top:10px"></div>
+    <div id="nu-tiles"></div>
     <div style="margin-top:12px"><button id="btn-nu-add">Benutzer anlegen</button></div>
   </div>
 </div>
@@ -1003,6 +1004,20 @@ function readMatrix(idPrefix) {
   AREAS_META.forEach(([id]) => { perms[id] = document.getElementById(`${idPrefix}-${id}`).value; });
   return perms;
 }
+let TILES_META = [];
+function tilesHtml(idPrefix, tiles) {
+  const allowed = tiles || TILES_META.map(([k]) => k);   // null = keine Einschraenkung -> alle angehakt
+  return `<div style="margin-top:14px">
+    <b>Dashboard-Kacheln für dieses Konto</b>
+    <div class="muted" style="margin:4px 0 8px">Zusätzlich zur globalen Einstellung (Einstellungen → Dashboard-Kacheln) einschränken, was <b>dieses eine Konto</b> auf dem Dashboard sieht. Alles angehakt = keine zusätzliche Einschränkung.</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px 18px">${TILES_META.map(([k, label]) => `
+      <label class="chip" style="font-weight:normal"><input type="checkbox" id="${idPrefix}-tile-${k}" ${allowed.includes(k) ? 'checked' : ''}><span>${escHUsers(label)}</span></label>`).join('')}</div>
+  </div>`;
+}
+function readTiles(idPrefix) {
+  const checked = TILES_META.filter(([k]) => document.getElementById(`${idPrefix}-tile-${k}`).checked).map(([k]) => k);
+  return checked.length === TILES_META.length ? null : checked;
+}
 function summarizePerms(perms) {
   for (const [name, p] of Object.entries(PRESETS_META)) {
     if (AREAS_META.every(([id]) => (perms[id] || 'none') === (p[id] || 'none'))) {
@@ -1018,7 +1033,7 @@ async function loadUsers() {
   try {
     const r = await fetch('/api/users');
     const d = await r.json();
-    AREAS_META = d.areas; PRESETS_META = d.presets;
+    AREAS_META = d.areas; PRESETS_META = d.presets; TILES_META = d.dashboard_tiles;
     const body = document.getElementById('users-body');
     body.innerHTML = '';
     for (const u of d.users) {
@@ -1043,7 +1058,8 @@ async function loadUsers() {
       editRow.className = 'u-editrow'; editRow.dataset.u = u.username; editRow.style.display = 'none';
       editRow.innerHTML = `<td colspan="5" style="padding:8px 4px 16px;background:var(--card2);border-radius:8px">
         <div style="max-width:480px">${matrixHtml('ue-' + u.username, perms)}</div>
-        <div style="margin-top:10px"><button type="button" class="u-save-perms" data-u="${u.username}">Rechte speichern</button>
+        <div style="max-width:480px">${tilesHtml('ue-' + u.username, u.dashboard_tiles)}</div>
+        <div style="margin-top:10px"><button type="button" class="u-save-perms" data-u="${u.username}">Speichern</button>
         <button type="button" class="ghost u-edit-cancel" data-u="${u.username}" style="margin-left:8px">Abbrechen</button></div></td>`;
       body.appendChild(editRow);
     }
@@ -1055,7 +1071,7 @@ async function loadUsers() {
       body.querySelector(`.u-editrow[data-u="${CSS.escape(el.dataset.u)}"]`).style.display = 'none';
     }));
     body.querySelectorAll('.u-save-perms').forEach(el => el.addEventListener('click', async () => {
-      await patchUser(el.dataset.u, { permissions: readMatrix('ue-' + el.dataset.u) });
+      await patchUser(el.dataset.u, { permissions: readMatrix('ue-' + el.dataset.u), dashboard_tiles: readTiles('ue-' + el.dataset.u) });
       loadUsers();
     }));
     body.querySelectorAll('.u-pw').forEach(el => el.addEventListener('click', async () => {
@@ -1089,6 +1105,7 @@ async function patchUser(username, body) {
 }
 function renderNuMatrix(presetName) {
   document.getElementById('nu-matrix').innerHTML = matrixHtml('nu', PRESETS_META[presetName] || {});
+  document.getElementById('nu-tiles').innerHTML = tilesHtml('nu', null);
   syncNuExpires();
   document.querySelectorAll('#nu-matrix select').forEach(el => el.addEventListener('change', syncNuExpires));
 }
@@ -1110,13 +1127,14 @@ document.getElementById('btn-nu-add').addEventListener('click', async () => {
   const username = document.getElementById('nu-username').value.trim();
   const password = document.getElementById('nu-password').value;
   const permissions = readMatrix('nu');
+  const dashboard_tiles = readTiles('nu');
   const expires = document.getElementById('nu-expires').value;
   if (!username) { msg.textContent = 'Benutzername eingeben.'; return; }
   if (password.length < 8) { msg.textContent = 'Passwort: mind. 8 Zeichen.'; return; }
   try {
     const r = await fetch('/api/users', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, permissions, expires }),
+      body: JSON.stringify({ username, password, permissions, expires, dashboard_tiles }),
     });
     const d = await r.json();
     if (!r.ok) { msg.textContent = d.error || 'Fehler'; return; }

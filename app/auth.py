@@ -56,6 +56,39 @@ def normalize_permissions(perms: dict | None) -> dict:
     return {a: (perms.get(a) if perms.get(a) in LEVELS else "none") for a in AREA_IDS}
 
 
+# Dashboard-Kacheln, die sich zusaetzlich zur globalen Einstellung (Einstellungen ->
+# Dashboard-Kacheln) PRO BENUTZER weiter einschraenken lassen - muss zu TILE_IDS in
+# index.html bzw. TILE_DEFS in admin.html passen.
+DASHBOARD_TILES = [
+    ("show_live_values", "Live-Werte (Victron)"),
+    ("show_energy_chart", "Energie (Verlauf)"),
+    ("show_flow_chart", "Energieflüsse"),
+    ("show_week_overview", "Wochenrückblick"),
+    ("show_month_overview", "Monatsüberblick"),
+    ("show_tibber_card", "Tibber-Kachel"),
+    ("show_override_card", "Sofort laden (Override)"),
+    ("show_price_plan", "Strompreis & Ladeplan"),
+    ("show_charge_log", "Ladevorgänge (heute)"),
+    ("show_ev_card", "Manuelle Ladetermine"),
+    ("show_shelly_card", "Geräte (Shelly/Tasmota/Tuya)"),
+    ("show_savings_card", "Ersparnis"),
+    ("show_plansim_card", "Ladeplan-Simulation (Test)"),
+    ("show_weather_card", "Wetter"),
+]
+DASHBOARD_TILE_KEYS = [k for k, _ in DASHBOARD_TILES]
+
+
+def normalize_tiles(tiles) -> list | None:
+    """None = keine zusaetzliche Einschraenkung (zeigt, was die globale Einstellung erlaubt).
+    Sonst eine Liste bekannter Kachel-Schluessel - unbekannte fallen raus."""
+    if tiles is None:
+        return None
+    if not isinstance(tiles, list):
+        return None
+    keep = [k for k in tiles if k in DASHBOARD_TILE_KEYS]
+    return keep if len(keep) < len(DASHBOARD_TILE_KEYS) else None    # alles angehakt = keine Einschraenkung
+
+
 def has_level(perms: dict, area: str, need: str) -> bool:
     return _LEVEL_ORDER.get((perms or {}).get(area, "none"), 0) >= _LEVEL_ORDER[need]
 
@@ -163,6 +196,7 @@ class UserStore:
                 d = dict(u)
                 d.pop("pw_hash", None)
                 d["permissions"] = normalize_permissions(d.get("permissions"))
+                d["dashboard_tiles"] = normalize_tiles(d.get("dashboard_tiles"))
                 out.append(d)
             return sorted(out, key=lambda d: d.get("created") or 0)
 
@@ -192,7 +226,7 @@ class UserStore:
             return dict(user)
 
     def create(self, username: str, password: str, permissions: dict | None = None,
-               expires: str | None = None) -> dict:
+               expires: str | None = None, dashboard_tiles=None) -> dict:
         key = _norm(username)
         if not key:
             raise UserError("Benutzername darf nicht leer sein.")
@@ -212,8 +246,20 @@ class UserStore:
                 "last_login": None,
                 "permissions": perms,
                 "expires": expires or None,          # "YYYY-MM-DD" oder None (unbegrenzt)
+                "dashboard_tiles": normalize_tiles(dashboard_tiles),
             }
             self._users[key] = user
+            self._write()
+            return dict(user)
+
+    def set_dashboard_tiles(self, username: str, tiles) -> dict:
+        key = _norm(username)
+        with self._lock:
+            self._sync()
+            user = self._users.get(key)
+            if not user:
+                raise UserError("Benutzer nicht gefunden.")
+            user["dashboard_tiles"] = normalize_tiles(tiles)
             self._write()
             return dict(user)
 

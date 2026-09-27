@@ -230,6 +230,7 @@ def _require_login():
     g.user = username
     g.user_display = user["username"]
     g.perms = auth.normalize_permissions(user.get("permissions"))
+    g.dashboard_tiles = auth.normalize_tiles(user.get("dashboard_tiles"))
 
     if request.endpoint in ALWAYS_ALLOWED_ENDPOINTS or request.endpoint == "api_config":
         return None                                    # api_config prueft jedes Feld einzeln selbst (siehe dort)
@@ -382,20 +383,24 @@ def api_update_own_account():
 def _user_out(u: dict) -> dict:
     return {"username": u["username"], "permissions": auth.normalize_permissions(u.get("permissions")),
             "created": u.get("created"), "last_login": u.get("last_login"),
-            "expires": u.get("expires"), "is_me": u["username"].strip().lower() == g.user}
+            "expires": u.get("expires"), "is_me": u["username"].strip().lower() == g.user,
+            "dashboard_tiles": auth.normalize_tiles(u.get("dashboard_tiles"))}
 
 
 @app.route("/api/users", methods=["GET", "POST"])
 def api_users():
     """Benutzerverwaltung (braucht Benutzerverwaltung=Schreiben) - Liste sowie Neuanlage mit
-    frei waehlbaren Rechten je Bereich (siehe auth.AREAS) und optionalem Ablaufdatum."""
+    frei waehlbaren Rechten je Bereich (siehe auth.AREAS), optionalem Ablaufdatum und optionaler
+    Einschraenkung, welche Dashboard-Kacheln dieses Konto zusaetzlich zur globalen Einstellung sieht."""
     if request.method == "GET":
-        return jsonify(users=[_user_out(u) for u in users.list()], areas=auth.AREAS, presets=auth.PRESETS)
+        return jsonify(users=[_user_out(u) for u in users.list()], areas=auth.AREAS, presets=auth.PRESETS,
+                       dashboard_tiles=auth.DASHBOARD_TILES)
     body = request.json or {}
     permissions = auth.normalize_permissions(body.get("permissions") or auth.PRESETS["user"])
     expires = (body.get("expires") or "").strip() or None
     try:
-        u = users.create(body.get("username") or "", body.get("password") or "", permissions=permissions, expires=expires)
+        u = users.create(body.get("username") or "", body.get("password") or "", permissions=permissions,
+                          expires=expires, dashboard_tiles=body.get("dashboard_tiles"))
     except UserError as exc:
         return jsonify(error=str(exc)), 400
     return jsonify(ok=True, user=_user_out(u))
@@ -403,9 +408,9 @@ def api_users():
 
 @app.route("/api/users/<username>", methods=["PATCH", "DELETE"])
 def api_users_item(username):
-    """Rechte/Ablauf/Passwort eines Benutzers aendern oder den Benutzer loeschen (braucht
-    Benutzerverwaltung=Schreiben). Mindestens ein Zugang muss die Benutzerverwaltung behalten -
-    sonst sperrt man sich versehentlich selbst aus."""
+    """Rechte/Ablauf/Passwort/Dashboard-Kacheln eines Benutzers aendern oder den Benutzer
+    loeschen (braucht Benutzerverwaltung=Schreiben). Mindestens ein Zugang muss die
+    Benutzerverwaltung behalten - sonst sperrt man sich versehentlich selbst aus."""
     if request.method == "DELETE":
         try:
             users.delete(username)
@@ -419,6 +424,8 @@ def api_users_item(username):
             users.set_permissions(username, body["permissions"])
         if "expires" in body:
             users.set_expires(username, (body.get("expires") or "").strip() or None)
+        if "dashboard_tiles" in body:
+            users.set_dashboard_tiles(username, body["dashboard_tiles"])
         if body.get("password"):
             users.update_password(username, body["password"])
     except UserError as exc:
@@ -1260,29 +1267,35 @@ def api_status():
         prices = list(ctrl.prices)
     charge = store.list_charge_sessions()
     cfg = store.load_config()
+    my_tiles = getattr(g, "dashboard_tiles", None)     # zusaetzliche Einschraenkung dieses Kontos (Einstellungen -> Weitere Benutzer)
+    ui = {"chart_energy_hourly": bool(cfg.get("chart_energy_hourly", False)),
+          "chart_flow_hourly": bool(cfg.get("chart_flow_hourly", False)),
+          # Alle Dashboard-Kacheln einzeln ein-/ausblendbar (Einstellungen ->
+          # Kacheln), Default ueberall an - siehe TILE_IDS in index.html.
+          # show_tibber_card wird bei festem Tarif zusaetzlich im Admin-UI
+          # gesperrt (updateTariffFields), hier nur normal ausgelesen.
+          "show_live_values": bool(cfg.get("show_live_values", True)),
+          "show_energy_chart": bool(cfg.get("show_energy_chart", True)),
+          "show_flow_chart": bool(cfg.get("show_flow_chart", True)),
+          "show_week_overview": bool(cfg.get("show_week_overview", True)),
+          "show_month_overview": bool(cfg.get("show_month_overview", True)),
+          "show_tibber_card": bool(cfg.get("show_tibber_card", True)),
+          "show_override_card": bool(cfg.get("show_override_card", True)),
+          "show_price_plan": bool(cfg.get("show_price_plan", True)),
+          "show_charge_log": bool(cfg.get("show_charge_log", True)),
+          "show_ev_card": bool(cfg.get("show_ev_card", True)),
+          "show_shelly_card": bool(cfg.get("show_shelly_card", True)),
+          "show_weather_card": bool(cfg.get("show_weather_card", True)),
+          "show_savings_card": bool(cfg.get("show_savings_card", True)),
+          "show_plansim_card": bool(cfg.get("show_plansim_card", True)) and cfg.get("tariff_mode") != "fixed",
+          "tile_order": [k for k in (cfg.get("tile_order") or []) if isinstance(k, str)]}
+    if my_tiles is not None:
+        for k in auth.DASHBOARD_TILE_KEYS:
+            if k not in my_tiles:
+                ui[k] = False
     return jsonify({
         "status": status,
-        "ui": {"chart_energy_hourly": bool(cfg.get("chart_energy_hourly", False)),
-               "chart_flow_hourly": bool(cfg.get("chart_flow_hourly", False)),
-               # Alle Dashboard-Kacheln einzeln ein-/ausblendbar (Einstellungen ->
-               # Kacheln), Default ueberall an - siehe TILE_IDS in index.html.
-               # show_tibber_card wird bei festem Tarif zusaetzlich im Admin-UI
-               # gesperrt (updateTariffFields), hier nur normal ausgelesen.
-               "show_live_values": bool(cfg.get("show_live_values", True)),
-               "show_energy_chart": bool(cfg.get("show_energy_chart", True)),
-               "show_flow_chart": bool(cfg.get("show_flow_chart", True)),
-               "show_week_overview": bool(cfg.get("show_week_overview", True)),
-               "show_month_overview": bool(cfg.get("show_month_overview", True)),
-               "show_tibber_card": bool(cfg.get("show_tibber_card", True)),
-               "show_override_card": bool(cfg.get("show_override_card", True)),
-               "show_price_plan": bool(cfg.get("show_price_plan", True)),
-               "show_charge_log": bool(cfg.get("show_charge_log", True)),
-               "show_ev_card": bool(cfg.get("show_ev_card", True)),
-               "show_shelly_card": bool(cfg.get("show_shelly_card", True)),
-               "show_weather_card": bool(cfg.get("show_weather_card", True)),
-               "show_savings_card": bool(cfg.get("show_savings_card", True)),
-               "show_plansim_card": bool(cfg.get("show_plansim_card", True)) and cfg.get("tariff_mode") != "fixed",
-               "tile_order": [k for k in (cfg.get("tile_order") or []) if isinstance(k, str)]},
+        "ui": ui,
         "prices": prices,
         "ev_schedules": store.list_ev(),
         "charge_log": charge,
