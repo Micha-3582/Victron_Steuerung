@@ -324,6 +324,48 @@ def battery_lifetime_kwh(now: datetime | None = None, start: datetime | None = N
     return {"charge_kwh": round(charge, 1), "discharge_kwh": round(discharge, 1), "since": since.isoformat()}
 
 
+_monthly_cache: dict = {"until": 0.0, "key": None, "data": None}
+MONTHLY_TTL_S = 6 * 3600
+
+
+def monthly_energy_totals(start: datetime, end: datetime) -> dict[str, dict] | None:
+    """Solar/Verbrauch/Netzbezug/Einspeisung je Kalendermonat aus dem VRM-Verlauf (taeglich aufsummiert, in
+    <=350-Tage-Anfragen - siehe battery_lifetime_kwh, VRM liefert ueber 365 Tage sonst STILLSCHWEIGEND nichts).
+    Kein Preis bekannt -> keine Kosten, nur die Energiemengen. None ohne VRM-Zugang oder bei Fehlern."""
+    c = load_credentials()
+    if not (c.get("token") and c.get("installation_id")):
+        return None
+    cache_key = (start.date().isoformat(), end.date().isoformat())
+    if _monthly_cache["key"] == cache_key and time.time() < _monthly_cache["until"]:
+        return _monthly_cache["data"]
+    months: dict[str, dict] = {}
+    try:
+        t = start
+        while t < end:
+            t2 = min(end, t + timedelta(days=_LIFETIME_CHUNK_DAYS))
+            data = _request(c, {"type": "kwh", "interval": "days", "start": int(t.timestamp()), "end": int(t2.timestamp())})
+            rec = data.get("records") if isinstance(data, dict) else None
+            if isinstance(rec, dict):
+                for code, key in KWH_CODES.items():
+                    for ts, v in _points(rec, code):
+                        d = datetime.fromtimestamp(ts)
+                        m = months.setdefault(f"{d.year}-{d.month:02d}", {"solar": 0.0, "verbrauch": 0.0, "import": 0.0, "export": 0.0})
+                        if key in ("s_load", "s_batt", "s_grid"):
+                            m["solar"] += v
+                        if key in ("s_load", "b_load", "g_load"):
+                            m["verbrauch"] += v
+                        if key in ("g_load", "g_batt"):
+                            m["import"] += v
+                        if key in ("s_grid", "b_grid"):
+                            m["export"] += v
+            t = t2
+    except VrmError:
+        return None
+    result = months or None
+    _monthly_cache.update(until=time.time() + MONTHLY_TTL_S, key=cache_key, data=result)
+    return result
+
+
 # ---------------------------------------------------------------- VRM als Steuerquelle (mit Rueckfall auf Open-Meteo)
 MAX_AGE_H = 3          # aeltere Prognosewerte (z. B. nach laengerem VRM-Ausfall) gelten nicht mehr
 

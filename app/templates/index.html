@@ -1350,18 +1350,18 @@ function renderMonth(data) {
   rows.forEach((m, i) => {
     if (curYear !== null && m.year !== curYear) { body += yearRow(curYear, acc); acc = null; }
     if (!acc) { acc = { solar: 0, verbrauch: 0, import: 0, cost_eur: 0, cost_incl_fees_eur: 0 }; curYear = m.year; }
-    acc.solar += m.solar; acc.verbrauch += m.verbrauch; acc.import += m.import; acc.cost_eur += m.cost_eur;
-    acc.cost_incl_fees_eur += m.cost_incl_fees_eur || 0;
-    const label = i === 0 ? `${MONTH_NAMES[m.month_num - 1]} ${m.year} (läuft)`
-      : `${MONTH_NAMES[m.month_num - 1]} ${m.year}`;
+    if (!m.vrm_only) { acc.cost_eur += m.cost_eur; acc.cost_incl_fees_eur += m.cost_incl_fees_eur || 0; }
+    acc.solar += m.solar; acc.verbrauch += m.verbrauch; acc.import += m.import;
+    const label = (i === 0 ? `${MONTH_NAMES[m.month_num - 1]} ${m.year} (läuft)`
+      : `${MONTH_NAMES[m.month_num - 1]} ${m.year}`) + (m.vrm_only ? ' <span class="muted" title="Aus dem VRM-Verlauf aufgefüllt – ohne Preis-Historie aus der Zeit, daher keine Kosten">(VRM)</span>' : '');
     body += `<tr>
       <td>${label}</td>
       <td>${m.solar.toFixed(1)} kWh</td>
       <td>${m.verbrauch.toFixed(1)} kWh</td>
       <td>${m.import.toFixed(1)} kWh</td>
       <td>${m.autarky != null ? Math.round(m.autarky) + ' %' : '–'}</td>
-      ${anyCost ? `<td>${m.cost_eur.toFixed(2)} €</td>` : ''}
-      ${showFees ? `<td>${(m.cost_incl_fees_eur || 0).toFixed(2)} €</td>` : ''}
+      ${anyCost ? `<td>${m.vrm_only ? '–' : m.cost_eur.toFixed(2) + ' €'}</td>` : ''}
+      ${showFees ? `<td>${m.vrm_only ? '–' : (m.cost_incl_fees_eur || 0).toFixed(2) + ' €'}</td>` : ''}
     </tr>`;
   });
   if (acc) body += yearRow(curYear, acc);

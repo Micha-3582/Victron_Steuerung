@@ -745,6 +745,26 @@ def monthly_overview(now: datetime | None = None, limit_months: int = 120) -> di
         cur["import"] += corr["import"]
         cur["export"] += corr["export"]
     months[cur_key] = cur
+
+    # Fehlende Monate DIESES Jahres (vor dem ersten lokal bekannten Monat) aus dem VRM auffuellen - ohne
+    # Preis-Historie aus der Zeit gibt es dafuer keine Kosten, nur die Energiemengen. Import-Fehler sind
+    # unkritisch: dann bleiben diese Monate einfach in der Uebersicht aus, wie bisher.
+    earliest_local = min(months.keys(), default=cur_key)
+    year_start_key = f"{now.year}-01"
+    if earliest_local > year_start_key:
+        try:
+            import vrm
+            vrm_months = vrm.monthly_energy_totals(datetime(now.year, 1, 1), datetime.fromisoformat(earliest_local + "-01"))
+        except Exception as e:                               # noqa: BLE001
+            log.warning("Monatsuebersicht: Auffuellen aus dem VRM fehlgeschlagen: %s", e)
+            vrm_months = None
+        for key, m in (vrm_months or {}).items():
+            if key < year_start_key or key >= earliest_local:
+                continue
+            months[key] = {"solar": m["solar"], "verbrauch": m["verbrauch"], "import": m["import"],
+                           "export": m["export"], "cost_ct": 0.0, "batt_charge": 0.0, "batt_discharge": 0.0,
+                           "vrm_only": True}
+
     rows = []
     for key in sorted(months.keys(), reverse=True)[:limit_months]:
         m = months[key]
@@ -759,6 +779,7 @@ def monthly_overview(now: datetime | None = None, limit_months: int = 120) -> di
             "cost_eur": round(m["cost_ct"] / 100.0, 2), "autarky": autarky,
             "cost_incl_fees_eur": cost_incl_fees_eur(load_config(), m["cost_ct"] / 100.0, days),
             "batt_charge_kwh": round(m.get("batt_charge", 0.0), 2), "batt_discharge_kwh": round(m.get("batt_discharge", 0.0), 2),
+            "vrm_only": bool(m.get("vrm_only")),
         })
     return {"months": rows}
 
