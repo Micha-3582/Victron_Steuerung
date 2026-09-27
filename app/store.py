@@ -774,6 +774,22 @@ def battery_cycle_stats(now: datetime | None = None) -> dict:
     now = now or datetime.now()
     cfg = load_config()
     cap = float((cfg or {}).get("battery_usable_kwh") or 0.0)
+    expected_cycles = float(cfg.get("battery_expected_cycles") or 0.0)
+
+    def project(cycles, since_date):
+        """Bei wie vielen Zyklen pro Jahr (aus dem bisherigen Tempo) reicht die vom Hersteller angegebene
+        Zyklenzahl noch wie viele Jahre - grobe Hochrechnung, geht von gleichbleibender Nutzung aus."""
+        if cycles is None or not since_date or not expected_cycles:
+            return None, None
+        try:
+            days = max(1, (now.date() - datetime.fromisoformat(since_date).date()).days)
+        except ValueError:
+            return None, None
+        per_year = cycles / days * 365.25
+        if per_year <= 0:
+            return round(per_year, 1), None
+        return round(per_year, 1), round(max(0.0, expected_cycles - cycles) / per_year, 1)
+
     install_date = cfg.get("battery_install_date")
     start = None
     if install_date:
@@ -788,16 +804,21 @@ def battery_cycle_stats(now: datetime | None = None) -> dict:
         log.warning("Akku-Lebenslauf vom VRM nicht abrufbar, nutze eigene Historie: %s", e)
     if lt:
         cycles = round((lt["charge_kwh"] + lt["discharge_kwh"]) / 2.0 / cap, 1) if cap > 0 else None
+        per_year, years_left = project(cycles, lt["since"])
         return {"charge_kwh": lt["charge_kwh"], "discharge_kwh": lt["discharge_kwh"], "battery_usable_kwh": cap,
-                "equivalent_full_cycles": cycles, "since_month": lt["since"][:7], "since_date": lt["since"], "source": "vrm"}
+                "equivalent_full_cycles": cycles, "since_month": lt["since"][:7], "since_date": lt["since"], "source": "vrm",
+                "battery_expected_cycles": expected_cycles or None, "cycles_per_year": per_year, "years_remaining": years_left}
     mo = monthly_overview(now, limit_months=10_000)
     charge = sum(m.get("batt_charge_kwh", 0.0) for m in mo["months"])
     discharge = sum(m.get("batt_discharge_kwh", 0.0) for m in mo["months"])
     cycles = round((charge + discharge) / 2.0 / cap, 1) if cap > 0 else None
     first_month = min((m["month"] for m in mo["months"]), default=None)
+    since_date = (first_month + "-01") if first_month else None
+    per_year, years_left = project(cycles, since_date)
     return {"charge_kwh": round(charge, 1), "discharge_kwh": round(discharge, 1),
             "battery_usable_kwh": cap, "equivalent_full_cycles": cycles, "since_month": first_month,
-            "since_date": (first_month + "-01") if first_month else None, "source": "lokal"}
+            "since_date": since_date, "source": "lokal",
+            "battery_expected_cycles": expected_cycles or None, "cycles_per_year": per_year, "years_remaining": years_left}
 
 
 def energy_grid_today(now: datetime | None = None) -> dict:

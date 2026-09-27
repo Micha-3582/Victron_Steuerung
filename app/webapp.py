@@ -963,8 +963,17 @@ def api_alarms():
 
 @app.route("/api/battery-cycles")
 def api_battery_cycles():
-    """Lebenslaufende Akku-Nutzung: Durchsatz und daraus die aequivalenten Vollzyklen (siehe store.battery_cycle_stats)."""
-    return jsonify(store.battery_cycle_stats())
+    """Lebenslaufende Akku-Nutzung: Durchsatz und daraus die aequivalenten Vollzyklen (siehe store.battery_cycle_stats),
+    plus live der Alterungszustand (SOH) direkt vom BMS, wie am Cerbo unter Batterie -> Alterungszustand."""
+    data = store.battery_cycle_stats()
+    cfg = store.load_config()
+    if store.is_configured(cfg):
+        try:
+            data["soh_pct"] = Cerbo(cfg["cerbo_host"], cfg.get("cerbo_port", 502)).read_soh()
+        except Exception as e:                               # noqa: BLE001
+            log.warning("Alterungszustand (SOH) nicht lesbar: %s", e)
+            data["soh_pct"] = None
+    return jsonify(data)
 
 
 def _next15(iso):
@@ -1291,7 +1300,8 @@ def api_config():
                "has_pv_inverter", "has_mppt", "tariff_mode",
                "fixed_price_ct", "pv_inverters",
                "contract_fee_month_eur", "grid_fee_day_eur", "meter_fee_day_eur",
-               "section14a_credit_day_eur", "vat_percent", "battery_install_date"] + list(Params().__dict__.keys())
+               "section14a_credit_day_eur", "vat_percent", "battery_install_date",
+               "battery_expected_cycles"] + list(Params().__dict__.keys())
     allowed = allowed + ["surplus_" + k for k in surplus.DEFAULTS]     # einstellbare Automatik-Werte
     if "scan_networks" in body:
         try:

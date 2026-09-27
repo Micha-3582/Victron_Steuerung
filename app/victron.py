@@ -14,6 +14,7 @@ _GRID_COUNTER_WARNING_INTERVAL = 600   # nur alle 10 Min erneut loggen (Live-/Sa
 
 # Register (verifiziert am Cerbo 192.168.2.241, 22.07.2026)
 SOC_BMS_UNIT, SOC_BMS_REG = 225, 266      # Wert = %*10  -> /10
+SOH_REG = 304                              # Alterungszustand (State of Health), Unit wie SOC_BMS_UNIT, Wert = %*10
 SOC_SYS_UNIT, SOC_SYS_REG = 100, 843      # Wert = %     (Gegencheck)
 ESS_MODE_UNIT, ESS_MODE_REG = 100, 2900   # Holding: 9=laden, 10=idle
 GRID_SP_UNIT, GRID_SP_REG = 100, 2700     # Holding int16: ESS 'Sollwert Netz' (W); negativ = leicht einspeisen
@@ -183,6 +184,19 @@ class Cerbo:
             if rr.isError():
                 raise IOError(f"ESS-Mode nicht lesbar: {rr}")
             return rr.registers[0]
+        finally:
+            c.close()
+
+    def read_soh(self):
+        """Alterungszustand der Batterie (State of Health, %) - dieselbe Anzeige wie am Cerbo unter
+        Batterie -> Alterungszustand. Nicht von jedem BMS unterstuetzt; dann None statt Fehler."""
+        c = self._client()
+        try:
+            rr = _call(c.read_input_registers, SOH_REG, SOC_BMS_UNIT)
+            if rr.isError():
+                return None
+            val = rr.registers[0]
+            return None if val in (0, 65535) else val / 10.0     # 0/0xFFFF = 'nicht unterstuetzt' bei manchen BMS
         finally:
             c.close()
 

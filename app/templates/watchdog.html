@@ -90,12 +90,20 @@ async function loadCycles() {
     'Hinweis: Ohne VRM-Zugang zählt nur, was diese App selbst seit ihrer Einführung gemessen hat (nicht die ganze Lebenszeit des Akkus).';
   const tile = (t, big, sub) => `<div class="systile"><div class="systile-t">${t}</div><div class="systile-v">${big}</div><div class="systile-s">${sub}</div></div>`;
   const since = c.since_date ? `${c.since_date.slice(8, 10)}.${c.since_date.slice(5, 7)}.${c.since_date.slice(0, 4)}` : '–';
-  $('cyc-body').style.display = '';
-  $('cyc-body').innerHTML =
+  let tiles =
     tile('Äquivalente Vollzyklen', c.equivalent_full_cycles, `seit ${since}${c.source === 'vrm' ? ' (VRM-Verlauf)' : ''}`) +
     tile('Geladen', c.charge_kwh.toFixed(0) + ' kWh', 'Solar + Netz → Akku') +
     tile('Entladen', c.discharge_kwh.toFixed(0) + ' kWh', 'Akku → Verbrauch + Netz') +
     tile('Nutzbare Kapazität', c.battery_usable_kwh + ' kWh', 'aus den Einstellungen');
+  if (c.soh_pct != null) {
+    tiles += tile('Alterungszustand (SOH)', c.soh_pct.toFixed(0) + ' %', 'direkt vom BMS, wie am Cerbo');
+  }
+  if (c.battery_expected_cycles && c.years_remaining != null) {
+    tiles += tile('Reicht noch rechnerisch', c.years_remaining + ' Jahre',
+      `bei ${c.cycles_per_year} Zyklen/Jahr bis ${c.battery_expected_cycles} Zyklen (Herstellerangabe)`);
+  }
+  $('cyc-body').style.display = '';
+  $('cyc-body').innerHTML = tiles;
 }
 loadCycles();
 </script>

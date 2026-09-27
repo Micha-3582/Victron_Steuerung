@@ -269,6 +269,9 @@
     <div><label>Akku in Betrieb seit
         <span class="qhelp" role="button" tabindex="0" data-help="Datum der Inbetriebnahme des Akkus. Wird für die Vollzyklen-Berechnung auf der Batterie-Watchdog-Seite genutzt, um die komplette Nutzung aus dem VRM-Verlauf zu holen (nicht nur, was diese App selbst seit ihrer Einführung gemessen hat). Optional - ohne Angabe zählt sie erst ab dem ersten Tag, den diese App kennt.">?</span>
       </label><input id="battery_install_date" type="date"></div>
+    <div><label>Erwartete Zyklenzahl
+        <span class="qhelp" role="button" tabindex="0" data-help="Vom Hersteller angegebene Lebensdauer in Vollzyklen (bei LiFePO4/Pylontech oft 6000 bei 80 % Restkapazität, siehe Datenblatt). Damit rechnet die Batterie-Watchdog-Seite hoch, wie viele Jahre der Akku bei bisherigem Tempo noch reicht. 0 = keine Hochrechnung.">?</span>
+      </label><input id="battery_expected_cycles" type="number" min="0" step="100" placeholder="z.B. 6000"></div>
     <div><label>Tagesverbrauch (kWh) <span class="qhelp" role="button" tabindex="0" data-help="Durchschnittlicher Stromverbrauch deines Hauses pro Tag in kWh. Damit rechnet die Steuerung, wie viel Energie bis zum nächsten Mittag gebraucht wird. Einen guten Wert liefert der Tagesverlauf im Dashboard oder der Betriebsbericht.">?</span></label><input id="daily_usage_kwh" type="number" step="0.1"></div>
     <div><label>Ladestrom beim Netzladen (A)
         <span class="qhelp" role="button" tabindex="0" data-help="VictronConnect/VEConfigure → Ladegerät → Ladestrom. Direkt ablesen, keine Umrechnung nötig.">?</span>
@@ -605,7 +608,8 @@ const PARAM_KEYS = ['battery_usable_kwh','daily_usage_kwh','pv_reserve_kwh',
   'evening_peak_start','evening_peak_end','min_peak_soc','peak_avoid_price',
   'evening_comfort_soc','valley_min_saving_ct',
   'night_safety_soc','target_safe_soc','hysterese_soc',
-  'contract_fee_month_eur','grid_fee_day_eur','meter_fee_day_eur','section14a_credit_day_eur','vat_percent'];
+  'contract_fee_month_eur','grid_fee_day_eur','meter_fee_day_eur','section14a_credit_day_eur','vat_percent',
+  'battery_expected_cycles'];
 
 // Muss exakt zu TILE_IDS in index.html passen (Schluessel = Config-Feld/Checkbox-ID).
 // show_tibber_card bekommt zusaetzlich eine Sperre bei festem Tarif (siehe
