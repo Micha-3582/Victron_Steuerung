@@ -36,6 +36,10 @@ ALARM_REGS = {                            # alle rein lesend (Input-Register), 0
     "battery_high_temp": (SOC_BMS_UNIT, 274),
     "battery_cell_imbalance": (SOC_BMS_UNIT, 322),
     "battery_internal_failure": (SOC_BMS_UNIT, 323),
+    # Nur zur einmaligen Gegenpruefung der Unit-ID 227 (siehe read_alarms): erwartbare Werte kennt man vom
+    # Dashboard (AC-Ausgang ~230 V, Batteriespannung ~50 V) - passen sie, ist die Unit-ID richtig zugeordnet.
+    "_check_vebus_ac_out_v": (VEBUS_UNIT, 15),      # /10 -> V
+    "_check_vebus_batt_v": (VEBUS_UNIT, 26),        # /100 -> V
 }
 
 
