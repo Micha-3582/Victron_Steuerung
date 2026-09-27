@@ -289,6 +289,29 @@
 
 <div id="dynamic-pricing-cards">
 <div class="card">
+  <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-4 12.7V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.3A7 7 0 0 0 12 2z"/><line x1="9" y1="22" x2="15" y2="22"/></svg>Intelligente Planung (Beta)</h2>
+  <div class="muted" style="margin-bottom:12px">Rechnet bei jedem Durchlauf frisch – mit dem gerade gemessenen Akkustand und der aktuellsten VRM-Prognose für
+    Sonne und Verbrauch –, wann Netzladen über den ganzen sichtbaren Zeitraum (heute und, sobald bekannt, morgen) am günstigsten ist,
+    und lädt danach. Ersetzt dabei Peak-Schutz, SOC-Strategie und den Günstig-Vorkauf unten, die bei aktivierter Planung nicht mehr
+    greifen (Ladelimit, PV-Reserve und der minimale Akkustand am Cerbo gelten weiter). Bei manuellem Override, Ladeterminen und
+    festem Tarif ist sie ohne Wirkung.</div>
+  <div style="display:flex;align-items:center;gap:14px">
+    <label class="switch" style="margin:0"><input type="checkbox" id="smart_planner_enabled"><span class="slider"></span></label>
+    <div><b>Intelligente Planung aktiv</b><div class="muted">Aus (Standard) = die Strategien unten entscheiden wie bisher.</div></div>
+  </div>
+  <details class="help" style="margin-top:12px">
+    <summary>Was ist daran anders als die Strategien unten?</summary>
+    <div class="help-body">
+      Die Strategien unten reagieren stufenweise auf feste Schwellen (Uhrzeiten, Mindest-SOC, Preisgrenzen) und schauen
+      dabei nur bis zur jeweils nächsten Stufe voraus. Die Intelligente Planung kennt keine Stufen: Sie plant in einem
+      Rechenschritt über den ganzen bekannten Zeitraum, wann Laden sich lohnt, und zieht die erwartete Sonne stundengenau
+      mit ein. Ändert sich die Prognose oder weicht die Wirklichkeit ab, rechnet sie beim nächsten Durchlauf einfach neu –
+      ganz ohne Schwellenwerte, die man von Hand nachjustieren müsste.
+    </div>
+  </details>
+</div>
+
+<div class="card">
   <h2><svg class="h2i" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.5 8 8 11 4.5-3 8-6 8-11V5l-8-3z"/></svg>Peak-Schutz &amp; Preislimit</h2>
   <details class="help">
     <summary>Was regelt der Peak-Schutz?</summary>
@@ -646,6 +669,7 @@ async function init() {
   document.getElementById('has_pv_inverter').checked = cfg.has_pv_inverter !== false;
   document.getElementById('has_mppt').checked = cfg.has_mppt !== false;
   document.getElementById('pv_auto_calibration').checked = !!cfg.pv_auto_calibration;
+  document.getElementById('smart_planner_enabled').checked = !!cfg.smart_planner_enabled;
   document.getElementById(cfg.tariff_mode === 'fixed' ? 'tariff_fixed' : 'tariff_tibber').checked = true;
   document.getElementById('tibber_token').value = cfg.tibber_token || '';
   document.getElementById('fixed_price_ct').value = cfg.fixed_price_ct ?? '';
@@ -712,6 +736,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     has_pv_inverter: document.getElementById('has_pv_inverter').checked,
     has_mppt: document.getElementById('has_mppt').checked,
     pv_auto_calibration: document.getElementById('pv_auto_calibration').checked,
+    smart_planner_enabled: document.getElementById('smart_planner_enabled').checked,
     tariff_mode: document.getElementById('tariff_fixed').checked ? 'fixed' : 'tibber',
     tibber_token: document.getElementById('tibber_token').value.trim(),
     fixed_price_ct: numDE(document.getElementById('fixed_price_ct').value),

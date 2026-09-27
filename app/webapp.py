@@ -40,7 +40,7 @@ import vrm_import
 import weather
 from auth import UserError, UserStore, new_secret_key
 from datasources import build_fixed_price_entries, fetch_tibber_prices
-from logic import ESS_CHARGE, ESS_IDLE, Params, Slot, decide
+from logic import ESS_CHARGE, ESS_IDLE, Params, Slot, decide, merge_into_windows
 from logic import _parse_iso as logic_parse_iso
 from victron import Cerbo
 
@@ -358,6 +358,20 @@ class Controller:
                    manual_override=forced, force_reason=reason,
                    params=params)
         store.save_state(state)
+        # Intelligente Planung (Beta, Standard aus): ersetzt die stufenweisen Schwellenwerte oben durch eine
+        # jeden Tick neu berechnete, kostenoptimale Planung. Greift NICHT bei manuellem Override/Ladetermin, festem
+        # Tarif, fehlenden Preisen oder wenn die harte Ladesperre (Ladelimit) bereits gezogen hat - diese
+        # Sicherheitsfaelle bleiben unveraendert bei der bewaehrten Logik oben.
+        if (cfg.get("smart_planner_enabled") and not forced and cfg.get("tariff_mode") != "fixed"
+                and d.reason != "Keine Preisdaten" and "Ladelimit" not in d.strategy):
+            try:
+                sm = self._smart_decision(now, soc, prices, vrm_data, params)
+                if sm is not None:
+                    charge_now, plan_slots, txt = sm
+                    d.allow_now, d.ess_mode, d.strategy = charge_now, (ESS_CHARGE if charge_now else ESS_IDLE), txt
+                    d.plan, d.plan_windows = plan_slots, (merge_into_windows(plan_slots) if plan_slots else "")
+            except Exception as e:                           # noqa: BLE001
+                log.warning("Intelligente Planung fehlgeschlagen, Rückfall auf Standard-Logik: %s", e)
         store.log_charge_state(d.ess_mode == ESS_CHARGE, d.strategy, now)
         try:                                            # Simulation laeuft nur mit - sie steuert nichts und darf nie stoeren
             if cfg.get("tariff_mode") == "fixed":
@@ -471,6 +485,44 @@ class Controller:
             day = now.date() if h.get("day") == "today" else now.date() + timedelta(days=1)
             out[(day.isoformat(), int(h["hour"]))] = float(h["wh"])
         return out
+
+    def _smart_decision(self, now, soc, prices, vrm_data, params):
+        """Intelligente Planung (Beta): baut JEDEN Tick frisch aus der aktuellen VRM-Prognose (Sonne + Verbrauch)
+        und den Tibber-Preisen einen kostenoptimalen Ladeplan (gleiches Verfahren wie die Ladeplan-Simulation,
+        siehe planner.py) und sagt, ob JETZT geladen werden soll. Kein Schwellenwert-Geruest (Peak-Fenster,
+        Mindest-SOC-Stufen, "guenstig genug?") mehr - jeder Tick denkt mit dem echten, gerade gemessenen Akkustand
+        und der jeweils aktuellsten Prognose neu; weicht die Wirklichkeit von der Prognose ab (Wolken, falsche
+        Schaetzung), korrigiert sich das von selbst beim naechsten Tick.
+        Rueckgabe: (jetzt_laden, geplante_Slots, Text) oder None, wenn die Datenlage nicht reicht (Aufrufer
+        faellt dann auf die Standard-Logik zurueck)."""
+        if not vrm_data or not vrm_data.get("hours"):
+            return None
+        solar = self._hour_map(vrm_data["hours"], now)
+        if self.pv_cal != 1.0:                               # gleiche Korrektur wie in der Steuerung (nur morgen)
+            today_iso = now.date().isoformat()
+            solar = {k: (v if k[0] == today_iso else v * self.pv_cal) for k, v in solar.items()}
+        cons = self._hour_map((vrm_data.get("cons") or {}).get("hours"), now)
+        now_q = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
+        seen, slots = set(), []
+        for item in prices:
+            start = logic_parse_iso(item["startsAt"])
+            if start >= now_q and start not in seen:
+                seen.add(start)
+                slots.append(Slot(name="", price=item["total"] * 100, start=start))
+        slots.sort(key=lambda x: x.start)
+        if not slots or slots[0].start != now_q:
+            return None
+        res = planner.run(now, soc, params, slots, solar, cons or None, set(), floor_soc=params.soc_floor_pct)
+        if not res or not res.get("times"):
+            return None
+        charge_kwh = res["sim"]["charge_kwh"]
+        charge_now = charge_kwh[0] > 1e-6
+        plan_slots = [Slot(name="", price=res["prices"][i], start=logic_parse_iso(t))
+                      for i, t in enumerate(res["times"]) if charge_kwh[i] > 1e-6]
+        windows_txt = merge_into_windows(plan_slots) if plan_slots else ""
+        txt = (f"🧠 Intelligente Planung – {'lädt jetzt' if charge_now else 'wartet'} "
+               f"({res['prices'][0]:.1f} ct" + (f", geplant: {windows_txt}" if windows_txt else "") + ")")
+        return charge_now, plan_slots, txt
 
     def _run_plansim(self, now, soc, prices, d, vrm_data, params, manual=False):
         if not vrm_data or not vrm_data.get("hours"):
@@ -1200,7 +1252,7 @@ def api_config():
                "show_live_values", "show_energy_chart", "show_flow_chart",
                "show_week_overview", "show_month_overview", "show_tibber_card",
                "show_override_card", "show_price_plan", "show_charge_log",
-               "show_ev_card", "show_shelly_card", "show_weather_card", "show_plansim_card", "show_savings_card", "pv_auto_calibration", "surplus_enabled", "surplus_dry_run", "rules_enabled", "rules_dry_run", "rules_manual_hold_min", "rules_failsafe_min",
+               "show_ev_card", "show_shelly_card", "show_weather_card", "show_plansim_card", "show_savings_card", "pv_auto_calibration", "smart_planner_enabled", "surplus_enabled", "surplus_dry_run", "rules_enabled", "rules_dry_run", "rules_manual_hold_min", "rules_failsafe_min",
                "surplus_min_soc", "tile_order", "scan_networks",
                "has_pv_inverter", "has_mppt", "tariff_mode",
                "fixed_price_ct", "pv_inverters"] + list(Params().__dict__.keys())
