@@ -721,6 +721,7 @@ def monthly_overview(now: datetime | None = None, limit_months: int = 120) -> di
     limit_months=120 (10 Jahre) als grosszuegige Obergrenze - das Archiv selbst wird
     nie automatisch beschnitten."""
     now = now or datetime.now()
+    cfg = load_config()
     archive_finished_days(now)   # sicherstellen, dass nichts Vergangenes fehlt
     data = _load_monthly()
     months = {k: dict(v) for k, v in data.get("months", {}).items()}
@@ -758,12 +759,16 @@ def monthly_overview(now: datetime | None = None, limit_months: int = 120) -> di
         except Exception as e:                               # noqa: BLE001
             log.warning("Monatsuebersicht: Auffuellen aus dem VRM fehlgeschlagen: %s", e)
             vrm_months = None
+        # Bei festem Tarif ist der Preis kein Geheimnis aus der Vergangenheit - anders als bei Tibber lassen
+        # sich die Kosten dieser nachgeholten Monate ganz normal ausrechnen (Netzbezug x fester Preis).
+        fixed_price_ct = float(cfg.get("fixed_price_ct") or 0.0) if cfg.get("tariff_mode") == "fixed" else 0.0
         for key, m in (vrm_months or {}).items():
             if key < year_start_key or key >= earliest_local:
                 continue
+            cost_ct = m["import"] * fixed_price_ct if fixed_price_ct else 0.0
             months[key] = {"solar": m["solar"], "verbrauch": m["verbrauch"], "import": m["import"],
-                           "export": m["export"], "cost_ct": 0.0, "batt_charge": 0.0, "batt_discharge": 0.0,
-                           "vrm_only": True}
+                           "export": m["export"], "cost_ct": cost_ct, "batt_charge": 0.0, "batt_discharge": 0.0,
+                           "vrm_only": True, "cost_known": bool(fixed_price_ct)}
 
     rows = []
     for key in sorted(months.keys(), reverse=True)[:limit_months]:
@@ -777,9 +782,9 @@ def monthly_overview(now: datetime | None = None, limit_months: int = 120) -> di
             "solar": round(m["solar"], 2), "verbrauch": round(m["verbrauch"], 2),
             "import": round(m["import"], 2), "export": round(m["export"], 2),
             "cost_eur": round(m["cost_ct"] / 100.0, 2), "autarky": autarky,
-            "cost_incl_fees_eur": cost_incl_fees_eur(load_config(), m["cost_ct"] / 100.0, days),
+            "cost_incl_fees_eur": cost_incl_fees_eur(cfg, m["cost_ct"] / 100.0, days),
             "batt_charge_kwh": round(m.get("batt_charge", 0.0), 2), "batt_discharge_kwh": round(m.get("batt_discharge", 0.0), 2),
-            "vrm_only": bool(m.get("vrm_only")),
+            "vrm_only": bool(m.get("vrm_only")), "cost_known": m.get("cost_known", not m.get("vrm_only")),
         })
     return {"months": rows}
 
