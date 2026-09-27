@@ -42,6 +42,7 @@ from auth import UserError, UserStore, new_secret_key
 from datasources import build_fixed_price_entries, fetch_tibber_prices
 from logic import ESS_CHARGE, ESS_IDLE, Params, Slot, decide, merge_into_windows
 from logic import _parse_iso as logic_parse_iso
+import victron
 from victron import Cerbo
 
 logging.basicConfig(level=logging.INFO,
@@ -352,6 +353,16 @@ class Controller:
         except Exception as e:                           # noqa: BLE001
             log.warning("Minimaler SOC nicht lesbar (letzter Wert %s %% bleibt): %s", self.soc_floor, e)
         params.soc_floor_pct = float(self.soc_floor or 0.0)
+        try:                                             # Alarme von Multiplus/Quattro (VE.Bus) und Batterie (BMS)
+            alarms = cerbo.read_alarms()
+            for key, val in alarms["values"].items():
+                if key.startswith("_"):
+                    continue
+                label = victron.ALARM_LABELS.get(key, key)
+                notify.event("alarm_" + key, bool(val), f"⚠️ {label}", f"✅ {label}: wieder in Ordnung.",
+                             flag="alarms", cfg=cfg)
+        except Exception as e:                           # noqa: BLE001
+            log.warning("Alarme nicht lesbar: %s", e)
         state = store.load_state()
         d = decide(soc=soc, price_entries=prices, solar_today_raw=solar_today_for_control,
                    solar_tom_raw=solar_tom_ctl, state=state, now=now,

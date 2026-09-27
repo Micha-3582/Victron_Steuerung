@@ -19,10 +19,9 @@ ESS_MODE_UNIT, ESS_MODE_REG = 100, 2900   # Holding: 9=laden, 10=idle
 GRID_SP_UNIT, GRID_SP_REG = 100, 2700     # Holding int16: ESS 'Sollwert Netz' (W); negativ = leicht einspeisen
 MIN_SOC_UNIT, MIN_SOC_REG = 100, 2901     # Holding: ESS 'Minimaler SOC (es sei denn, Netz faellt aus)', Wert = %*10
 
-# Alarme (aus der offiziellen Victron Modbus-TCP-Registerliste, github.com/victronenergy/dbus_modbustcp -
-# NOCH NICHT am Cerbo verifiziert wie die Register oben, insbesondere die Unit-ID des Multiplus/VE.Bus kann
-# je nach Anlage/Venus-Version abweichen ("seit Venus 2.60 dynamisch vergeben") - vor Nutzung gegenpruefen.
-VEBUS_UNIT = 227                          # Cerbo GX VE.Bus-Port (Multiplus/Quattro) - Vorbelegung, ggf. anpassen
+# Alarme (aus der offiziellen Victron Modbus-TCP-Registerliste, github.com/victronenergy/dbus_modbustcp;
+# Unit 227 am Cerbo 192.168.2.241 verifiziert 27.09.2026 ueber AC-Ausgang/Batteriespannung - siehe Git-Historie)
+VEBUS_UNIT = 227                          # Cerbo GX VE.Bus-Port (Multiplus/Quattro)
 ALARM_REGS = {                            # alle rein lesend (Input-Register), 0=Ok, 2=Alarm (teils 1=Warnung)
     "vebus_error": (VEBUS_UNIT, 32),          # 0=kein Fehler, sonst VE.Bus-Fehlercode 1-26
     "vebus_high_temp": (VEBUS_UNIT, 34),
@@ -36,10 +35,20 @@ ALARM_REGS = {                            # alle rein lesend (Input-Register), 0
     "battery_high_temp": (SOC_BMS_UNIT, 274),
     "battery_cell_imbalance": (SOC_BMS_UNIT, 322),
     "battery_internal_failure": (SOC_BMS_UNIT, 323),
-    # Nur zur einmaligen Gegenpruefung der Unit-ID 227 (siehe read_alarms): erwartbare Werte kennt man vom
-    # Dashboard (AC-Ausgang ~230 V, Batteriespannung ~50 V) - passen sie, ist die Unit-ID richtig zugeordnet.
-    "_check_vebus_ac_out_v": (VEBUS_UNIT, 15),      # /10 -> V
-    "_check_vebus_batt_v": (VEBUS_UNIT, 26),        # /100 -> V
+}
+ALARM_LABELS = {                          # Beschriftung fuer Telegram/Log, wenn der Wert != 0 ist (0=Ok)
+    "vebus_error": "Multiplus/Quattro: VE.Bus-Fehler",
+    "vebus_high_temp": "Multiplus/Quattro: Übertemperatur",
+    "vebus_low_battery": "Multiplus/Quattro: Batterie zu niedrig",
+    "vebus_overload": "Multiplus/Quattro: Überlast",
+    "vebus_grid_lost": "Multiplus/Quattro: Netz weg",
+    "battery_low_voltage": "Batterie: Spannung zu niedrig",
+    "battery_high_voltage": "Batterie: Spannung zu hoch",
+    "battery_low_soc": "Batterie: Ladestand zu niedrig (BMS-Alarm)",
+    "battery_low_temp": "Batterie: Temperatur zu niedrig",
+    "battery_high_temp": "Batterie: Temperatur zu hoch",
+    "battery_cell_imbalance": "Batterie: Zellen-Ungleichgewicht",
+    "battery_internal_failure": "Batterie: interner Fehler",
 }
 
 

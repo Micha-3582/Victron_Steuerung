@@ -33,6 +33,7 @@ EVENTS = {
     "tibber": ("Tibber-Preise fehlen (Notlauf mit gespeicherten Preisen / Netzladen gestoppt)", True),
     "vrm": ("VRM-Prognose nicht verfügbar", True),
     "watchdog": ("Batterie-Watchdog schlägt an (Batterie reagiert nicht)", True),
+    "alarms": ("Multiplus/Batterie meldet einen Alarm (Übertemperatur, Überlast, Zellen-Ungleichgewicht, ...)", True),
     "low_soc": ("Akkustand niedrig", True),
     "surplus": ("Überschuss-Automatik schaltet ein Gerät (auch im Trockenlauf)", False),
     "rules": ("Regeln schalten ein Gerät (auch im Trockenlauf)", False),
