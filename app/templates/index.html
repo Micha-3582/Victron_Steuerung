@@ -1325,8 +1325,9 @@ function renderMonth(data) {
   const rows = (data && data.months) || [];
   if (!rows.length) { t.innerHTML = ''; return; }
   const anyCost = data.tariff_mode !== 'fixed' || rows.some(m => m.cost_eur > 0);
+  const showFees = anyCost && data.has_contract_fees;
   const head = `<tr class="thead"><td>Monat</td><td>Solar</td><td>Verbrauch</td>` +
-    `<td>Netzbezug</td><td>Autarkie</td>${anyCost ? '<td>Kosten</td>' : ''}</tr>`;
+    `<td>Netzbezug</td><td>Autarkie</td>${anyCost ? '<td>Kosten</td>' : ''}${showFees ? '<td>Gesamt inkl. Gebühren</td>' : ''}</tr>`;
   // Zeilen sind neuester Monat zuerst - je Jahr eine "Summe <Jahr>"-Zwischensumme
   // einfuegen, sobald das Jahr wechselt (bzw. am Ende fuer das letzte/aelteste Jahr).
   const yearRow = (year, acc) => {
@@ -1339,13 +1340,15 @@ function renderMonth(data) {
       <td>${acc.import.toFixed(1)} kWh</td>
       <td>${autarky != null ? autarky + ' %' : '–'}</td>
       ${anyCost ? `<td>${acc.cost_eur.toFixed(2)} €</td>` : ''}
+      ${showFees ? `<td>${acc.cost_incl_fees_eur.toFixed(2)} €</td>` : ''}
     </tr>`;
   };
   let body = '', curYear = null, acc = null;
   rows.forEach((m, i) => {
     if (curYear !== null && m.year !== curYear) { body += yearRow(curYear, acc); acc = null; }
-    if (!acc) { acc = { solar: 0, verbrauch: 0, import: 0, cost_eur: 0 }; curYear = m.year; }
+    if (!acc) { acc = { solar: 0, verbrauch: 0, import: 0, cost_eur: 0, cost_incl_fees_eur: 0 }; curYear = m.year; }
     acc.solar += m.solar; acc.verbrauch += m.verbrauch; acc.import += m.import; acc.cost_eur += m.cost_eur;
+    acc.cost_incl_fees_eur += m.cost_incl_fees_eur || 0;
     const label = i === 0 ? `${MONTH_NAMES[m.month_num - 1]} ${m.year} (läuft)`
       : `${MONTH_NAMES[m.month_num - 1]} ${m.year}`;
     body += `<tr>
@@ -1355,6 +1358,7 @@ function renderMonth(data) {
       <td>${m.import.toFixed(1)} kWh</td>
       <td>${m.autarky != null ? Math.round(m.autarky) + ' %' : '–'}</td>
       ${anyCost ? `<td>${m.cost_eur.toFixed(2)} €</td>` : ''}
+      ${showFees ? `<td>${(m.cost_incl_fees_eur || 0).toFixed(2)} €</td>` : ''}
     </tr>`;
   });
   if (acc) body += yearRow(curYear, acc);

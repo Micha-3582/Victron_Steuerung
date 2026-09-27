@@ -194,6 +194,20 @@
   </div>
 </div>
 
+<div class="card">
+  <h2><svg class="h2i" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>Vertragskosten (für „inkl. Gebühren"-Anzeige)</h2>
+  <div class="muted" style="margin-bottom:10px">Optional: die festen Posten von deiner Stromrechnung, damit Telegram-Tagesbilanz und Monatsübersicht zusätzlich
+    eine geschätzte <b>Gesamtsumme inkl. Gebühren</b> zeigen, vergleichbar mit der echten Rechnung. Wirkt sich auf nichts anderes aus
+    (Netzkosten-Spalten, Ersparnis und die Ladesteuerung bleiben wie bisher) – leer/0 lassen, wenn nicht gebraucht.</div>
+  <div class="grid2">
+    <div><label>Grundgebühr (€/Monat) <span class="qhelp" role="button" tabindex="0" data-help="Feste monatliche Gebühr laut Vertrag (bei Tibber z.B. „Tibber Gebühr“). Wird gleichmäßig auf die Tage des Monats umgelegt.">?</span></label><input id="contract_fee_month_eur" type="number" step="0.01" min="0" placeholder="z.B. 5,03"></div>
+    <div><label>Netznutzungsgebühr (€/Tag) <span class="qhelp" role="button" tabindex="0" data-help="Tägliche Netznutzungsgebühr laut Vertrag/Rechnung, z.B. 0,22 €/Tag.">?</span></label><input id="grid_fee_day_eur" type="number" step="0.001" min="0" placeholder="z.B. 0,22"></div>
+    <div><label>Messstellengebühr (€/Tag) <span class="qhelp" role="button" tabindex="0" data-help="Tägliche Gebühr für den Zähler laut Vertrag/Rechnung, z.B. 0,0921 €/Tag.">?</span></label><input id="meter_fee_day_eur" type="number" step="0.0001" min="0" placeholder="z.B. 0,0921"></div>
+    <div><label>Reduzierung §14a EnWG (€/Tag) <span class="qhelp" role="button" tabindex="0" data-help="Nachlass auf die Netznutzungsgebühr für steuerbare Verbrauchseinrichtungen (§14a EnWG), z.B. 0,38 €/Tag laut Rechnung. Wird von den Gebühren abgezogen.">?</span></label><input id="section14a_credit_day_eur" type="number" step="0.001" min="0" placeholder="z.B. 0,38"></div>
+    <div><label>Mehrwertsteuer (%) <span class="qhelp" role="button" tabindex="0" data-help="Satz, mit dem die Rechnung auf Verbrauch + Gebühren einmal aufschlägt (in Deutschland aktuell 19 %). 0 = keine MwSt aufschlagen.">?</span></label><input id="vat_percent" type="number" step="1" min="0" max="100" placeholder="z.B. 19"></div>
+  </div>
+</div>
+
 <div class="card" id="pv-forecast-card">
   <h2><svg class="h2i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/><line x1="19.1" y1="4.9" x2="17" y2="7"/><line x1="7" y1="17" x2="4.9" y2="19.1"/></svg>PV-Prognose (Steuerung)</h2>
   <div class="muted" style="margin-bottom:10px">Wie viel Sonne heute und morgen kommt, holt die Steuerung vom <b>Victron VRM</b> (Reiter „VRM“).
@@ -581,7 +595,8 @@ const PARAM_KEYS = ['battery_usable_kwh','daily_usage_kwh','pv_reserve_kwh',
   'morning_peak_start','morning_peak_end',
   'evening_peak_start','evening_peak_end','min_peak_soc','peak_avoid_price',
   'evening_comfort_soc','valley_min_saving_ct',
-  'night_safety_soc','target_safe_soc','hysterese_soc'];
+  'night_safety_soc','target_safe_soc','hysterese_soc',
+  'contract_fee_month_eur','grid_fee_day_eur','meter_fee_day_eur','section14a_credit_day_eur','vat_percent'];
 
 // Muss exakt zu TILE_IDS in index.html passen (Schluessel = Config-Feld/Checkbox-ID).
 // show_tibber_card bekommt zusaetzlich eine Sperre bei festem Tarif (siehe
@@ -1238,7 +1253,7 @@ setInterval(refreshShellyStatus, 5000);
 /* --- Reiter: jede Karte gehoert zu genau einem Reiter (Zuordnung ueber die Ueberschrift) --- */
 const ADMIN_TABS = [
   { id: 'anlage', label: 'Anlage', match: ['Victron Cerbo', 'Anlage', 'Batterie-Watchdog', 'Netz-Zähler'] },
-  { id: 'tarif', label: 'Tarif & Laden', match: ['Tibber', 'Stromtarif', 'Intelligente Planung', 'Peak-Schutz', 'SOC-Strategie', 'PV-Prognose'] },
+  { id: 'tarif', label: 'Tarif & Laden', match: ['Tibber', 'Stromtarif', 'Vertragskosten', 'Intelligente Planung', 'Peak-Schutz', 'SOC-Strategie', 'PV-Prognose'] },
   { id: 'solar', label: 'Solar', match: ['PV-Wechselrichter'] },
   { id: 'vrm', label: 'VRM', match: ['Victron VRM'] },
   { id: 'wetter', label: 'Wetter', match: ['Wettervorhersage'] },

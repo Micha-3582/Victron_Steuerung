@@ -4,6 +4,7 @@ Alles als JSON neben der App.
 """
 from __future__ import annotations
 
+import calendar
 import json
 import logging
 import os
@@ -683,6 +684,27 @@ def archive_finished_days(now: datetime | None = None):
     _save_monthly(data)
 
 
+def contract_fixed_cost_eur(cfg: dict, days: float) -> float:
+    """Netto-Fixkosten des Stromvertrags (Grundgebühr, Netznutzung, Messstelle, abzüglich der Reduzierung
+    nach §14a EnWG) für `days` Tage - siehe Einstellungen → Stromtarif → Vertragskosten. Die monatliche
+    Grundgebühr wird gleichmäßig auf einen Monat (30,44 Tage im Schnitt) umgelegt. Alle Werte 0 (Standard) =
+    wirkt sich nichts aus, die bisherigen Kosten-Anzeigen (Netzkosten, Ersparnis) bleiben unverändert -
+    diese Funktion wird nur für die zusätzliche 'inkl. Gebühren'-Summe benutzt."""
+    per_day = (float(cfg.get("contract_fee_month_eur", 0) or 0) / 30.44
+               + float(cfg.get("grid_fee_day_eur", 0) or 0)
+               + float(cfg.get("meter_fee_day_eur", 0) or 0)
+               - float(cfg.get("section14a_credit_day_eur", 0) or 0))
+    return per_day * days
+
+
+def cost_incl_fees_eur(cfg: dict, energy_cost_eur: float, days: float) -> float:
+    """Energiekosten (wie bisher aus den Tibber-Preisen berechnet, netto) plus die festen Vertragskosten für den
+    Zeitraum, darauf einmal die Mehrwertsteuer - genau wie auf der Tibber-Rechnung (Verbrauch + Gebühren, dann
+    EINE Mehrwertsteuer-Zeile auf die Summe). Damit vergleichbar mit der echten monatlichen Abrechnung."""
+    vat = float(cfg.get("vat_percent", 0) or 0) / 100.0
+    return round((energy_cost_eur + contract_fixed_cost_eur(cfg, days)) * (1 + vat), 2)
+
+
 def monthly_overview(now: datetime | None = None, limit_months: int = 120) -> dict:
     """Monatsuebersicht - EINE Zeile pro Kalendermonat (Solar/Verbrauch/Netz/
     Autarkie/Kosten), wie die Summenzeile des Wochenrueckblicks, nur je Monat statt
@@ -719,11 +741,13 @@ def monthly_overview(now: datetime | None = None, limit_months: int = 120) -> di
         autarky = (round(max(0.0, min(100.0, (1 - m["import"] / m["verbrauch"]) * 100)), 0)
                    if m["verbrauch"] > 0 else None)
         y, mo = key.split("-")
+        days = now.day if key == cur_key else calendar.monthrange(int(y), int(mo))[1]     # laufender Monat: bisherige Tage
         rows.append({
             "month": key, "year": int(y), "month_num": int(mo),
             "solar": round(m["solar"], 2), "verbrauch": round(m["verbrauch"], 2),
             "import": round(m["import"], 2), "export": round(m["export"], 2),
             "cost_eur": round(m["cost_ct"] / 100.0, 2), "autarky": autarky,
+            "cost_incl_fees_eur": cost_incl_fees_eur(load_config(), m["cost_ct"] / 100.0, days),
         })
     return {"months": rows}
 

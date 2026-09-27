@@ -1109,6 +1109,7 @@ def api_month():
     return jsonify({
         **store.monthly_overview(),
         "tariff_mode": cfg.get("tariff_mode", "tibber"),
+        "has_contract_fees": bool(store.contract_fixed_cost_eur(cfg, 1)) or bool(float(cfg.get("vat_percent", 0) or 0)),
     })
 
 
@@ -1255,7 +1256,9 @@ def api_config():
                "show_ev_card", "show_shelly_card", "show_weather_card", "show_plansim_card", "show_savings_card", "pv_auto_calibration", "smart_planner_enabled", "surplus_enabled", "surplus_dry_run", "rules_enabled", "rules_dry_run", "rules_manual_hold_min", "rules_failsafe_min",
                "surplus_min_soc", "tile_order", "scan_networks",
                "has_pv_inverter", "has_mppt", "tariff_mode",
-               "fixed_price_ct", "pv_inverters"] + list(Params().__dict__.keys())
+               "fixed_price_ct", "pv_inverters",
+               "contract_fee_month_eur", "grid_fee_day_eur", "meter_fee_day_eur",
+               "section14a_credit_day_eur", "vat_percent"] + list(Params().__dict__.keys())
     allowed = allowed + ["surplus_" + k for k in surplus.DEFAULTS]     # einstellbare Automatik-Werte
     if "scan_networks" in body:
         try:

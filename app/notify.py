@@ -259,6 +259,12 @@ def daily_summary(cfg: dict, now: datetime, extra=None) -> None:
         zeilen.append(f"🔋 Autarkie: {day['autarky']:.0f} %")
     if day.get("cost_eur"):
         zeilen.append(f"💶 Netzkosten: {day['cost_eur']:.2f} €")
+        try:                                                     # nur, wenn Vertragskosten eingetragen sind (sonst unveraendert wie bisher)
+            if store.contract_fixed_cost_eur(cfg, 1) or float(cfg.get("vat_percent", 0) or 0):
+                incl = store.cost_incl_fees_eur(cfg, day["cost_eur"], 1)
+                zeilen.append(f"🧾 Geschätzte Gesamtkosten heute (inkl. Gebühren, MwSt): {incl:.2f} €")
+        except Exception as e:                                   # noqa: BLE001
+            log.warning("Gesamtkosten inkl. Gebuehren nicht berechenbar: %s", e)
     try:
         zusatz = ("\n\n" + extra()) if extra else ""
     except Exception:                                       # noqa: BLE001
