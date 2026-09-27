@@ -29,23 +29,24 @@ AREAS = [
     ("dashboard", "Dashboard", "Live-Werte, Verlauf, Preis/Ladeplan. Schreiben = Geräte schalten, Sofort-laden-Override, Ladetermine anlegen."),
     ("rules", "Regeln", "Die Seite „Regeln“ (Wenn/Dann-Schaltungen)."),
     ("automation", "Automatik", "Überschuss-Automatik (Geräte bei PV-Überschuss zuschalten)."),
-    ("settings_anlage", "Einstellungen: Anlage", "Cerbo-Zugang, Batteriekapazität, Inbetriebnahme-Datum."),
+    ("settings_anlage", "Einstellungen: Anlage", "Cerbo-Zugang, Batteriekapazität, Inbetriebnahme-Datum. Die Cerbo-IP-Adresse ist nur bei „Schreiben“ im Klartext sichtbar."),
     ("settings_solar", "Einstellungen: Solar", "PV-Wechselrichter (einzeln erfasst)."),
     ("settings_tarif", "Einstellungen: Tarif & Laden", "Tibber/fester Tarif, Ladestrategie, Vertragskosten. Der Tibber-Zugangs-Token ist nur bei „Schreiben“ sichtbar."),
     ("settings_vrm", "Einstellungen: VRM", "Victron-VRM-Anbindung. Zugangsdaten nur bei „Schreiben“ sichtbar."),
     ("settings_wetter", "Einstellungen: Wetter", "Standort für die Wettervorhersage."),
     ("settings_meldungen", "Einstellungen: Meldungen", "Telegram-Benachrichtigungen. Bot-Token nur bei „Schreiben“ sichtbar."),
-    ("settings_geraete", "Einstellungen: Geräte", "Shelly/Tuya/Tasmota-Geräteverwaltung. Zugangsdaten nur bei „Schreiben“ sichtbar."),
+    ("settings_geraete", "Einstellungen: Geräte", "Shelly/Tuya/Tasmota-Geräteverwaltung. Zugangsdaten und die IP-Adressen der Geräte sind nur bei „Schreiben“ im Klartext sichtbar."),
     ("settings_anzeige", "Einstellungen: Dashboard-Kacheln", "Welche Kacheln das Dashboard zeigt und in welcher Reihenfolge."),
     ("settings_system", "Einstellungen: System", "Trockenlauf, Abfrage-Intervalle, App-Update."),
+    ("account", "Eigenes Konto", "Eigenen Benutzernamen und eigenes Passwort ändern können. Bei „Kein Zugriff“ bleiben Name und Passwort fest (z.B. für einen geteilten Demo-Zugang)."),
     ("user_management", "Benutzerverwaltung", "Andere Zugänge anlegen/ändern/löschen. Mindestens ein Zugang muss „Schreiben“ behalten."),
 ]
 AREA_IDS = [a[0] for a in AREAS]
 
 PRESETS = {
     "admin": {a: "write" for a in AREA_IDS},
-    "user": {a: ("write" if a == "dashboard" else "none") for a in AREA_IDS},
-    "demo": {a: ("none" if a == "user_management" else "read") for a in AREA_IDS},
+    "user": {a: ("write" if a in ("dashboard", "account") else "none") for a in AREA_IDS},
+    "demo": {a: ("none" if a in ("user_management", "account") else "read") for a in AREA_IDS},
 }
 
 

@@ -38,6 +38,7 @@
   .chip span { border:1px solid var(--border); border-radius:999px; padding:1px 8px; font-size:12px; color:var(--muted); }
   .chip input:checked + span { background:var(--accent); border-color:var(--accent); color:#14171c; font-weight:600; }
   .ro-locked { opacity: .65; pointer-events: none; }
+  .ro-locked .qhelp { pointer-events: auto; }   /* Tooltips bleiben auch in gesperrten Karten lesbar */
   /* Passwortfelder mit Auge zum Kontrollieren der Eingabe (wie beim Login) */
   .pw-wrap { position: relative; }
   .pw-wrap input { padding-right: 42px; width: 100%; }
@@ -439,10 +440,12 @@
     <span id="grid-msg" class="muted" style="margin-left:12px"></span></div>
 </div>
 
+{% if can_save_settings %}
 <div class="card">
   <button id="btn-save">Speichern</button>
   <span id="saved" class="muted" style="margin-left:12px"></span>
 </div>
+{% endif %}
 
 </div>
 
@@ -592,9 +595,11 @@
   <div id="shelly-found" style="display:flex;flex-direction:column;gap:2px;margin-top:8px"></div>
 </div>
 
-<div class="card" data-tab="system" data-area="always">
+<div class="card{{ ' ro-locked' if user_perms.account != 'write' else '' }}" data-tab="system" data-area="account">
   <h2><svg class="h2i" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Konto &amp; Zugang</h2>
-  <div class="hint" style="margin-bottom:10px">Dein eigenes Konto - das darf jeder für sich selbst ändern, unabhängig von den sonstigen Rechten.</div>
+  {% if user_perms.account != 'write' %}
+  <div class="hint" style="margin-bottom:10px">Dieses Konto darf Name und Passwort nicht selbst ändern.</div>
+  {% endif %}
   <div class="grid2">
     <div><label>Benutzername <span class="qhelp" role="button" tabindex="0" data-help="Name, mit dem du dich an dieser App anmeldest. Zum Ändern brauchst du dein aktuelles Passwort.">?</span></label><input id="acc-username" autocomplete="username"></div>
     <div><label>Aktuelles Passwort <span class="qhelp" role="button" tabindex="0" data-help="Dein aktuelles Passwort. Es wird bei jeder Änderung an Konto oder Passwort zur Bestätigung gebraucht.">?</span></label><div class="pw-wrap"><input id="pw-current" type="password" autocomplete="current-password"><button type="button" class="pw-toggle" data-for="pw-current" aria-label="Passwort anzeigen" title="Passwort anzeigen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
@@ -769,7 +774,9 @@ async function init() {
   document.getElementById('chart_flow_hourly').checked = !!cfg.chart_flow_hourly;
   tileOrder = mergeTileOrder(cfg.tile_order); renderTileToggles();
   TILE_DEFS.forEach(t => { document.getElementById(t.key).checked = cfg[t.key] !== false; });
-  document.getElementById('cerbo_host').value = cfg.cerbo_host || '';
+  const cerboEl = document.getElementById('cerbo_host');
+  cerboEl.value = cfg.cerbo_host || '';
+  cerboEl.placeholder = (cfg.cerbo_host_set && !cfg.cerbo_host) ? '•.•.•.• hinterlegt (nur bei Schreibrecht sichtbar)' : '';
   document.getElementById('cerbo_port').value = cfg.cerbo_port || 502;
   document.getElementById('has_pv_inverter').checked = cfg.has_pv_inverter !== false;
   document.getElementById('has_mppt').checked = cfg.has_mppt !== false;
@@ -841,7 +848,7 @@ document.getElementById('tibber_token').addEventListener('input', updateTariffFi
 // Komma ODER Punkt als Dezimaltrenner akzeptieren (parseFloat("0,6") wäre sonst 0)
 const numDE = v => parseFloat(String(v).replace(',', '.'));
 
-document.getElementById('btn-save').addEventListener('click', async () => {
+document.getElementById('btn-save')?.addEventListener('click', async () => {
   const body = {
     app_display_name: document.getElementById('app_display_name').value.trim(),
     dry_run: document.getElementById('dry_run').checked,

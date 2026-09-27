@@ -120,8 +120,9 @@ def _deny(msg: str, code: int = 403):
 # braucht "read" auf diesen Bereich, alles andere (POST/PATCH/DELETE) "write". Endpunkte,
 # die hier fehlen, sind nur mit Benutzerverwaltung=write erreichbar (sicherer Standard fuer
 # neue/vergessene Routen) - ausser sie stehen in ALWAYS_ALLOWED (eigenes Konto, Ab-/Anmelden).
-ALWAYS_ALLOWED_ENDPOINTS = {"api_update_own_account"}
+ALWAYS_ALLOWED_ENDPOINTS = set()
 ENDPOINT_AREA = {
+    "api_update_own_account": "account",
     # Dashboard: Status/Verlauf ansehen (read) - Geraete schalten/Override/Ladetermine (write)
     "index": "dashboard", "solar_log_page": "dashboard", "api_solar_log": "dashboard",
     "watchdog_page": "dashboard", "api_watchdog": "dashboard", "api_alarms": "dashboard",
@@ -251,8 +252,9 @@ def inject_role():
     perms = _perms()
     settings_areas = [a for a in auth.AREA_IDS if a.startswith("settings_") or a == "user_management"]
     can_see_admin = any(perms.get(a, "none") != "none" for a in settings_areas)
+    can_save_settings = any(perms.get(a) == "write" for a in settings_areas if a.startswith("settings_"))
     return {"user_role": "admin" if auth.is_full_admin(perms) else "custom", "user_perms": perms,
-            "can_see_admin": can_see_admin}
+            "can_see_admin": can_see_admin, "can_save_settings": can_save_settings}
 
 
 @app.route("/create-account", methods=["GET", "POST"])
@@ -1453,9 +1455,10 @@ def api_ess_grid_setpoint():
         return jsonify(error=str(e)), 400
 
 
-# Felder, deren Wert nie an den Browser zurueckgeht (nur schreiben, nie lesen) - unabhaengig
-# von Bereichsrechten, damit ein Zugangs-Token niemals irgendwo im Klartext ankommt.
-SECRET_FIELDS = {"tibber_token"}
+# Felder, deren echter Wert nur bei Schreibrecht auf ihren Bereich rausgeht - fuer
+# Zugangs-Token (nie im Klartext an einen reinen Leser) und interne IP-Adressen (Michael:
+# "man soll sehen dass da eine IP reinkommt, aber nicht meine internen IPs gelistet").
+SECRET_FIELDS = {"tibber_token", "cerbo_host"}
 
 
 @app.route("/api/config", methods=["GET", "POST"])
@@ -1645,8 +1648,12 @@ def api_shelly_list():
     """?dashboard=1: nur die in den Einstellungen fuers Dashboard freigegebenen."""
     devs = shelly.list_with_status(only_shown=request.args.get("dashboard") == "1")
     ruled = {r["device_id"] for r in rules.list_rules() if r.get("enabled", True)} if rules.enabled(store.load_config()) else set()
+    show_ip = auth.has_level(g.perms, "settings_geraete", "write")
     for d in devs:
         d["automated"] = bool(d.get("auto")) or d["id"] in ruled      # "Auto"-Hinweis im Dashboard: Ueberschuss-Automatik oder aktive Regel
+        if not show_ip and d.get("ip"):
+            d["ip_hidden"] = True
+            d["ip"] = "•.•.•.•"                    # interne IP nicht ohne Schreibrecht auf Geraete-Verwaltung zeigen
     return jsonify(devs)
 
 
