@@ -130,6 +130,10 @@ $('surplus_enabled').addEventListener('change', () => { CFG.enabled = $('surplus
 $('surplus_dry').addEventListener('change', () => { CFG.dry = $('surplus_dry').checked; touch(); });
 
 function devField(id, field, value) { DV[id][field] = value; touch(); }
+function pwWarn(id) {                             // Hinweis "Leistung eintragen" sofort beim Tippen aktualisieren, ohne die Zeile (und den Fokus) neu zu zeichnen
+  const el = document.querySelector(`.pw-warn[data-dev="${CSS.escape(id)}"]`);
+  if (el) el.style.display = Number(DV[id].power_w) > 0 ? 'none' : '';
+}
 function autoRemove(id) { AUTO = AUTO.filter(x => x !== id); touch(); renderSurplus(); }
 function autoMove(id, dir) { const i = AUTO.indexOf(id), j = i + dir; if (i < 0 || j < 0 || j >= AUTO.length) return; [AUTO[i], AUTO[j]] = [AUTO[j], AUTO[i]]; touch(); renderSurplus(); }
 function renderSurplus() {
@@ -153,11 +157,11 @@ function renderSurplus() {
         </div>
       </div>
       <div class="grid2" style="margin-top:8px;grid-template-columns:repeat(3,1fr)">
-        <div><label>Leistung des Geräts (W)</label><input type="number" min="0" value="${escH(v.power_w)}" placeholder="z.B. 2000" oninput="devField('${eid}', 'power_w', this.value)"></div>
+        <div><label>Leistung des Geräts (W)</label><input type="number" min="0" value="${escH(v.power_w)}" placeholder="z.B. 2000" oninput="devField('${eid}', 'power_w', this.value); pwWarn('${eid}')"></div>
         <div><label>Mind. an (min)</label><input type="number" min="0" value="${escH(v.min_on_min)}" oninput="devField('${eid}', 'min_on_min', this.value)"></div>
         <div><label>Mind. aus (min)</label><input type="number" min="0" value="${escH(v.min_off_min)}" oninput="devField('${eid}', 'min_off_min', this.value)"></div>
       </div>
-      ${Number(v.power_w) > 0 ? '' : '<div class="muted" style="color:#e5544a;margin-top:6px">Leistung eintragen – ohne sie wird dieses Gerät nicht geschaltet.</div>'}
+      <div class="muted pw-warn" data-dev="${eid}" style="color:#e5544a;margin-top:6px;${Number(v.power_w) > 0 ? 'display:none' : ''}">Leistung eintragen – ohne sie wird dieses Gerät nicht geschaltet.</div>
     </div>`;
   }).join('') : '<div class="muted">Noch kein Gerät in der Überschuss-Automatik.</div>';
 }
