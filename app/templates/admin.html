@@ -1010,12 +1010,18 @@ function readMatrix(idPrefix) {
 let TILES_META = [];
 function tilesHtml(idPrefix, tiles) {
   const allowed = tiles || TILES_META.map(([k]) => k);   // null = keine Einschraenkung -> alle angehakt
-  return `<div style="margin-top:14px">
+  return `<div id="${idPrefix}-tiles-wrap" style="margin-top:14px">
     <b>Dashboard-Kacheln für dieses Konto</b>
     <div class="muted" style="margin:4px 0 8px">Legt fest, was <b>dieses eine Konto</b> auf dem Dashboard überhaupt sehen darf (die Obergrenze) - innerhalb davon kann sich das Konto selbst in „Meine Ansicht" noch weiter einschränken. Alles angehakt = keine Einschränkung.</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px 18px">${TILES_META.map(([k, label]) => `
       <label class="chip" style="font-weight:normal"><input type="checkbox" id="${idPrefix}-tile-${k}" ${allowed.includes(k) ? 'checked' : ''}><span>${escHUsers(label)}</span></label>`).join('')}</div>
   </div>`;
+}
+// Die Kachel-Liste ist nur sinnvoll, wenn das Konto ueberhaupt (lesend oder schreibend) aufs
+// Dashboard darf - bei "Kein Zugriff" gibt es dort nichts zum Einschraenken.
+function syncTilesVisibility(idPrefix) {
+  const sel = document.getElementById(idPrefix + '-dashboard'), wrap = document.getElementById(idPrefix + '-tiles-wrap');
+  if (sel && wrap) wrap.style.display = sel.value === 'none' ? 'none' : '';
 }
 function readTiles(idPrefix) {
   const checked = TILES_META.filter(([k]) => document.getElementById(`${idPrefix}-tile-${k}`).checked).map(([k]) => k);
@@ -1065,6 +1071,9 @@ async function loadUsers() {
         <div style="margin-top:10px"><button type="button" class="u-save-perms" data-u="${u.username}">Speichern</button>
         <button type="button" class="ghost u-edit-cancel" data-u="${u.username}" style="margin-left:8px">Abbrechen</button></div></td>`;
       body.appendChild(editRow);
+      const uePrefix = 'ue-' + u.username;
+      syncTilesVisibility(uePrefix);
+      document.getElementById(uePrefix + '-dashboard')?.addEventListener('change', () => syncTilesVisibility(uePrefix));
     }
     body.querySelectorAll('.u-expires').forEach(el => el.addEventListener('change', () => patchUser(el.dataset.u, { expires: el.value })));
     body.querySelectorAll('.u-edit').forEach(el => el.addEventListener('click', () => {
@@ -1110,6 +1119,8 @@ function renderNuMatrix(presetName) {
   document.getElementById('nu-matrix').innerHTML = matrixHtml('nu', PRESETS_META[presetName] || {});
   document.getElementById('nu-tiles').innerHTML = tilesHtml('nu', null);
   syncNuExpires();
+  syncTilesVisibility('nu');
+  document.getElementById('nu-dashboard')?.addEventListener('change', () => syncTilesVisibility('nu'));
   document.querySelectorAll('#nu-matrix select').forEach(el => el.addEventListener('change', syncNuExpires));
 }
 function syncNuExpires() {
