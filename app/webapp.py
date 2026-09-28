@@ -565,7 +565,6 @@ class Controller:
                    solar_tom_raw=solar_tom_ctl, state=state, now=now,
                    manual_override=forced, force_reason=reason,
                    params=params)
-        store.save_state(state)
         # Intelligente Planung (Beta, Standard aus): ersetzt die stufenweisen Schwellenwerte oben durch eine
         # jeden Tick neu berechnete, kostenoptimale Planung. Greift NICHT bei manuellem Override/Ladetermin, festem
         # Tarif, fehlenden Preisen oder wenn die harte Ladesperre (Ladelimit) bereits gezogen hat - diese
@@ -573,13 +572,16 @@ class Controller:
         if (cfg.get("smart_planner_enabled", True) and not forced and cfg.get("tariff_mode") != "fixed"
                 and d.reason != "Keine Preisdaten" and "Ladelimit" not in d.strategy):
             try:
-                sm = self._smart_decision(now, soc, prices, vrm_data, params)
+                sm = self._smart_decision(now, soc, prices, vrm_data, params, state)
                 if sm is not None:
                     charge_now, plan_slots, txt = sm
                     d.allow_now, d.ess_mode, d.strategy = charge_now, (ESS_CHARGE if charge_now else ESS_IDLE), txt
                     d.plan, d.plan_windows = plan_slots, (merge_into_windows(plan_slots) if plan_slots else "")
             except Exception as e:                           # noqa: BLE001
                 log.warning("Intelligente Planung fehlgeschlagen, Rückfall auf Standard-Logik: %s", e)
+        # Erst JETZT speichern (state.smart_commit_slot wird ggf. erst in _smart_decision() oben gesetzt -
+        # vorher zu speichern wuerde das Commitment beim naechsten Tick wieder verlieren).
+        store.save_state(state)
         store.log_charge_state(d.ess_mode == ESS_CHARGE, d.strategy, now)
         try:                                            # Simulation laeuft nur mit - sie steuert nichts und darf nie stoeren
             if cfg.get("tariff_mode") == "fixed":
@@ -694,13 +696,19 @@ class Controller:
             out[(day.isoformat(), int(h["hour"]))] = float(h["wh"])
         return out
 
-    def _smart_decision(self, now, soc, prices, vrm_data, params):
+    def _smart_decision(self, now, soc, prices, vrm_data, params, state=None):
         """Intelligente Planung (Beta): baut JEDEN Tick frisch aus der aktuellen VRM-Prognose (Sonne + Verbrauch)
         und den Tibber-Preisen einen kostenoptimalen Ladeplan (gleiches Verfahren wie die Ladeplan-Simulation,
         siehe planner.py) und sagt, ob JETZT geladen werden soll. Kein Schwellenwert-Geruest (Peak-Fenster,
         Mindest-SOC-Stufen, "guenstig genug?") mehr - jeder Tick denkt mit dem echten, gerade gemessenen Akkustand
         und der jeweils aktuellsten Prognose neu; weicht die Wirklichkeit von der Prognose ab (Wolken, falsche
         Schaetzung), korrigiert sich das von selbst beim naechsten Tick.
+        Commitment (state.smart_commit_slot): hat ein Tick innerhalb einer Viertelstunde einmal "jetzt laden"
+        beschlossen, bleibt es dabei bis zum Ende dieser Viertelstunde, auch wenn ein spaeterer Tick (z.B. weil
+        der reale SOC inzwischen minimal hoeher ist als die Prognose) knapp auf "reicht schon" umschwenken wuerde -
+        sonst flattert die Ladung in Grenzfaellen minuetlich an/aus, statt die 15 Minuten durchzuziehen (Michael,
+        28.09.2026). Gleiches Prinzip wie state.commit_slot in logic.decide() fuer die Standard-Logik, nur ein
+        eigenes Feld, weil beide Planer unabhaengig voneinander laufen.
         Rueckgabe: (jetzt_laden, geplante_Slots, Text) oder None, wenn die Datenlage nicht reicht (Aufrufer
         faellt dann auf die Standard-Logik zurueck)."""
         if not vrm_data or not vrm_data.get("hours"):
@@ -727,6 +735,18 @@ class Controller:
         charge_now = charge_kwh[0] > 1e-6
         plan_slots = [Slot(name="", price=res["prices"][i], start=logic_parse_iso(t))
                       for i, t in enumerate(res["times"]) if charge_kwh[i] > 1e-6]
+        # Commitment: einmal in dieser Viertelstunde "laden" beschlossen -> bis zum Slot-Ende dabei bleiben.
+        now_slot_name = now_q.isoformat(timespec="minutes")
+        committed = ""
+        if state is not None:
+            committed = state.smart_commit_slot
+            if committed and committed != now_slot_name:
+                committed = ""                  # neue Viertelstunde angebrochen -> altes Commitment verfaellt
+            if charge_now:
+                committed = now_slot_name
+            elif committed == now_slot_name:
+                charge_now = True                # Commitment zieht die Ladung ueber diesen Tick hinweg durch
+            state.smart_commit_slot = committed
         windows_txt = merge_into_windows(plan_slots) if plan_slots else ""
         txt = (f"🧠 Intelligente Planung – {'lädt jetzt' if charge_now else 'wartet'} "
                f"({res['prices'][0]:.1f} ct" + (f", geplant: {windows_txt}" if windows_txt else "") + ")")

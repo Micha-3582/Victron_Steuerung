@@ -94,6 +94,11 @@ class PersistentState:
     morning_bridge: bool = False
     night_buffer: bool = False
     charge_limit_hit: bool = False
+    smart_commit_slot: str = ""    # wie commit_slot, aber fuer die Intelligente Planung (siehe webapp._smart_decision):
+                                    # verhindert, dass eine einmal begonnene Ladung innerhalb derselben Viertelstunde
+                                    # durch eine neu berechnete Entscheidung wieder abgebrochen wird (Michael, 28.09.:
+                                    # "wenn es zu einer ladeentscheidung kommt das dann die 15 min auch durchgezogen
+                                    # werden" - vorher flatterte das bei knappen Faellen minuetlich an/aus)
 
 
 @dataclass
