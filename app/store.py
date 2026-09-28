@@ -1106,8 +1106,13 @@ def recent_solar_average(days: int = 7, now: datetime | None = None) -> float | 
 
 
 # --- Preis-Historie (Tibber-Preise je Viertelstunde, lange aufbewahrt) --------------------------
-# price_history.json: {"days": {"YYYY-MM-DD": {"p": [96 Werte in ct/kWh oder null], "src": "tibber" | "derived"}}}
-# "tibber" = Originalpreise, "derived" = aus Bezugskosten/-menge im Verlauf zurueckgerechnet (nur Slots mit Netzbezug, lueckenhaft).
+# price_history.json: {"days": {"YYYY-MM-DD": {"p": [96 Werte in ct/kWh oder null], "lvl": [96 Tibber-Level-Strings
+#   'VERY_CHEAP'/'CHEAP'/'NORMAL'/'EXPENSIVE'/'VERY_EXPENSIVE' oder null], "src": "tibber" | "derived"}}}
+# "tibber" = Originalpreise (inkl. Tibbers eigener Einstufung), "derived" = aus Bezugskosten/-menge im Verlauf
+# zurueckgerechnet (nur Slots mit Netzbezug, lueckenhaft, kein "lvl" - der Preis allein war ja bekannt, nicht die
+# Einstufung). "lvl" existiert erst seit 28.09.2026 (Michael: Rueckblick soll dieselben Farben zeigen wie am Tag
+# selbst bei Tibber) - aeltere Tage haben das Feld schlicht nicht bzw. es steht auf null; der Rueckblick im
+# Frontend (index.html loadHistPrices) faellt dafuer auf eine grobe Schaetzung relativ zum Tagesdurchschnitt zurueck.
 PRICE_HISTORY_PATH = os.path.join(_DIR, "price_history.json")
 _PRICE_KEEP_DAYS = 800            # rund 2 Jahre; die Datei bleibt trotzdem klein (~0,5 MB)
 _PRICE_LOCK = threading.Lock()
@@ -1129,39 +1134,43 @@ def _save_price_days(days: dict):
 
 
 def record_prices(entries: list) -> int:
-    """Haelt die Tibber-Preise fest (heute UND morgen, sobald sie da sind). Schreibt nur bei Aenderungen; ein Tag mit
-    Originalpreisen wird nur ergaenzt bzw. korrigiert, nie durch weniger Daten ersetzt. Rueckgabe: Anzahl geaenderter Tage."""
+    """Haelt die Tibber-Preise UND Tibbers eigene Einstufung (level: CHEAP/NORMAL/...) fest (heute UND morgen,
+    sobald sie da sind). Schreibt nur bei Aenderungen; ein Tag mit Originalpreisen wird nur ergaenzt bzw.
+    korrigiert, nie durch weniger Daten ersetzt. Rueckgabe: Anzahl geaenderter Tage."""
     from logic import _parse_iso
     starts = []
     for e in entries or []:
         try:
-            starts.append((_parse_iso(e["startsAt"]), round(float(e["total"]) * 100, 2)))
+            starts.append((_parse_iso(e["startsAt"]), round(float(e["total"]) * 100, 2), e.get("level") or None))
         except (KeyError, TypeError, ValueError):
             continue
-    starts.sort()
-    new: dict[str, list] = {}
-    for i, (t, ct) in enumerate(starts):
+    starts.sort(key=lambda x: x[0])
+    new: dict[str, dict] = {}
+    for i, (t, ct, lvl) in enumerate(starts):
         if i + 1 < len(starts):
             gap = (starts[i + 1][0] - t).total_seconds() / 60
         else:                                                       # letzter Eintrag: gleiche Dauer wie der davor
             gap = (t - starts[i - 1][0]).total_seconds() / 60 if i else 15
         n = 4 if gap >= 55 else 1                                  # Stundenpreis gilt fuer alle 4 Viertelstunden
-        vals = new.setdefault(t.date().isoformat(), [None] * 96)
+        rec = new.setdefault(t.date().isoformat(), {"p": [None] * 96, "lvl": [None] * 96})
         base = t.hour * 4 + t.minute // 15
         for k in range(n):
             if base + k < 96:
-                vals[base + k] = ct
+                rec["p"][base + k] = ct
+                rec["lvl"][base + k] = lvl
     changed = 0
     with _PRICE_LOCK:
         days = _price_days()
-        for day, vals in new.items():
+        for day, rec_new in new.items():
             rec = days.get(day)
             if rec and rec.get("src") == "tibber":
-                merged = [v if v is not None else o for v, o in zip(vals, rec["p"])]
-                if merged == rec["p"]:
+                old_lvl = rec.get("lvl") or [None] * len(rec["p"])
+                merged_p = [v if v is not None else o for v, o in zip(rec_new["p"], rec["p"])]
+                merged_lvl = [v if v is not None else o for v, o in zip(rec_new["lvl"], old_lvl)]
+                if merged_p == rec["p"] and merged_lvl == old_lvl:
                     continue
-                vals = merged
-            days[day] = {"p": vals, "src": "tibber"}
+                rec_new = {"p": merged_p, "lvl": merged_lvl}
+            days[day] = {"p": rec_new["p"], "lvl": rec_new["lvl"], "src": "tibber"}
             changed += 1
         if changed:
             _save_price_days(days)
@@ -1233,11 +1242,14 @@ def price_history(days: int = 90) -> dict:
 
 
 def price_day(day: str) -> dict | None:
-    """96 Viertelstunden-Preise (ct, Luecken als None) EINES Tages inkl. Quelle - fuer den Tage-zurueck-Blick
-    im Strompreis-Diagramm (anders als price_slots(): gibt auch "derived" zurueck, nicht nur Original-Tibber)."""
+    """96 Viertelstunden-Preise (ct, Luecken als None) UND Tibbers Einstufung (lvl, falls vorhanden) EINES Tages
+    inkl. Quelle - fuer den Tage-zurueck-Blick im Strompreis-Diagramm (anders als price_slots(): gibt auch
+    "derived" zurueck, nicht nur Original-Tibber)."""
     with _PRICE_LOCK:
         rec = _price_days().get(day)
-        return {"p": list(rec["p"]), "src": rec["src"]} if rec else None
+        if not rec:
+            return None
+        return {"p": list(rec["p"]), "lvl": list(rec.get("lvl") or [None] * len(rec["p"])), "src": rec["src"]}
 
 
 def energy_grid_charge_buckets(day: str) -> dict:

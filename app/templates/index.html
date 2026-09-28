@@ -1358,11 +1358,12 @@ async function loadHistPrices(day) {
   const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
   prices = (rec ? rec.p : Array(96).fill(null)).map((ct, i) => {
     const h = Math.floor(i / 4), m = (i % 4) * 15;
-    // Tibber liefert "level" (CHEAP/NORMAL/...) nur live mit, in der Preis-Historie steckt nur der ct-Wert
-    // (siehe store.py price_history.json) - fuer die Farben hier daher grob wie Tibber selbst relativ zum
-    // Tagesdurchschnitt einstufen, statt alles pauschal "normal" (blau) zu faerben.
-    const level = ct == null ? 'NORMAL' : ct < avg * 0.6 ? 'VERY_CHEAP' : ct < avg * 0.9 ? 'CHEAP'
-      : ct <= avg * 1.4 ? 'NORMAL' : ct <= avg * 1.8 ? 'EXPENSIVE' : 'VERY_EXPENSIVE';
+    // Seit 28.09.2026 speichert store.record_prices() Tibbers eigene Einstufung (lvl) mit - damit sieht der
+    // Rueckblick exakt dieselben Farben wie am Tag selbst (Michael, Screenshot). Nur bei aelteren Tagen, die das
+    // Feld noch nicht haben, faellt es auf eine grobe Schaetzung relativ zum Tagesdurchschnitt zurueck.
+    const realLvl = rec && rec.lvl && rec.lvl[i];
+    const level = realLvl || (ct == null ? 'NORMAL' : ct < avg * 0.6 ? 'VERY_CHEAP' : ct < avg * 0.9 ? 'CHEAP'
+      : ct <= avg * 1.4 ? 'NORMAL' : ct <= avg * 1.8 ? 'EXPENSIVE' : 'VERY_EXPENSIVE');
     return { start: `${day}T${pad(h)}:${pad(m)}`, label: `${pad(h)}:${pad(m)}`, ct, level, planned: false, cheap_lock: false };
   });
   const cts = prices.map(p => p.ct).filter(v => v != null);
