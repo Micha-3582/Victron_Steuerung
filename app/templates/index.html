@@ -1422,6 +1422,7 @@ async function loadShelly() {
   if (!shellyEnabled) { card.hidden = true; return; }
   let list;
   try { list = await (await fetch('/api/shelly?dashboard=1')).json(); } catch (e) { return; }
+  if (!shellyEnabled) { card.hidden = true; return; }   // waehrend des Wartens ausgeschaltet worden - sonst zeigt dieser noch "veraltete" Aufruf die Kachel doch wieder
   if (shellyDragActive) return;
   if (!Array.isArray(list) || !list.length) { card.hidden = true; return; }
   card.hidden = false;
@@ -1530,6 +1531,7 @@ async function loadWeather() {
   const card = $('weather-card');
   if (!weatherEnabled) { card.hidden = true; return; }
   try { wxData = await (await fetch('/api/weather')).json(); } catch (e) { return; }
+  if (!weatherEnabled) { card.hidden = true; return; }   // waehrend des Wartens ausgeschaltet worden - sonst zeigt dieser noch "veraltete" Aufruf die Kachel doch wieder
   if (!wxData.configured || !wxData.current) { card.hidden = true; return; }     // ohne Standort keine Kachel
   card.hidden = false;
   renderWeather();
@@ -1562,6 +1564,7 @@ async function loadPlansim() {
   const card = $('plansim-card');
   if (!plansimEnabled) { card.hidden = true; return; }
   try { psData = await (await fetch('/api/plan-sim')).json(); } catch (e) { return; }
+  if (!plansimEnabled) { card.hidden = true; return; }   // waehrend des Wartens ausgeschaltet worden - sonst zeigt dieser noch "veraltete" Aufruf die Kachel doch wieder
   card.hidden = false;
   renderPlansim();
 }
@@ -1637,6 +1640,7 @@ async function loadSavings() {
   const card = $('savings-card');
   if (!savingsEnabled) { card.hidden = true; return; }
   let d; try { d = await (await fetch('/api/savings')).json(); } catch (e) { return; }
+  if (!savingsEnabled) { card.hidden = true; return; }   // waehrend des Wartens ausgeschaltet worden (siehe applyTileVisibility) - sonst zeigt dieser noch "veraltete" Aufruf die Kachel doch wieder
   if (!d.available) { card.hidden = true; return; }
   card.hidden = false;
   const eur = c => (c / 100).toFixed(2) + ' €';
