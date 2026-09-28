@@ -2063,8 +2063,13 @@ def api_vrm_credentials():
 def api_vrm_restore():
     """Fehlende Verlaufsdaten aus dem VRM nachholen. Ohne {"apply": true} nur Vorschau."""
     body = request.get_json(silent=True) or {}
+    days = body.get("days")
     try:
-        return jsonify(vrm_import.run(apply=bool(body.get("apply"))))
+        days = int(days) if days else None
+    except (TypeError, ValueError):
+        days = None
+    try:
+        return jsonify(vrm_import.run(apply=bool(body.get("apply")), days=days))
     except vrm.VrmError as e:
         return jsonify(error=str(e)), 400
     except Exception as e:                               # noqa: BLE001

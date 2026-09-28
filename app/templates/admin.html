@@ -548,9 +548,14 @@
       übernommen werden nur Viertelstunden, die bei uns fehlen – vorhandene Messwerte bleiben unangetastet, vorher wird eine Sicherung angelegt.
       Die Kosten (€) der nachgeholten Zeiten bleiben 0, weil der damalige Preis nicht bekannt ist.</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <label class="muted" style="display:flex;gap:6px;align-items:center">Zeitraum:
+        <input id="vrm-restore-days" type="number" min="1" max="1200" value="35" style="width:80px"> Tage zurück
+      </label>
       <button id="vrm-restore-preview" class="ghost">Vorschau: Was fehlt?</button>
       <button id="vrm-restore-apply" class="ghost" hidden>Jetzt übernehmen</button>
     </div>
+    <div class="muted" style="margin-top:4px;font-size:.9em">Für einen einmaligen Nachimport seit Installation der Anlage hier die Tage bis zurück zum
+      Einbaudatum eintragen (z. B. 400) – die Abfrage holt das VRM in sicheren 7-Tage-Häppchen, das dauert bei großen Zeiträumen etwas länger.</div>
     <div class="muted" id="vrm-restore-msg" style="margin-top:8px"></div>
     <div id="vrm-restore-list" style="margin-top:6px"></div>
   </div>
@@ -1535,7 +1540,8 @@ async function vrmRestore(apply) {
   const pb = document.getElementById('vrm-restore-preview'), ab = document.getElementById('vrm-restore-apply');
   pb.disabled = ab.disabled = true; restoreMsg(apply ? 'Übernehme …' : 'Frage das VRM ab … (kann etwas dauern)');
   try {
-    const r = await shellyApi('/api/vrm/restore', 'POST', { apply });
+    const days = parseInt(document.getElementById('vrm-restore-days').value, 10) || 35;
+    const r = await shellyApi('/api/vrm/restore', 'POST', { apply, days });
     const list = document.getElementById('vrm-restore-list');
     if (apply) {
       restoreMsg(`Fertig ✓ – ${r.added || 0} Viertelstunden ergänzt. Die Ansichten zeigen es nach dem nächsten Neuladen.`);

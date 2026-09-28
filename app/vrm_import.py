@@ -27,12 +27,18 @@ def _bucket(flows: dict, soc: float | None) -> dict:
     return b
 
 
-def run(apply: bool = False, now: datetime | None = None) -> dict:
+def run(apply: bool = False, now: datetime | None = None, days: int | None = None) -> dict:
+    """`days`: Anzahl Tage rueckwirkend (Default: store.VRM_RESTORE_LOOKBACK_DAYS = 35 fuer die
+    normale Luecken-Kontrolle). Fuer einen einmaligen historischen Nachimport (z.B. seit
+    Installationsdatum) kann hier ein deutlich groesserer Wert uebergeben werden - vrm.fetch_flow_slots/
+    fetch_soc_slots zerlegen den Zeitraum ohnehin in CHUNK_DAYS=7-Tage-Haeppchen, das ist also
+    unabhaengig von der Laenge sicher (anders als die fruehere 365-Tage-Falle bei _LIFETIME_CHUNK_DAYS)."""
     c = vrm.load_credentials()
     if not (c.get("token") and c.get("installation_id")):
         raise vrm.VrmError("VRM-Zugang ist noch nicht eingerichtet")
     now = now or datetime.now()
-    start = (now - timedelta(days=store.VRM_RESTORE_LOOKBACK_DAYS - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    lookback = days if days is not None else store.VRM_RESTORE_LOOKBACK_DAYS
+    start = (now - timedelta(days=lookback - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
     end = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)     # laufender Slot bleibt bei der App
     flows, used = vrm.fetch_flow_slots(c, start, end)
     have = store.history_keys()
