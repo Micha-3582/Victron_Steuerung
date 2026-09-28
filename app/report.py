@@ -115,14 +115,18 @@ def _checks(now: datetime, cfg: dict, ctrl: dict, stats: dict, hist_days: dict) 
     else:
         out.append(_check("prices", "Preis-Historie", "warn", f"heute {n_today}/96, morgen {n_tom}/96"))
 
-    # 6) Vollstaendigkeit der Messdaten
+    # 6) Vollstaendigkeit der Messdaten - gestern liegt normalerweise schon im dauerhaften
+    # Archiv (nur der laufende Tag bleibt in history.json, siehe store._day_buckets).
     try:
-        hours = store._load_history().get("hours", {})
-        n_y = sum(1 for k in hours if k[:10] == yday)
+        n_y = len(store._day_buckets(yday))
         lvl = "ok" if n_y >= 90 else ("warn" if n_y >= 70 else "fail")
         out.append(_check("history", "Messdaten gestern", lvl, f"{n_y}/96 Viertelstunden"))
-        n_days = len({k[:10] for k in hours})
-        out.append(_check("history_span", "Verlauf vorhanden", "info", f"{n_days} Tage in history.json"))
+        min_day = store.energy_min_day()
+        if min_day:
+            n_days = (now.date() - datetime.strptime(min_day, "%Y-%m-%d").date()).days + 1
+            out.append(_check("history_span", "Verlauf vorhanden", "info", f"{n_days} Tage seit {min_day} (heiß + Archiv)"))
+        else:
+            out.append(_check("history_span", "Verlauf vorhanden", "info", "0 Tage"))
     except Exception as e:                                   # noqa: BLE001
         out.append(_check("history", "Messdaten gestern", "fail", str(e)))
     ls = ctrl.get("last_system_ts") or 0
@@ -208,10 +212,9 @@ def _day_rows(now: datetime, days: int, stats: dict, hist_days: dict) -> list[di
         ps = {r["date"]: r for r in store.plansim_log(60)}
     except Exception:                                        # noqa: BLE001
         pass
-    hours = store._load_history().get("hours", {})
-    charged: dict[str, float] = {}
-    for k, b in hours.items():
-        charged[k[:10]] = charged.get(k[:10], 0.0) + b.get("g_batt", 0.0)
+    # Netz->Batterie-Ladung je Tag - heiss + Archiv (siehe store._day_buckets), sonst waeren
+    # alle Tage ausser dem laufenden immer 0.0.
+    charged: dict[str, float] = {day: sum(b.get("g_batt", 0.0) for b in store._day_buckets(day).values()) for day in summ}
     rows = []
     for day in sorted(summ, reverse=True):
         s, o = summ[day], stats.get(day, {})
