@@ -41,6 +41,7 @@
     <button id="f-prev" class="ghost daytab" title="Vorheriger Tag">◀</button>
     <span id="f-day" style="min-width:78px;text-align:center;font-size:14px">Heute</span>
     <button id="f-next" class="ghost daytab" title="Nächster Tag">▶</button>
+    <button id="f-pick" type="button" class="ghost daytab" title="Tag auswählen">📅</button>
     <span class="muted" style="margin-left:auto" id="flow-hint">Woher der Strom kam und wohin er ging – oben genutzt/erzeugt, unten Batterie/Netz-Ladung.</span>
   </div>
   <div class="chart-scroll">
@@ -96,8 +97,11 @@
   <div class="card full" id="price-plan-card">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <h2 style="margin:0">Strompreis & Ladeplan</h2>
-      <button id="day-today" class="ghost daytab active">Heute</button>
-      <button id="day-tomorrow" class="ghost daytab">Morgen</button>
+      <button id="p-prev" class="ghost daytab" title="Vorheriger Tag">◀</button>
+      <span id="p-day" style="min-width:78px;text-align:center;font-size:14px">Heute</span>
+      <button id="p-next" class="ghost daytab" title="Nächster Tag">▶</button>
+      <button id="p-pick" type="button" class="ghost daytab" title="Tag auswählen">📅</button>
+      <input type="date" id="p-datepick" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
       <button id="btn-select" class="ghost sel-btn" aria-pressed="false">✏️ Markieren</button>
       <span class="muted" style="margin-left:auto" id="drag-hint">In die Kurve klicken oder ziehen, um einen Ladetermin anzulegen.</span>
     </div>
@@ -663,18 +667,20 @@ $('e-prev').addEventListener('click', () => shiftEnergyDay(-1));
 $('e-next').addEventListener('click', () => shiftEnergyDay(1));
 $('f-prev').addEventListener('click', () => shiftEnergyDay(-1));
 $('f-next').addEventListener('click', () => shiftEnergyDay(1));
-$('e-pick').addEventListener('click', () => {
+function openEnergyDatePick() {
   const inp = $('e-datepick');
   inp.min = energyMinDay || todayStr();
   inp.max = fcForDay(tomorrowStr()) ? tomorrowStr() : todayStr();
   inp.value = energyDay || todayStr();
   try { inp.showPicker(); } catch (e) { inp.focus(); inp.click(); }   // showPicker() nicht ueberall verfuegbar (aeltere Browser)
-});
+}
+$('e-pick').addEventListener('click', openEnergyDatePick);
+$('f-pick').addEventListener('click', openEnergyDatePick);   // teilt sich den Picker mit "Energie (Verlauf)" - beide zeigen denselben Tag
 $('e-datepick').addEventListener('change', () => { if ($('e-datepick').value) loadEnergyDay($('e-datepick').value); });
 
 /* --- Drag-Auswahl --- */
 function slotAtX(clientX) {
-  if (!prices.length) return null;
+  if (!prices.length || activeDay === 'past') return null;  // Verlauf ist nur Anzeige, keine Ladetermine im Nachhinein
   const rect = chart.canvas.getBoundingClientRect();
   const area = chart.chartArea;
   const x = clientX - rect.left;
@@ -1227,33 +1233,89 @@ function plannedWindowsFor(dateStr) {
   wins.push(`${start}-${end}`);
   return wins.join(', ');
 }
+// Tage-zurueck-Blick beim Strompreis-Diagramm, analog zu Energie (Verlauf) / Energieflüsse (◀ Tag ▶ 📅).
+// "Heute"/"Morgen" bleiben live und bearbeitbar (Ladetermine, Markieren) - alles davor kommt
+// schreibgeschuetzt aus der Preis-Historie (store.price_history, siehe /api/prices/history?day=).
+let priceDay = '', priceMinDay = '';
+const histPriceCache = {};   // Tag -> {p,src} | null, damit der Tick-Poll nicht staendig neu abfragt
+
+function priceMaxDay() { return fcForDay(tomorrowStr()) ? tomorrowStr() : todayStr(); }
+
 function applyDay() {
-  const target = activeDay === 'today' ? dayStr(0) : dayStr(1);
-  prices = allPrices.filter(p => p.start.slice(0, 10) === target);
-  const emptyTom = activeDay === 'tomorrow' && !prices.length;
-  $('drag-hint').textContent = emptyTom
-    ? 'Für morgen liegen noch keine Preise vor (Tibber veröffentlicht sie ~13 Uhr).'
-    : 'In die Kurve klicken oder ziehen, um einen Ladetermin anzulegen.';
-  // Preis-Kennzahlen des angezeigten Tages (min / Ø / max)
+  const target = priceDay || todayStr();
+  activeDay = target === todayStr() ? 'today' : (target === tomorrowStr() ? 'tomorrow' : 'past');
+  $('p-day').textContent = fmtDayLabel(target);
+  $('p-prev').style.display = priceMinDay && target <= priceMinDay ? 'none' : '';
+  $('p-next').style.display = target >= priceMaxDay() ? 'none' : '';
+  const selBtn = $('btn-select');
+  if (activeDay !== 'past') {
+    if (selBtn) selBtn.style.display = '';
+    prices = allPrices.filter(p => p.start.slice(0, 10) === target);
+    const emptyTom = activeDay === 'tomorrow' && !prices.length;
+    $('drag-hint').textContent = emptyTom
+      ? 'Für morgen liegen noch keine Preise vor (Tibber veröffentlicht sie ~13 Uhr).'
+      : 'In die Kurve klicken oder ziehen, um einen Ladetermin anzulegen.';
+    // Preis-Kennzahlen des angezeigten Tages (min / Ø / max)
+    const cts = prices.map(p => p.ct).filter(v => v != null);
+    $('price-stats').textContent = cts.length
+      ? `Min ${Math.min(...cts).toFixed(1)} · Ø ${(cts.reduce((a, b) => a + b, 0) / cts.length).toFixed(1)} · Max ${Math.max(...cts).toFixed(1)} ct/kWh`
+      : '';
+    const win = plannedWindowsFor(target);
+    $('planline').textContent = win
+      ? `Geplante Ladefenster (${activeDay === 'today' ? 'heute' : 'morgen'}): ${win}`
+      : (activeDay === 'today' ? 'Heute keine Netzladung geplant.' : 'Morgen keine Netzladung geplant.');
+    renderChart();
+    updateWidth();
+  } else {
+    if (selBtn) selBtn.style.display = 'none';
+    setSelectMode(false);
+    loadHistPrices(target);
+  }
+}
+
+async function loadHistPrices(day) {
+  let rec = histPriceCache[day];
+  if (rec === undefined) {
+    try { rec = (await (await fetch('/api/prices/history?day=' + day)).json()).record; }
+    catch (e) { rec = null; }
+    histPriceCache[day] = rec;
+  }
+  if ((priceDay || todayStr()) !== day) return;      // zwischenzeitlich weitergeklickt - verwerfen
+  prices = (rec ? rec.p : Array(96).fill(null)).map((ct, i) => {
+    const h = Math.floor(i / 4), m = (i % 4) * 15;
+    return { start: `${day}T${pad(h)}:${pad(m)}`, label: `${pad(h)}:${pad(m)}`, ct, level: 'NORMAL', planned: false, cheap_lock: false };
+  });
   const cts = prices.map(p => p.ct).filter(v => v != null);
   $('price-stats').textContent = cts.length
     ? `Min ${Math.min(...cts).toFixed(1)} · Ø ${(cts.reduce((a, b) => a + b, 0) / cts.length).toFixed(1)} · Max ${Math.max(...cts).toFixed(1)} ct/kWh`
     : '';
-  const win = plannedWindowsFor(target);
-  $('planline').textContent = win
-    ? `Geplante Ladefenster (${activeDay === 'today' ? 'heute' : 'morgen'}): ${win}`
-    : (activeDay === 'today' ? 'Heute keine Netzladung geplant.' : 'Morgen keine Netzladung geplant.');
+  $('drag-hint').textContent = !rec ? 'Für diesen Tag sind keine Preise gespeichert.'
+    : (rec.src === 'tibber' ? 'Gespeicherte Tibber-Preise – nur Anzeige, keine Bearbeitung.'
+                             : 'Aus den Bezugskosten zurückgerechnet (lückenhaft) – nur Anzeige.');
+  $('planline').textContent = '';
   renderChart();
   updateWidth();
 }
-function setDay(d) {
-  activeDay = d;
-  $('day-today').classList.toggle('active', d === 'today');
-  $('day-tomorrow').classList.toggle('active', d === 'tomorrow');
+
+function shiftPriceDay(delta) {
+  const base = new Date((priceDay || todayStr()) + 'T00:00');
+  base.setDate(base.getDate() + delta);
+  let nd = isoDay(base);
+  if (nd > priceMaxDay()) nd = priceMaxDay();
+  if (priceMinDay && nd < priceMinDay) nd = priceMinDay;
+  priceDay = nd;
   applyDay();
 }
-$('day-today').addEventListener('click', () => setDay('today'));
-$('day-tomorrow').addEventListener('click', () => setDay('tomorrow'));
+$('p-prev').addEventListener('click', () => shiftPriceDay(-1));
+$('p-next').addEventListener('click', () => shiftPriceDay(1));
+$('p-pick').addEventListener('click', () => {
+  const inp = $('p-datepick');
+  inp.min = priceMinDay || todayStr();
+  inp.max = priceMaxDay();
+  inp.value = priceDay || todayStr();
+  try { inp.showPicker(); } catch (e) { inp.focus(); inp.click(); }
+});
+$('p-datepick').addEventListener('change', () => { if ($('p-datepick').value) { priceDay = $('p-datepick').value; applyDay(); } });
 
 function renderOverview(items) {
   const t = $('charge-log');
@@ -1398,6 +1460,11 @@ function renderMonth(data) {
 async function loadMonth() {
   try { renderMonth(await (await fetch('/api/month')).json()); } catch (e) {}
 }
+async function loadPriceMinDay() {
+  // Einmalig: aeltester Tag der Preis-Historie (Grenze fuer "weiter zurueck" im Strompreis-Diagramm).
+  try { priceMinDay = (await (await fetch('/api/prices/history?days=1')).json()).info.first || ''; applyDay(); }
+  catch (e) {}
+}
 
 buildChart();
 buildEnergyChart();
@@ -1408,6 +1475,7 @@ load();
 loadLive();
 loadWeek();
 loadMonth();
+loadPriceMinDay();
 setInterval(load, 15000);      // Plan/Preise/Termine (langsamer)
 setInterval(loadLive, 2000);   // Live-Werte vom Cerbo (wie Victron: alle 2 s)
 setInterval(loadWeek, 300000);  // Wochenrückblick (ändert sich langsam)

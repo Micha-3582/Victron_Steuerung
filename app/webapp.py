@@ -1983,7 +1983,11 @@ def api_plan_sim():
 
 @app.route("/api/prices/history", methods=["GET"])
 def api_price_history():
-    """Gespeicherte Tibber-Preise je Viertelstunde (?days=N, Standard 90) + Kurzinfo."""
+    """Gespeicherte Tibber-Preise je Viertelstunde. Mit ?day=YYYY-MM-DD nur dieser eine Tag (Tage-zurueck-Blick
+    im Strompreis-Diagramm, siehe index.html priceDay), sonst ?days=N (Standard 90) als Sammelabfrage + Kurzinfo."""
+    day = request.args.get("day", "")
+    if day:
+        return jsonify({"day": day, "record": store.price_day(day)})
     try:
         n = max(1, min(800, int(request.args.get("days", 90))))
     except ValueError:

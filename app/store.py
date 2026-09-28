@@ -1232,6 +1232,14 @@ def price_history(days: int = 90) -> dict:
         return {k: d[k] for k in sorted(d)[-days:]}
 
 
+def price_day(day: str) -> dict | None:
+    """96 Viertelstunden-Preise (ct, Luecken als None) EINES Tages inkl. Quelle - fuer den Tage-zurueck-Blick
+    im Strompreis-Diagramm (anders als price_slots(): gibt auch "derived" zurueck, nicht nur Original-Tibber)."""
+    with _PRICE_LOCK:
+        rec = _price_days().get(day)
+        return {"p": list(rec["p"]), "src": rec["src"]} if rec else None
+
+
 def energy_grid_charge_buckets(day: str) -> dict:
     """{slot_key 'YYYY-MM-DDTHH:MM': gemessene Netz→Batterie-kWh} eines Tages.
     Basis für die tatsächliche (statt geschätzte) Lademenge in den Ladevorgängen."""
