@@ -1593,6 +1593,10 @@ def api_config():
             continue                   # sonst wuerde das gemeinsame "Speichern" ueber alle Reiter hinweg immer scheitern
         cfg[key] = body[key]
     store.save_config(cfg)
+    try:                                    # neue Vertragskosten-Periode ab heute, falls sich etwas geaendert hat
+        store.record_contract_period_if_changed(cfg)
+    except Exception as e:                  # noqa: BLE001
+        log.warning("Vertragskosten-Periode nicht speicherbar: %s", e)
     if denied:
         log.info("api_config: %s hat keine Schreibrechte fuer %s - Feld(er) uebersprungen", g.user, ", ".join(denied))
     # Sofort einen Regel-Durchlauf anstoßen, damit Preise/Status gleich erscheinen

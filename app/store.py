@@ -745,7 +745,6 @@ def energy_week_summary(now: datetime | None = None, days: int = 7, offset_weeks
     if today_iso in per_day and (corr["import"] or corr["export"]):
         per_day[today_iso]["import"] += corr["import"]
         per_day[today_iso]["export"] += corr["export"]
-    cfg = load_config()
     days_out = []
     totals = {"solar": 0.0, "verbrauch": 0.0, "import": 0.0, "export": 0.0, "cost_ct": 0.0}
     for d in day_keys:
@@ -758,7 +757,7 @@ def energy_week_summary(now: datetime | None = None, days: int = 7, offset_weeks
             "solar": round(row["solar"], 2), "verbrauch": round(row["verbrauch"], 2),
             "import": round(row["import"], 2), "export": round(row["export"], 2),
             "cost_eur": day_cost, "autarky": autarky,
-            "cost_incl_fees_eur": cost_incl_fees_eur(cfg, day_cost, 1),
+            "cost_incl_fees_eur": cost_incl_fees_eur_for_range(day_cost, d, d),
         })
         for key in totals:
             totals[key] += row[key]
@@ -772,7 +771,7 @@ def energy_week_summary(now: datetime | None = None, days: int = 7, offset_weeks
         "totals": {"solar": round(totals["solar"], 2), "verbrauch": round(totals["verbrauch"], 2),
                    "import": round(totals["import"], 2), "export": round(totals["export"], 2),
                    "cost_eur": total_cost, "autarky": total_autarky,
-                   "cost_incl_fees_eur": cost_incl_fees_eur(cfg, total_cost, len(day_keys))},
+                   "cost_incl_fees_eur": cost_incl_fees_eur_for_range(total_cost, day_keys[0], day_keys[-1])},
         "offset_weeks": offset_weeks,
         "can_go_older": can_go_older,
     }
@@ -789,23 +788,110 @@ def _save_monthly(data: dict):
 
 def contract_fixed_cost_eur(cfg: dict, days: float) -> float:
     """Netto-Fixkosten des Stromvertrags (Grundgebühr, Netznutzung, Messstelle, abzüglich der Reduzierung
-    nach §14a EnWG) für `days` Tage - siehe Einstellungen → Stromtarif → Vertragskosten. Die monatliche
-    Grundgebühr wird gleichmäßig auf einen Monat (30,44 Tage im Schnitt) umgelegt. Alle Werte 0 (Standard) =
-    wirkt sich nichts aus, die bisherigen Kosten-Anzeigen (Netzkosten, Ersparnis) bleiben unverändert -
-    diese Funktion wird nur für die zusätzliche 'inkl. Gebühren'-Summe benutzt."""
-    per_day = (float(cfg.get("contract_fee_month_eur", 0) or 0) / 30.44
-               + float(cfg.get("grid_fee_day_eur", 0) or 0)
-               + float(cfg.get("meter_fee_day_eur", 0) or 0)
-               - float(cfg.get("section14a_credit_day_eur", 0) or 0))
-    return per_day * days
+    nach §14a EnWG) für `days` Tage, MIT DEN AKTUELL EINGESTELLTEN WERTEN - siehe Einstellungen → Stromtarif →
+    Vertragskosten. Fuer eine punktuelle Ja/Nein-Frage ("gibt es ueberhaupt Vertragskosten?", z.B.
+    webapp.has_contract_fees) unproblematisch, aber NICHT fuer echte vergangene Zeitraeume verwenden - dafuer
+    gibt es contract_fixed_cost_for_range(), das die zum jeweiligen Tag gueltige Periode nimmt (siehe
+    record_contract_period_if_changed() weiter unten: Michael, 28.09. - bei einem Anbieterwechsel duerfen sich
+    vergangene Monate nicht rueckwirkend mit den neuen Konditionen aendern)."""
+    return _fee_per_day(_period_values(cfg)) * days
 
 
 def cost_incl_fees_eur(cfg: dict, energy_cost_eur: float, days: float) -> float:
-    """Energiekosten (wie bisher aus den Tibber-Preisen berechnet, netto) plus die festen Vertragskosten für den
-    Zeitraum, darauf einmal die Mehrwertsteuer - genau wie auf der Tibber-Rechnung (Verbrauch + Gebühren, dann
-    EINE Mehrwertsteuer-Zeile auf die Summe). Damit vergleichbar mit der echten monatlichen Abrechnung."""
+    """Wie contract_fixed_cost_eur(): mit den AKTUELLEN Einstellungen, fuer punktuelle Faelle (z.B. notify.py -
+    der heutige Tag ist ja per Definition die aktuelle Periode). Fuer echte vergangene Zeitraeume siehe
+    cost_incl_fees_eur_for_range()."""
     vat = float(cfg.get("vat_percent", 0) or 0) / 100.0
     return round((energy_cost_eur + contract_fixed_cost_eur(cfg, days)) * (1 + vat), 2)
+
+
+# --- Vertragskosten-Perioden: Aenderungen an Grundgebuehr/Netznutzung/Messstelle/§14a/MwSt wirken sich nur ab
+# ihrem Gueltigkeitsdatum aus, nicht rueckwirkend auf die ganze Historie (siehe contract_fixed_cost_eur oben).
+CONTRACT_PERIODS_PATH = os.path.join(_DIR, "contract_periods.json")
+_CONTRACT_FIELDS = ("contract_fee_month_eur", "grid_fee_day_eur", "meter_fee_day_eur",
+                     "section14a_credit_day_eur", "vat_percent")
+
+
+def _period_values(cfg: dict) -> dict:
+    return {k: float(cfg.get(k, 0) or 0) for k in _CONTRACT_FIELDS}
+
+
+def _fee_per_day(p: dict) -> float:
+    return (float(p.get("contract_fee_month_eur", 0) or 0) / 30.44
+            + float(p.get("grid_fee_day_eur", 0) or 0)
+            + float(p.get("meter_fee_day_eur", 0) or 0)
+            - float(p.get("section14a_credit_day_eur", 0) or 0))
+
+
+def _load_contract_periods() -> list:
+    d = _load_json_recovering(CONTRACT_PERIODS_PATH, lambda: {"periods": []})
+    periods = d.get("periods") if isinstance(d, dict) else None
+    return periods if isinstance(periods, list) else []
+
+
+def _save_contract_periods(periods: list):
+    _dump_json(CONTRACT_PERIODS_PATH, {"periods": periods}, indent=2, backup=True)
+
+
+def record_contract_period_if_changed(cfg: dict, day: str | None = None) -> bool:
+    """Bei jedem Speichern der Einstellungen (webapp.py /api/config) aufrufen. Legt eine neue, ab `day`
+    (Standard: heute) gueltige Periode an, WENN sich einer der Vertragskosten-Werte oder die MwSt geaendert hat -
+    vergangene Tage/Monate rechnen weiter mit der bisherigen Periode (siehe contract_period_for_day()).
+    Beim allerersten Aufruf (noch keine Periode gespeichert) wird rueckwirkend ab 2000-01-01 die aktuelle
+    Config uebernommen - das entspricht dem bisherigen Verhalten (aktuelle Werte gelten fuer die gesamte
+    bekannte Vergangenheit), bis der Nutzer zum ersten Mal wirklich etwas aendert. Rueckgabe: True bei Aenderung."""
+    day = day or datetime.now().date().isoformat()
+    vals = _period_values(cfg)
+    periods = _load_contract_periods()
+    if not periods:
+        _save_contract_periods([{"from": "2000-01-01", **vals}])
+        return False
+    last = periods[-1]
+    if all(abs(float(last.get(k, 0.0)) - vals[k]) < 1e-9 for k in _CONTRACT_FIELDS):
+        return False
+    if last.get("from") == day:
+        periods[-1] = {"from": day, **vals}    # zweite Aenderung am selben Tag ueberschreibt statt zu duplizieren
+    else:
+        periods.append({"from": day, **vals})
+    _save_contract_periods(periods)
+    return True
+
+
+def contract_period_for_day(day: str) -> dict:
+    """Die am angegebenen Tag (YYYY-MM-DD) gueltigen Vertragskosten-Werte. Ohne je gespeicherte Periode (z.B.
+    frisch installierte App, noch nie etwas an den Vertragskosten gespeichert) Ruecksprung auf die aktuelle
+    Config - reine Rueckwaertskompatibilitaet."""
+    periods = _load_contract_periods()
+    if not periods:
+        return {"from": "1970-01-01", **_period_values(load_config())}
+    applicable = [p for p in periods if p.get("from", "") <= day]
+    return applicable[-1] if applicable else periods[0]   # Tag vor der ersten Periode -> aelteste bekannte nehmen
+
+
+def contract_fixed_cost_for_range(day_from: str, day_to: str) -> float:
+    """Netto-Fixkosten ueber einen Datumsbereich (beide Enden inklusive), Tag fuer Tag mit der jeweils zu dem
+    Zeitpunkt gueltigen Periode - damit eine Vertragsaenderung waehrend des Zeitraums nur ab ihrem
+    Gueltigkeitsdatum wirkt (siehe record_contract_period_if_changed())."""
+    periods = _load_contract_periods() or [{"from": "1970-01-01", **_period_values(load_config())}]
+    d0 = datetime.strptime(day_from, "%Y-%m-%d").date()
+    d1 = datetime.strptime(day_to, "%Y-%m-%d").date()
+    total, d = 0.0, d0
+    while d <= d1:
+        iso = d.isoformat()
+        applicable = [p for p in periods if p.get("from", "") <= iso]
+        total += _fee_per_day(applicable[-1] if applicable else periods[0])
+        d += timedelta(days=1)
+    return total
+
+
+def cost_incl_fees_eur_for_range(energy_cost_eur: float, day_from: str, day_to: str) -> float:
+    """Wie cost_incl_fees_eur(), aber periodenkorrekt ueber einen echten Datumsbereich. Die MwSt wird mit dem am
+    LETZTEN Tag des Zeitraums gueltigen Satz auf die Summe angewendet (der MwSt-Satz aendert sich in der Praxis
+    praktisch nie - eine tagegenaue Aufteilung wuerde eine vollstaendige Tages-Kosten-Historie je Monat
+    voraussetzen, die monthly_summary.json aus Platzgruenden bewusst nicht vorhaelt, siehe deren Kommentar)."""
+    fees = contract_fixed_cost_for_range(day_from, day_to)
+    vat = float(contract_period_for_day(day_to).get("vat_percent", 0) or 0) / 100.0
+    return round((energy_cost_eur + fees) * (1 + vat), 2)
 
 
 def monthly_overview(now: datetime | None = None, limit_months: int = 120) -> dict:
@@ -873,12 +959,14 @@ def monthly_overview(now: datetime | None = None, limit_months: int = 120) -> di
                    if m["verbrauch"] > 0 else None)
         y, mo = key.split("-")
         days = now.day if key == cur_key else calendar.monthrange(int(y), int(mo))[1]     # laufender Monat: bisherige Tage
+        month_from = f"{key}-01"
+        month_to = f"{key}-{days:02d}"
         rows.append({
             "month": key, "year": int(y), "month_num": int(mo),
             "solar": round(m["solar"], 2), "verbrauch": round(m["verbrauch"], 2),
             "import": round(m["import"], 2), "export": round(m["export"], 2),
             "cost_eur": round(m["cost_ct"] / 100.0, 2), "autarky": autarky,
-            "cost_incl_fees_eur": cost_incl_fees_eur(cfg, m["cost_ct"] / 100.0, days),
+            "cost_incl_fees_eur": cost_incl_fees_eur_for_range(m["cost_ct"] / 100.0, month_from, month_to),
             "batt_charge_kwh": round(m.get("batt_charge", 0.0), 2), "batt_discharge_kwh": round(m.get("batt_discharge", 0.0), 2),
             "vrm_only": bool(m.get("vrm_only")), "cost_known": m.get("cost_known", not m.get("vrm_only")),
         })
