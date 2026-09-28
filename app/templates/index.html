@@ -18,7 +18,6 @@
     <span id="e-day" style="min-width:78px;text-align:center;font-size:14px">Heute</span>
     <button id="e-next" class="ghost daytab" title="Nächster Tag">▶</button>
     <button id="e-pick" type="button" class="ghost daytab" title="Tag auswählen">📅</button>
-    <input type="date" id="e-datepick" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
     <span class="muted" style="margin-left:auto" id="energy-hint">Verbrauch &amp; Solar, Batterie-SOC. Baut sich im Lauf des Tages auf.</span>
   </div>
   <div class="chart-scroll">
@@ -101,7 +100,6 @@
       <span id="p-day" style="min-width:78px;text-align:center;font-size:14px">Heute</span>
       <button id="p-next" class="ghost daytab" title="Nächster Tag">▶</button>
       <button id="p-pick" type="button" class="ghost daytab" title="Tag auswählen">📅</button>
-      <input type="date" id="p-datepick" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
       <button id="btn-select" class="ghost sel-btn" aria-pressed="false">✏️ Markieren</button>
       <span class="muted" style="margin-left:auto" id="drag-hint">In die Kurve klicken oder ziehen, um einen Ladetermin anzulegen.</span>
     </div>
@@ -171,6 +169,25 @@
   #wx-days .d:nth-child(even) { background: rgba(255,255,255,.04); }
   #wx-days .d .m { color: var(--muted); font-size: 12px; }
   @media (max-width: 560px) { #wx-days .d { grid-template-columns: 64px 28px 76px 1fr; font-size: 13px; } }
+
+  /* Eigenes, dunkel gestyltes Kalender-Popup fuer die Tag-Auswahl (e-pick/f-pick/p-pick) statt des nativen
+     Browser-Datepickers - der bricht aus dem Design und erscheint nicht neben dem Icon (Michael, 28.09.). */
+  .calpop { position: fixed; z-index: 50; background: var(--card2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.4); width: 232px; }
+  .calpop .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .calpop .cal-head b { font-size: 13px; color: var(--fg); }
+  .calpop .cal-nav { background: none; border: none; color: var(--fg); cursor: pointer; font-size: 15px;
+    padding: 2px 10px; border-radius: 6px; line-height: 1.6; }
+  .calpop .cal-nav:hover { background: var(--bg); }
+  .calpop .cal-nav:disabled { color: #4a5266; cursor: default; background: none; }
+  .calpop .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+  .calpop .cal-wd { font-size: 11px; color: var(--muted); text-align: center; padding: 2px 0 4px; }
+  .calpop .cal-day { background: none; border: none; color: var(--fg); font-size: 13px; padding: 6px 0;
+    border-radius: 6px; cursor: pointer; }
+  .calpop .cal-day:hover:not(:disabled) { background: var(--bg); }
+  .calpop .cal-day.today { box-shadow: inset 0 0 0 1px var(--accent); }
+  .calpop .cal-day.sel { background: var(--accent); color: #14171c; font-weight: 600; }
+  .calpop .cal-day:disabled { color: #454c5c; cursor: default; }
 </style>
 <div class="card full" id="savings-card" hidden style="margin-bottom:14px">
   <style>
@@ -667,16 +684,72 @@ $('e-prev').addEventListener('click', () => shiftEnergyDay(-1));
 $('e-next').addEventListener('click', () => shiftEnergyDay(1));
 $('f-prev').addEventListener('click', () => shiftEnergyDay(-1));
 $('f-next').addEventListener('click', () => shiftEnergyDay(1));
-function openEnergyDatePick() {
-  const inp = $('e-datepick');
-  inp.min = energyMinDay || todayStr();
-  inp.max = fcForDay(tomorrowStr()) ? tomorrowStr() : todayStr();
-  inp.value = energyDay || todayStr();
-  try { inp.showPicker(); } catch (e) { inp.focus(); inp.click(); }   // showPicker() nicht ueberall verfuegbar (aeltere Browser)
+/* --- Eigenes Kalender-Popup (statt nativem <input type=date>) fuer e-pick/f-pick/p-pick: passend zum
+   dunklen Design und direkt neben dem Icon positioniert, statt am Browser-Standardort (Michael, 28.09.). */
+const CAL_MONTH_NAMES = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+let calPop = null, calOutsideHandler = null, calEscHandler = null;
+function closeCalPop() {
+  if (calPop) { calPop.remove(); calPop = null; }
+  if (calOutsideHandler) { document.removeEventListener('click', calOutsideHandler); calOutsideHandler = null; }
+  if (calEscHandler) { document.removeEventListener('keydown', calEscHandler); calEscHandler = null; }
 }
-$('e-pick').addEventListener('click', openEnergyDatePick);
-$('f-pick').addEventListener('click', openEnergyDatePick);   // teilt sich den Picker mit "Energie (Verlauf)" - beide zeigen denselben Tag
-$('e-datepick').addEventListener('change', () => { if ($('e-datepick').value) loadEnergyDay($('e-datepick').value); });
+function openCalendarPicker(anchor, opts, onPick) {
+  closeCalPop();
+  const todayIso = todayStr();
+  let [vy, vm] = (opts.value || todayIso).split('-').map(Number);
+  const pop = document.createElement('div');
+  pop.className = 'calpop';
+  function place() {
+    const r = anchor.getBoundingClientRect();
+    let top = r.bottom + 6, left = r.left;
+    if (left + pop.offsetWidth > window.innerWidth - 10) left = window.innerWidth - pop.offsetWidth - 10;
+    if (top + pop.offsetHeight > window.innerHeight - 10) top = r.top - pop.offsetHeight - 6;
+    pop.style.left = Math.max(10, left) + 'px';
+    pop.style.top = Math.max(10, top) + 'px';
+  }
+  function render() {
+    const first = new Date(vy, vm - 1, 1);
+    const startOffset = (first.getDay() + 6) % 7;              // Woche beginnt Montag
+    const daysInMonth = new Date(vy, vm, 0).getDate();
+    const prevDisabled = opts.min && `${vy}-${pad(vm)}-01` <= opts.min;
+    const nextDisabled = opts.max && `${vy}-${pad(vm)}-${pad(daysInMonth)}` >= opts.max;
+    let cells = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map(wd => `<div class="cal-wd">${wd}</div>`).join('');
+    for (let i = 0; i < startOffset; i++) cells += '<div></div>';
+    for (let d = 1; d <= daysInMonth; d++) {
+      const iso = `${vy}-${pad(vm)}-${pad(d)}`;
+      const disabled = (opts.min && iso < opts.min) || (opts.max && iso > opts.max);
+      const cls = ['cal-day'];
+      if (iso === todayIso) cls.push('today');
+      if (iso === opts.value) cls.push('sel');
+      cells += `<button type="button" class="${cls.join(' ')}"${disabled ? ' disabled' : ''} data-day="${iso}">${d}</button>`;
+    }
+    pop.innerHTML = `<div class="cal-head"><button type="button" class="cal-nav" data-nav="-1"${prevDisabled ? ' disabled' : ''}>‹</button>`
+      + `<b>${CAL_MONTH_NAMES[vm - 1]} ${vy}</b><button type="button" class="cal-nav" data-nav="1"${nextDisabled ? ' disabled' : ''}>›</button></div>`
+      + `<div class="cal-grid">${cells}</div>`;
+  }
+  render();
+  document.body.appendChild(pop);
+  calPop = pop;
+  place();
+  pop.addEventListener('click', e => {
+    const nav = e.target.closest('[data-nav]');
+    if (nav) { vm += Number(nav.dataset.nav); if (vm < 1) { vm = 12; vy--; } else if (vm > 12) { vm = 1; vy++; } render(); place(); return; }
+    const dayBtn = e.target.closest('[data-day]');
+    if (dayBtn) { closeCalPop(); onPick(dayBtn.dataset.day); }
+  });
+  setTimeout(() => {
+    calOutsideHandler = e => { if (!pop.contains(e.target) && e.target !== anchor) closeCalPop(); };
+    document.addEventListener('click', calOutsideHandler);
+  }, 0);
+  calEscHandler = e => { if (e.key === 'Escape') closeCalPop(); };
+  document.addEventListener('keydown', calEscHandler);
+}
+function openEnergyDatePick(anchor) {
+  openCalendarPicker(anchor, { value: energyDay || todayStr(), min: energyMinDay || todayStr(),
+    max: fcForDay(tomorrowStr()) ? tomorrowStr() : todayStr() }, day => loadEnergyDay(day));
+}
+$('e-pick').addEventListener('click', e => openEnergyDatePick(e.currentTarget));
+$('f-pick').addEventListener('click', e => openEnergyDatePick(e.currentTarget));   // teilt sich den Picker mit "Energie (Verlauf)" - beide zeigen denselben Tag
 
 /* --- Drag-Auswahl --- */
 function slotAtX(clientX) {
@@ -1315,14 +1388,10 @@ function shiftPriceDay(delta) {
 }
 $('p-prev').addEventListener('click', () => shiftPriceDay(-1));
 $('p-next').addEventListener('click', () => shiftPriceDay(1));
-$('p-pick').addEventListener('click', () => {
-  const inp = $('p-datepick');
-  inp.min = priceMinDay || todayStr();
-  inp.max = priceMaxDay();
-  inp.value = priceDay || todayStr();
-  try { inp.showPicker(); } catch (e) { inp.focus(); inp.click(); }
+$('p-pick').addEventListener('click', e => {
+  openCalendarPicker(e.currentTarget, { value: priceDay || todayStr(), min: priceMinDay || todayStr(), max: priceMaxDay() },
+    day => { priceDay = day; applyDay(); });
 });
-$('p-datepick').addEventListener('change', () => { if ($('p-datepick').value) { priceDay = $('p-datepick').value; applyDay(); } });
 
 function renderOverview(items) {
   const t = $('charge-log');
