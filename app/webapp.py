@@ -728,7 +728,12 @@ class Controller:
         slots.sort(key=lambda x: x.start)
         if not slots or slots[0].start != now_q:
             return None
-        res = planner.run(now, soc, params, slots, solar, cons or None, set(), floor_soc=params.soc_floor_pct)
+        # Sicherheitspuffer: die Planung rechnet mit einer hoeheren Untergrenze als der echte Cerbo-Minimalwert
+        # (soc_floor_pct), damit sie nicht bis auf den letzten Prozentpunkt auf die Sonnenprognose wettet - die
+        # harte Ladesperre/Notbremse anderswo bleibt unveraendert beim echten Wert (Michael, 29.09.).
+        buffered_floor = min(params.soc_floor_pct + max(0.0, params.smart_planner_safety_buffer_pct),
+                              params.max_charge_soc - 1)
+        res = planner.run(now, soc, params, slots, solar, cons or None, set(), floor_soc=buffered_floor)
         if not res or not res.get("times"):
             return None
         charge_kwh = res["sim"]["charge_kwh"]

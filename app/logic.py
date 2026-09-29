@@ -66,6 +66,11 @@ class Params:
     max_charge_soc: float = MAX_CHARGE_SOC
     absolute_cheap_price: float = ABSOLUTE_CHEAP_PRICE
     soc_floor_pct: float = 0.0     # 'Minimaler SOC' am Cerbo (wird je Durchlauf gelesen): darunter liefert der Akku nichts mehr
+    smart_planner_safety_buffer_pct: float = 5.0   # Intelligente Planung rechnet mit soc_floor_pct + diesem Puffer als
+    # Untergrenze (siehe webapp._smart_decision), OHNE den echten Cerbo-Minimalwert zu aendern - reine Sicherheitsmarge
+    # gegen eine zu optimistische Sonnenprognose (Michael, 29.09.: "min soc 15% eingestellt, Software soll trotzdem mit
+    # 20% rechnen" - Ladelimit/harte Cerbo-Sperre bleiben unveraendert bei den echten 15%, nur die Planung selbst wird
+    # vorsichtiger und laedt nachts etwas frueher/mehr, statt bis auf den letzten Prozentpunkt auf die Sonne zu wetten).
     dynamic_pricing: bool = True   # False = fester Tarif: keine preisbasierten Strategien
 
     @classmethod

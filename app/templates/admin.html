@@ -351,6 +351,9 @@
     <label class="switch" style="margin:0"><input type="checkbox" id="smart_planner_enabled"><span class="slider"></span></label>
     <div><b>Intelligente Planung aktiv</b><div class="muted">An (Standard). Nur ausschalten, um stattdessen die festen Strategien unten von Hand einzustellen.</div></div>
   </div>
+  <div style="margin-top:14px"><label>Sicherheitspuffer beim Nachtladen (%-Punkte)
+    <span class="qhelp" role="button" tabindex="0" data-help="Die Planung rechnet nachts so, als läge der minimale Akkustand um diesen Wert höher als der echte, am Cerbo eingestellte Wert – sie plant also vorsichtiger und lädt tendenziell etwas früher/mehr, statt bis auf den letzten Prozentpunkt auf die Sonnenprognose zu wetten. Die echte Ladesperre am Cerbo (Minimaler Akkustand oben unter „Anlage & Speicher“) ändert sich dadurch NICHT – nur wie weit die Planung sich traut, den Akku rechnerisch runterzufahren. 0 = kein Puffer, rechnet exakt mit dem echten Minimalwert (Verhalten wie vor dem 29.09.2026). Beispiel: Minimaler Akkustand 15 %, Puffer 5 % → die Planung rechnet mit 20 % als Untergrenze.">?</span></label>
+    <input id="smart_planner_safety_buffer_pct" type="number" step="1" min="0" max="30" placeholder="z.B. 5" style="width:100px"></div>
   <details class="help" style="margin-top:12px">
     <summary>Was ist daran anders als die Strategien unten?</summary>
     <div class="help-body">
@@ -701,7 +704,7 @@ const PARAM_KEYS = ['battery_usable_kwh','daily_usage_kwh','pv_reserve_kwh',
   'evening_comfort_soc','valley_min_saving_ct',
   'night_safety_soc','target_safe_soc','hysterese_soc',
   'contract_fee_month_eur','grid_fee_day_eur','meter_fee_day_eur','section14a_credit_day_eur','vat_percent',
-  'battery_expected_cycles'];
+  'battery_expected_cycles','smart_planner_safety_buffer_pct'];
 
 /* ---- "Meine Ansicht": Kippschalter + ▲▼, je Konto fuer sich selbst - ersetzt die frueher globale
    "Kacheln"-Karte (die fuer ALLE Konten auf einmal galt und dadurch ueberfluessig war, jetzt wo
