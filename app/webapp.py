@@ -686,6 +686,16 @@ class Controller:
             })
         return out
 
+    @staticmethod
+    def _buffered_floor(params):
+        """Untergrenze fuer den Planer (planner.py): der echte Cerbo-Minimalwert (params.soc_floor_pct) plus
+        Sicherheitspuffer (params.smart_planner_safety_buffer_pct) - siehe _smart_decision(). Von der Ladeplan-
+        Simulation (_run_plansim) genauso benutzt, damit deren 'Bisherige Steuerung' wirklich das zeigt, was live
+        passiert, statt mit dem ungenutzten alten night_safety_soc-Default (30%) zu rechnen (Michael, 29.09.:
+        Simulation zeigte eine bei 30% schnurgerade SOC-Linie, obwohl der echte Minimalwert+Puffer nur 20% sind)."""
+        return min(params.soc_floor_pct + max(0.0, params.smart_planner_safety_buffer_pct),
+                   params.max_charge_soc - 1)
+
     # ------------------------------------------------------------ Ladeplan-Simulation (nur Anzeige)
     @staticmethod
     def _hour_map(hours, now):
@@ -728,12 +738,7 @@ class Controller:
         slots.sort(key=lambda x: x.start)
         if not slots or slots[0].start != now_q:
             return None
-        # Sicherheitspuffer: die Planung rechnet mit einer hoeheren Untergrenze als der echte Cerbo-Minimalwert
-        # (soc_floor_pct), damit sie nicht bis auf den letzten Prozentpunkt auf die Sonnenprognose wettet - die
-        # harte Ladesperre/Notbremse anderswo bleibt unveraendert beim echten Wert (Michael, 29.09.).
-        buffered_floor = min(params.soc_floor_pct + max(0.0, params.smart_planner_safety_buffer_pct),
-                              params.max_charge_soc - 1)
-        res = planner.run(now, soc, params, slots, solar, cons or None, set(), floor_soc=buffered_floor)
+        res = planner.run(now, soc, params, slots, solar, cons or None, set(), floor_soc=self._buffered_floor(params))
         if not res or not res.get("times"):
             return None
         charge_kwh = res["sim"]["charge_kwh"]
@@ -774,7 +779,8 @@ class Controller:
                 seen.add(start)
                 slots.append(Slot(name="", price=item["total"] * 100, start=start))
         slots.sort(key=lambda x: x.start)
-        res = planner.run(now, soc, params, slots, solar, cons or None, {x.start for x in d.plan})
+        res = planner.run(now, soc, params, slots, solar, cons or None, {x.start for x in d.plan},
+                          floor_soc=self._buffered_floor(params))
         if not res:
             return {"available": False, "reason": "Zu wenig Preis- oder Prognosedaten für eine Simulation."}
         try:
