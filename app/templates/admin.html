@@ -323,6 +323,12 @@
     <div><label>Ladelimit / max. SOC (%)
         <span class="qhelp" role="button" tabindex="0" data-help="Harte Obergrenze: ab diesem Ladestand wird nie aus dem Netz geladen - auch nicht bei manuellen Ladeterminen oder Sofort-Override.">?</span>
       </label><input id="max_charge_soc" type="number" min="1" max="100"></div>
+    <div><label>Periodische Vollladung (Tage)
+        <span class="qhelp" role="button" tabindex="0" data-help="Für die Batteriegesundheit (BMS-Balancing der Zellen, genauere Alterungsschätzung) sollte der Akku hin und wieder wirklich ganz voll werden, statt dauerhaft am Ladelimit gedeckelt zu bleiben. Diese Einstellung hebt dafür alle X Tage die Ladeobergrenze auf das Vollladungs-Ziel unten an - WANN tatsächlich geladen wird, entscheidet weiterhin ganz normal die Intelligente Planung bzw. die Preis-Strategien: es wird nie blind sofort geladen, sondern nur beim nächsten günstigen Moment bzw. wenn genug Sonne da ist. Findet sich lange kein günstiger Anlass, bleibt es einfach weiter fällig, auch über mehrere Tage. Die PV-Reserve bleibt unangetastet - die letzten Prozent bis zum Ziel soll nach Möglichkeit die Sonne beisteuern. 0 = Funktion aus (Standard).">?</span>
+      </label><input id="periodic_full_charge_days" type="number" min="0" step="1" placeholder="0 = aus, z.B. 30"></div>
+    <div><label>Vollladungs-Ziel (%)
+        <span class="qhelp" role="button" tabindex="0" data-help="Ziel-Ladestand für die periodische Vollladung oben (meist 100 %). Wird nur angesteuert, wenn oben ein Intervall eingetragen ist.">?</span>
+      </label><input id="periodic_full_charge_target_soc" type="number" min="1" max="100" placeholder="z.B. 100"></div>
     <div><label>Minimaler Akkustand am Cerbo (%)
         <span class="qhelp" role="button" tabindex="0" data-help="Dieselbe Einstellung wie im VRM-Portal unter „Minimaler SOC (es sei denn, Netz fällt aus)“: Darunter entlädt der Akku nicht weiter, das Haus läuft dann aus dem Netz. Wird direkt am Cerbo gesetzt, nicht erst mit „Speichern“.">?</span>
       </label>
@@ -704,7 +710,8 @@ const PARAM_KEYS = ['battery_usable_kwh','daily_usage_kwh','pv_reserve_kwh',
   'evening_comfort_soc','valley_min_saving_ct',
   'night_safety_soc','target_safe_soc','hysterese_soc',
   'contract_fee_month_eur','grid_fee_day_eur','meter_fee_day_eur','section14a_credit_day_eur','vat_percent',
-  'battery_expected_cycles','smart_planner_safety_buffer_pct'];
+  'battery_expected_cycles','smart_planner_safety_buffer_pct',
+  'periodic_full_charge_days','periodic_full_charge_target_soc'];
 
 /* ---- "Meine Ansicht": Kippschalter + ▲▼, je Konto fuer sich selbst - ersetzt die frueher globale
    "Kacheln"-Karte (die fuer ALLE Konten auf einmal galt und dadurch ueberfluessig war, jetzt wo

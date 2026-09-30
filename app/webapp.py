@@ -561,6 +561,7 @@ class Controller:
         except Exception as e:                           # noqa: BLE001
             log.warning("Alarme nicht lesbar: %s", e)
         state = store.load_state()
+        self._apply_periodic_full_charge(state, params, soc, now)
         d = decide(soc=soc, price_entries=prices, solar_today_raw=solar_today_for_control,
                    solar_tom_raw=solar_tom_ctl, state=state, now=now,
                    manual_override=forced, force_reason=reason,
@@ -685,6 +686,42 @@ class Controller:
                 "cheap_lock": bool(absolute_cheap_price) and ct <= absolute_cheap_price,
             })
         return out
+
+    @staticmethod
+    def _apply_periodic_full_charge(state, params, soc, now):
+        """Periodische Vollladung fuer Batteriegesundheit/BMS-Balancing (angeregt durch Victrons 'GX Opportunity
+        Loads'-Folien, Venus OS v3.80, 29.09.2026 - siehe Params.periodic_full_charge_days). Hebt NUR die
+        Ladeobergrenze (params.max_charge_soc) an, wenn eine Vollladung faellig ist - WANN tatsaechlich geladen
+        wird, entscheidet weiterhin die ganz normale preis-/sonnenbewusste Logik danach (Intelligente Planung
+        bzw. Standard-Strategien). Es wird nie blind/sofort geladen (Michael, 30.09.: "niemals blind laden und
+        die preise ausser acht lassen") - ist gerade kein guenstiger Moment oder scheint keine Sonne, wartet die
+        angehobene Grenze einfach weiter, auch ueber mehrere Tage hinweg. pv_reserve_kwh bleibt dabei unangetastet,
+        d.h. per Netz wird trotzdem nur bis zur gewohnten Reserve-Grenze zugekauft - die letzten Prozent bis zum
+        Ziel soll nach Moeglichkeit die Sonne selbst beisteuern, nicht erzwungener Netzbezug."""
+        interval = float(params.periodic_full_charge_days or 0)
+        if interval <= 0:
+            state.full_charge_pending = False
+            return
+        target = float(params.periodic_full_charge_target_soc or 100.0)
+        due = True
+        if state.last_full_charge_date:
+            try:
+                last = datetime.strptime(state.last_full_charge_date, "%Y-%m-%d").date()
+                due = (now.date() - last).days >= interval
+            except ValueError:
+                due = True
+        if due and params.max_charge_soc < target:
+            if not state.full_charge_pending:
+                opslog.log("battery", f"Periodische Vollladung fällig (alle {interval:.0f} Tage) – "
+                           f"Ladeobergrenze bis {target:.0f} % angehoben, sobald Preis/Sonne es hergeben.")
+            state.full_charge_pending = True
+            params.max_charge_soc = target
+        if soc >= target - 0.5 and (state.full_charge_pending or not state.last_full_charge_date):
+            if state.full_charge_pending:
+                opslog.log("battery", f"Vollladung erreicht ({soc:.0f} %) – nächste periodische Vollladung "
+                           f"in {interval:.0f} Tagen fällig.")
+            state.last_full_charge_date = now.date().isoformat()
+            state.full_charge_pending = False
 
     @staticmethod
     def _buffered_floor(params):
