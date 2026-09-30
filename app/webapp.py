@@ -646,6 +646,7 @@ class Controller:
                 "system": system,
                 "override": bool(cfg.get("manual_override")),
                 "tariff_mode": cfg.get("tariff_mode", "tibber"),
+                "full_charge": self._full_charge_status(cfg, state, now),
             }
         # Hinweis: Das Energie-Logging läuft in einem eigenen, feineren Takt
         # (run_energy / energy_sample_seconds), NICHT hier - sonst würde die
@@ -722,6 +723,28 @@ class Controller:
                            f"in {interval:.0f} Tagen fällig.")
             state.last_full_charge_date = now.date().isoformat()
             state.full_charge_pending = False
+
+    @staticmethod
+    def _full_charge_status(cfg, state, now):
+        """Anzeige-Info fuer die Karte 'Periodische Vollladung' (admin.html): wie viele Tage noch bis zur
+        naechsten Faelligkeit, bzw. ob gerade eine faellig ist und auf einen guenstigen Moment/genug Sonne
+        wartet. Reine Anzeige - die eigentliche Entscheidung trifft _apply_periodic_full_charge()."""
+        interval = float(cfg.get("periodic_full_charge_days") or 0)
+        if interval <= 0:
+            return {"enabled": False}
+        target = float(cfg.get("periodic_full_charge_target_soc") or 100.0)
+        last = state.last_full_charge_date or None
+        days_since = next_date = None
+        if last:
+            try:
+                last_d = datetime.strptime(last, "%Y-%m-%d").date()
+                days_since = (now.date() - last_d).days
+                next_date = (last_d + timedelta(days=int(interval))).isoformat()
+            except ValueError:
+                pass
+        days_left = None if days_since is None else max(0, int(interval) - days_since)
+        return {"enabled": True, "interval_days": interval, "target_soc": target, "last_date": last,
+                "pending": bool(state.full_charge_pending), "days_left": days_left, "next_date": next_date}
 
     @staticmethod
     def _buffered_floor(params):

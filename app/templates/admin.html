@@ -323,12 +323,6 @@
     <div><label>Ladelimit / max. SOC (%)
         <span class="qhelp" role="button" tabindex="0" data-help="Harte Obergrenze: ab diesem Ladestand wird nie aus dem Netz geladen - auch nicht bei manuellen Ladeterminen oder Sofort-Override.">?</span>
       </label><input id="max_charge_soc" type="number" min="1" max="100"></div>
-    <div><label>Periodische Vollladung (Tage)
-        <span class="qhelp" role="button" tabindex="0" data-help="Für die Batteriegesundheit (BMS-Balancing der Zellen, genauere Alterungsschätzung) sollte der Akku hin und wieder wirklich ganz voll werden, statt dauerhaft am Ladelimit gedeckelt zu bleiben. Diese Einstellung hebt dafür alle X Tage die Ladeobergrenze auf das Vollladungs-Ziel unten an - WANN tatsächlich geladen wird, entscheidet weiterhin ganz normal die Intelligente Planung bzw. die Preis-Strategien: es wird nie blind sofort geladen, sondern nur beim nächsten günstigen Moment bzw. wenn genug Sonne da ist. Findet sich lange kein günstiger Anlass, bleibt es einfach weiter fällig, auch über mehrere Tage. Die PV-Reserve bleibt unangetastet - die letzten Prozent bis zum Ziel soll nach Möglichkeit die Sonne beisteuern. 0 = Funktion aus (Standard).">?</span>
-      </label><input id="periodic_full_charge_days" type="number" min="0" step="1" placeholder="0 = aus, z.B. 30"></div>
-    <div><label>Vollladungs-Ziel (%)
-        <span class="qhelp" role="button" tabindex="0" data-help="Ziel-Ladestand für die periodische Vollladung oben (meist 100 %). Wird nur angesteuert, wenn oben ein Intervall eingetragen ist.">?</span>
-      </label><input id="periodic_full_charge_target_soc" type="number" min="1" max="100" placeholder="z.B. 100"></div>
     <div><label>Minimaler Akkustand am Cerbo (%)
         <span class="qhelp" role="button" tabindex="0" data-help="Dieselbe Einstellung wie im VRM-Portal unter „Minimaler SOC (es sei denn, Netz fällt aus)“: Darunter entlädt der Akku nicht weiter, das Haus läuft dann aus dem Netz. Wird direkt am Cerbo gesetzt, nicht erst mit „Speichern“.">?</span>
       </label>
@@ -343,6 +337,25 @@
         <span class="qhelp" role="button" tabindex="0" data-help="Gegenstück zum Ladelimit: faellt der Preis auf oder unter diesen Wert, wird sofort geladen, unabhaengig davon, ob gerade eine Strategie ueberhaupt Bedarf sieht - fuer Preise, die an dem Tag mit hoher Sicherheit nicht mehr unterboten werden. Bleibt weiterhin unter dem Ladelimit oben. 0 = deaktiviert.">?</span>
       </label><input id="absolute_cheap_price" type="number" step="0.5" min="0"></div>
   </div>
+</div>
+
+<div class="card">
+  <h2><svg class="h2i" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><rect x="20" y="10" width="2" height="4"/></svg>Periodische Vollladung</h2>
+  <div class="muted" style="margin-bottom:12px">Für die Batteriegesundheit (BMS-Balancing der Zellen, genauere Alterungsschätzung) sollte der Akku hin
+    und wieder wirklich ganz voll werden, statt dauerhaft am Ladelimit gedeckelt zu bleiben. Diese Einstellung hebt dafür alle X Tage die
+    Ladeobergrenze auf das Vollladungs-Ziel unten an – <b>wann</b> tatsächlich geladen wird, entscheidet weiterhin ganz normal die Intelligente
+    Planung bzw. die Preis-Strategien: es wird nie blind sofort geladen, sondern nur beim nächsten günstigen Moment bzw. wenn genug Sonne da
+    ist. Findet sich lange kein günstiger Anlass, bleibt es einfach weiter fällig, auch über mehrere Tage. Die PV-Reserve bleibt unangetastet –
+    die letzten Prozent bis zum Ziel soll nach Möglichkeit die Sonne beisteuern.</div>
+  <div class="grid2">
+    <div><label>Intervall (Tage)
+        <span class="qhelp" role="button" tabindex="0" data-help="Alle so viele Tage wird eine Vollladung fällig (siehe Kartentext oben). 0 = Funktion aus (Standard).">?</span>
+      </label><input id="periodic_full_charge_days" type="number" min="0" step="1" placeholder="0 = aus, z.B. 30"></div>
+    <div><label>Vollladungs-Ziel (%)
+        <span class="qhelp" role="button" tabindex="0" data-help="Ziel-Ladestand für die periodische Vollladung (meist 100 %). Wird nur angesteuert, wenn links ein Intervall eingetragen ist.">?</span>
+      </label><input id="periodic_full_charge_target_soc" type="number" min="1" max="100" placeholder="z.B. 100"></div>
+  </div>
+  <div class="muted" id="full-charge-status" style="margin-top:10px">–</div>
 </div>
 
 <div id="dynamic-pricing-cards">
@@ -1442,8 +1455,27 @@ loadVrmInfo();
     const st = (await (await fetch('/api/status')).json()).status || {};
     if (st.pv_source) document.getElementById('pv-source-msg').textContent =
       `Aktuell steuert: ${st.pv_source}${st.pv_note ? ' – ⚠ ' + st.pv_note : ''}`;
+    renderFullChargeStatus(st.full_charge);
   } catch (e) { /* egal */ }
 })();
+/* --- Periodische Vollladung: Status-Zeile ("in X Tagen" / "fällig, wartet ...") --- */
+function fmtDateDE(iso) { if (!iso) return ''; const [y, m, d] = iso.split('-'); return `${d}.${m}.${y}`; }
+function renderFullChargeStatus(fc) {
+  const el = document.getElementById('full-charge-status');
+  if (!el) return;
+  if (!fc || !fc.enabled) { el.textContent = 'Aus – trage links ein Intervall ein, um sie zu aktivieren.'; return; }
+  const zuletzt = fc.last_date ? `Zuletzt erreicht: ${fmtDateDE(fc.last_date)}.` : 'Bisher noch nie erreicht.';
+  if (fc.pending) {
+    el.textContent = `⏳ Fällig – wartet auf einen günstigen Moment bzw. genug Sonne, um auf ${fc.target_soc.toFixed(0)} % zu laden. ${zuletzt}`;
+  } else if (fc.days_left === 0) {
+    el.textContent = `⏳ Heute fällig. ${zuletzt}`;
+  } else if (fc.days_left != null) {
+    el.textContent = `Nächste Vollladung: in ${fc.days_left} Tag${fc.days_left === 1 ? '' : 'en'}`
+      + (fc.next_date ? ` (ca. ${fmtDateDE(fc.next_date)})` : '') + `. ${zuletzt}`;
+  } else {
+    el.textContent = `Noch nie erreicht – wird beim nächsten Durchlauf fällig (wartet dann auf einen günstigen Moment).`;
+  }
+}
 /* --- Wetter: Standort --- */
 function wxMsg(t, err) { const m = document.getElementById('wx-msg'); m.textContent = t; m.style.color = err ? '#e5544a' : ''; }
 async function wxLoad() {
@@ -1579,7 +1611,7 @@ setInterval(refreshShellyStatus, 5000);
 
 /* --- Reiter: jede Karte gehoert zu genau einem Reiter (Zuordnung ueber die Ueberschrift) --- */
 const ADMIN_TABS = [
-  { id: 'anlage', label: 'Anlage', match: ['Victron Cerbo', 'Anlage', 'Batterie-Watchdog', 'Netz-Zähler'] },
+  { id: 'anlage', label: 'Anlage', match: ['Victron Cerbo', 'Anlage', 'Batterie-Watchdog', 'Netz-Zähler', 'Periodische Vollladung'] },
   { id: 'tarif', label: 'Tarif & Laden', match: ['Tibber', 'Stromtarif', 'Vertragskosten', 'Intelligente Planung', 'Peak-Schutz', 'SOC-Strategie', 'PV-Prognose'] },
   { id: 'solar', label: 'Solar', match: ['PV-Wechselrichter'] },
   { id: 'vrm', label: 'VRM', match: ['Victron VRM'] },
