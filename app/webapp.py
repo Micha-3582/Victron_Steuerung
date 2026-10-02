@@ -1168,7 +1168,11 @@ class Controller:
                     for ev in flow_engine.step(now, ctx, [r for r in all_rules if flows.is_flow(r)]):
                         self._log_flow_event(ev, dry)
                     for act in flow_engine.advance(skip_waits=dry):
-                        self._apply_flow(act, dry, cfg)
+                        try:
+                            self._apply_flow(act, dry, cfg)
+                        except Exception as e:                                       # noqa: BLE001
+                            log.warning("Ablauf-Schritt fehlgeschlagen: %s", e)         # ein kaputter Schritt darf die folgenden nicht verschlucken
+                            autolog.log("rules", f"Regel „{act.get('rule', '')}“: Schritt fehlgeschlagen ({e})", dev=act.get("rule", ""), action="fail", dry=dry, rule=act.get("rule_id"))
                     virtual.consume(pressed)                                         # Knopfdruck war genau einen Durchlauf lang sichtbar
                     if time.time() - last_flush > 60:
                         rule_engine.flush()
