@@ -9,11 +9,11 @@
 </style>
 
 {% if user_perms.rules != 'write' %}
-<div class="card" style="border-color:var(--muted)"><div class="muted">🧪 Testbereich – du kannst den Regel-Baukasten frei ausprobieren (Regeln anlegen, Bedingungen zusammenstellen), aber mit diesem Konto lässt sich nichts speichern und nichts wirkt auf die echte Steuerung.</div></div>
+<div class="card" style="border-color:var(--muted)"><div class="muted">🧪 Testbereich – du kannst den Regel-Editor frei ausprobieren (Regeln anlegen, Bedingungen zusammenstellen), aber mit diesem Konto lässt sich nichts speichern und nichts wirkt auf die echte Steuerung.</div></div>
 {% endif %}
 <div class="card" id="rules-card">
   <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Regeln</h2>
-  <div class="muted" style="margin-bottom:12px">Dein eigener kleiner Smart-Home-Baukasten. Jede Regel hat einen Namen und besteht aus <b>WENN</b> (Bedingungen: Uhrzeit, Strompreis, Akku, Sonne, Sensor, anderes Gerät, eigener Schalter/Knopf),
+  <div class="muted" style="margin-bottom:12px">Dein Regel-Editor für das ganze Smart Home. Jede Regel hat einen Namen und besteht aus <b>WENN</b> (Bedingungen: Uhrzeit, Strompreis, Akku, Sonne, Sensor, anderes Gerät, eigener Schalter/Knopf),
     <b>DANN</b> und optional <b>SONST</b>. Es gibt zwei Arten: <b>Zustand halten</b> (Geräte folgen der Bedingung, z. B. „Licht an, solange die Tür offen ist“) und <b>Ablauf</b> (startet einmal, wenn die Bedingung eintritt – mit Warten,
     Thermostat-Sollwerten, Telegram-Nachricht und eigenen Schaltern, z. B. „Warmwasser-Timer“). Fehlt ein Messwert (Sensor oder Gerät nicht erreichbar), passiert nichts. Zustands-Regeln übernehmen laufende Geräte; von Hand ausgeschaltete bleiben aus, bis die Bedingung einmal nicht mehr stimmt;
     eine „ausschalten“-Regel gewinnt gegen jede „einschalten“-Regel desselben Geräts. Schaltest du die Regeln insgesamt aus, werden laufende Abläufe abgebrochen.
@@ -221,7 +221,7 @@ function collectCond(row) {
   if (t === 'device') return v('c-dk') === 'power' ? { type: t, device_id: v('c-dev'), op: v('c-op'), value: v('c-val') } : { type: t, device_id: v('c-dev'), is: v('c-dk') };
   return { type: 'sun_tomorrow', op: v('c-op'), kwh: v('c-kwh') };
 }
-const STEP_TYPES = [['switch', 'Gerät ein-/ausschalten'], ['wait', 'Warten'], ['setpoint', 'Thermostate: Solltemperatur setzen'], ['notify', 'Telegram-Nachricht senden'], ['virtual', 'Eigenen Schalter setzen / Knopf drücken']];
+const STEP_TYPES = [['switch', 'Gerät ein-/ausschalten'], ['toggle', 'Gerät umschalten (an ↔ aus)'], ['wait', 'Warten'], ['setpoint', 'Thermostate: Solltemperatur setzen'], ['notify', 'Telegram-Nachricht senden'], ['virtual', 'Eigenen Schalter setzen / Knopf drücken']];
 function actRow(a, branch, flow) {
   const t = a.type || 'switch', sel = (cls, val, list, w) => `<select class="${cls}" style="width:${w || 'auto'}" onchange="ruleEdited(this)">${optHtml(list, val)}</select>`;
   let body = '';
@@ -231,6 +231,11 @@ function actRow(a, branch, flow) {
       + (known ? '' : `<option value="${escH(a.device_id)}" selected>${d ? escH(d.icon + ' ' + d.name) : '(Gerät fehlt)'}</option>`);
     body = `<select class="a-state" style="width:auto;font-weight:600" onchange="ruleEdited(this)">${optHtml([['on', '🟢 einschalten'], ['off', '🔴 ausschalten']], a.state)}</select>
       <select class="a-dev" style="width:auto;min-width:180px" onchange="ruleEdited(this)">${opts}</select>`;
+  } else if (t === 'toggle') {
+    const devs = switchable(), known = devs.some(x => x.id === a.device_id), d = dev(a.device_id);
+    const opts = devs.map(x => `<option value="${escH(x.id)}" ${x.id === a.device_id ? 'selected' : ''}>${escH(x.icon)} ${escH(x.name)}</option>`).join('')
+      + (known ? '' : `<option value="${escH(a.device_id)}" selected>${d ? escH(d.icon + ' ' + d.name) : '(Gerät fehlt)'}</option>`);
+    body = `<b>🔁 Umschalten</b> <select class="a-dev" style="width:auto;min-width:180px" onchange="ruleEdited(this)">${opts}</select> <span class="muted">(läuft es, geht es aus – sonst an)</span>`;
   } else if (t === 'wait') {
     const sec = a.seconds || 60, unit = sec % 3600 === 0 ? 'h' : sec % 60 === 0 ? 'min' : 's', val = unit === 'h' ? sec / 3600 : unit === 'min' ? sec / 60 : sec;
     body = `<b>⏱ Warten</b> <input class="a-wval" type="number" min="1" step="any" value="${val}" style="width:90px" oninput="ruleEdited(this)">
@@ -246,7 +251,7 @@ function actRow(a, branch, flow) {
     body = `<b>✉ Telegram</b> <input class="a-text" placeholder="Nachricht, z.B. Warmwasser ist fertig" value="${escH(a.text || '')}" style="flex:1;min-width:220px" oninput="ruleEdited(this)">`;
   } else if (t === 'virtual') {
     const list = S.virtual || [], opts = list.map(x => [escH(x.id), escH(x.icon + ' ' + x.name)]); if (!list.some(x => x.id === a.id)) opts.unshift([escH(a.id), '(Schalter fehlt)']);
-    body = `<b>🎚 Eigener Schalter</b> ${sel('a-vid', a.id, opts)} ${sel('a-vst', a.state, [['on', 'einschalten'], ['off', 'ausschalten'], ['press', 'drücken (Knopf)']])}`;
+    body = `<b>🎚 Eigener Schalter</b> ${sel('a-vid', a.id, opts)} ${sel('a-vst', a.state, [['on', 'einschalten'], ['off', 'ausschalten'], ['toggle', 'umschalten'], ['press', 'drücken (Knopf)']])}`;
   }
   const mv = flow ? `<button class="ghost" style="padding:2px 8px" title="nach oben" onclick="actMove(this,-1)">↑</button><button class="ghost" style="padding:2px 8px" title="nach unten" onclick="actMove(this,1)">↓</button>` : '';
   return `<div class="act" data-branch="${branch}" data-type="${t}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:rgba(255,255,255,.04);border-radius:8px;padding:6px 8px;margin-top:6px">
@@ -254,6 +259,7 @@ function actRow(a, branch, flow) {
 }
 function collectAct(x) {
   const t = x.dataset.type, q = c => x.querySelector('.' + c);
+  if (t === 'toggle') return { type: t, device_id: q('a-dev').value };
   if (t === 'wait') return { type: t, seconds: Math.round((+q('a-wval').value || 0) * ({ s: 1, min: 60, h: 3600 }[q('a-wunit').value])) };
   if (t === 'setpoint') return { type: t, device_ids: q('a-spall').checked ? ['*'] : [...x.querySelectorAll('.a-sp:checked')].map(c => c.value), value: q('a-spv').value };
   if (t === 'notify') return { type: t, text: q('a-text').value };
@@ -270,7 +276,7 @@ function collectRule(box) {
 const ruleBox = el => el.closest('[data-rule]');
 function syncRule(box) {                          // Entwurf der Regel aus den sichtbaren Feldern neu aufbauen
   const r = R.find(x => x.id === box.dataset.rule); Object.assign(r, collectRule(box));
-  r.device_id = ((r.then.concat(r.else).find(a => !a.type) || {}).device_id) || r.device_id; return r;
+  r.device_id = ((r.then.concat(r.else).find(a => !a.type || a.type === 'toggle') || {}).device_id) || r.device_id; return r;
 }
 function ruleEdited(el) { const box = ruleBox(el), r = syncRule(box); touch(); box.querySelector('.r-status').innerHTML = statusBlock(r); }
 function virtChanged(sel) { condTypeChanged(sel, virtualDefault(sel.value)); }
@@ -311,9 +317,9 @@ function condAdd(sel) {
 }
 function actAddSel(sel, branch) {
   const box = ruleBox(sel), r = syncRule(box), t = sel.value; if (!t) return;
-  const used = new Set(r[branch].filter(a => !a.type).map(a => a.device_id)), d = switchable().find(x => !used.has(x.id)) || switchable()[0];
+  const used = new Set(r[branch].filter(a => !a.type || a.type === 'toggle').map(a => a.device_id)), d = switchable().find(x => !used.has(x.id)) || switchable()[0];
   const mk = {
-    switch: () => ({ device_id: d ? d.id : '', state: branch === 'else' ? 'off' : 'on' }), wait: () => ({ type: 'wait', seconds: 60 }),
+    switch: () => ({ device_id: d ? d.id : '', state: branch === 'else' ? 'off' : 'on' }), toggle: () => ({ type: 'toggle', device_id: d ? d.id : '' }), wait: () => ({ type: 'wait', seconds: 60 }),
     setpoint: () => ({ type: 'setpoint', device_ids: ['*'], value: 21 }), notify: () => ({ type: 'notify', text: '' }),
     virtual: () => ({ type: 'virtual', id: ((S.virtual || [])[0] || {}).id || '', state: 'on' }),
   };
@@ -325,7 +331,7 @@ async function ruleDelete(id) {
   if (!await uiConfirm('Regel löschen?', 'Die Regel wird entfernt, sobald du „Speichern“ drückst. Das Gerät bleibt in der Liste.', 'Löschen')) return;
   R = R.filter(r => r.id !== id); if (EDIT === id) EDIT = null; touch(); renderRules();
 }
-let WIZ = null;                                   // neue Regel: nur der Name, danach gleich in den Baukasten
+let WIZ = null;                                   // neue Regel: nur der Name, danach gleich in den Regel-Editor
 function wizStart() { WIZ = { name: '' }; renderWizard(); $('rule-wizard').scrollIntoView({ block: 'center', behavior: 'smooth' }); const n = $('wiz-name'); if (n) n.focus(); }
 function wizCancel() { WIZ = null; renderWizard(); }
 function wizCreate() {
@@ -341,7 +347,7 @@ function renderWizard() {
   if (!WIZ) { w.innerHTML = ''; return; }
   w.innerHTML = `<div style="border:1px dashed var(--border);border-radius:10px;padding:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <input id="wiz-name" placeholder="Name der neuen Regel (Pflicht), z.B. Warmwasser-Timer" value="${escH(WIZ.name)}" oninput="WIZ.name = this.value; this.style.borderColor = ''" onkeydown="if (event.key === 'Enter') wizCreate()" style="flex:1;min-width:220px;font-weight:600">
-    <button type="button" onclick="wizCreate()">Weiter zum Baukasten</button>
+    <button type="button" onclick="wizCreate()">Weiter zum Regel-Editor</button>
     <button class="ghost" style="padding:2px 9px" title="Abbrechen" onclick="wizCancel()">✕</button></div>`;
 }
 const norm = v => Array.isArray(v) ? v.map(norm) : (v && typeof v === 'object') ? Object.fromEntries(Object.keys(v).sort().map(k => [k, norm(v[k])])) : (typeof v === 'string' && v.trim() !== '' && !isNaN(v) ? Number(v) : v);
@@ -384,7 +390,7 @@ function ruleHtml(r) {
     <div class="r-status">${statusBlock(r)}</div>
   </div>`;
 }
-let EDIT = null;                                  // ID der Regel, die gerade im Baukasten offen ist (null = Liste)
+let EDIT = null;                                  // ID der Regel, die gerade im Regel-Editor offen ist (null = Liste)
 const devName = id => { const d = dev(id); return d ? d.name : '(Gerät fehlt)'; };
 function condSummary(c) {
   const cmp = c.op === 'below' ? 'unter' : 'über';
@@ -402,9 +408,10 @@ function condSummary(c) {
   if (c.type === 'device') return 'is' in c ? `${devName(c.device_id)} ist ${c.is === 'on' ? 'an' : 'aus'}` : `${devName(c.device_id)} Leistung ${cmp} ${c.value} W`;
   return c.type;
 }
-const VSTATE_WORD = { on: 'an', off: 'aus', press: 'drücken' };
+const VSTATE_WORD = { on: 'an', off: 'aus', toggle: 'umschalten', press: 'drücken' };
 const actSummary = a => {
   const t = a.type || 'switch';
+  if (t === 'toggle') return `umschalten: ${devName(a.device_id)}`;
   if (t === 'wait') { const s = a.seconds || 0; return 'warte ' + (s % 3600 === 0 ? s / 3600 + ' h' : s % 60 === 0 ? s / 60 + ' min' : s + ' s'); }
   if (t === 'setpoint') return `Thermostate ${(a.device_ids || []).includes('*') ? '(alle)' : '(' + (a.device_ids || []).length + ')'} → ${a.value} °C`;
   if (t === 'notify') return `Telegram „${(a.text || '').slice(0, 25)}${(a.text || '').length > 25 ? '…' : ''}“`;

@@ -1205,16 +1205,30 @@ class Controller:
         t = st.get("type", "switch")
         jobs = []                                         # (aktion-fuers-logbuch, geraet, text, ok, fehler)
         names = {d["id"]: d["name"] for d in shelly.load_devices()}
-        if t == "switch":
-            on = st["state"] == "on"
+        if t in ("switch", "toggle"):
             name = names.get(st["device_id"], st["device_id"])
             err = None
-            if not dry:
+            on = st.get("state") == "on"
+            if t == "toggle":                                  # aktuellen Zustand lesen (im Trockenlauf: den gedachten)
                 try:
-                    shelly.set_state(st["device_id"], on, timer_s=0 if on else None)
-                except shelly.ShellyError as e:
-                    err = str(e)
-            jobs.append(("on" if on else "off", name, f"{name} {'eingeschaltet' if on else 'ausgeschaltet'}", err))
+                    cur = next((d for d in shelly.list_with_status(ids={st["device_id"]})), None)
+                except Exception as e:                         # noqa: BLE001
+                    cur, err = None, str(e)
+                if st["device_id"] in self._rules_dry_on and dry:
+                    on = not self._rules_dry_on[st["device_id"]]
+                elif cur and cur.get("online"):
+                    on = not cur.get("on")
+                else:
+                    err = err or "Gerät nicht erreichbar – Umschalten nicht möglich"
+            if not err:
+                if dry:
+                    self._rules_dry_on[st["device_id"]] = on
+                else:
+                    try:
+                        shelly.set_state(st["device_id"], on, timer_s=0 if on else None)
+                    except shelly.ShellyError as e:
+                        err = str(e)
+            jobs.append(("on" if on else "off", name, (f"{name} umgeschaltet → {'ein' if on else 'aus'}" if t == "toggle" else f"{name} {'eingeschaltet' if on else 'ausgeschaltet'}") if not err else f"{name}: Schalten fehlgeschlagen ({err})", err))
         elif t == "setpoint":
             if dry:
                 names_sp = [s["name"] for s in homematic.load_setpoints() if "*" in st["device_ids"] or s["id"] in st["device_ids"]]
@@ -1233,9 +1247,10 @@ class Controller:
             if vname is None:
                 jobs.append(("fail", st["id"], "Eigener Schalter existiert nicht mehr", "weg"))
             else:
-                what = {"on": "eingeschaltet", "off": "ausgeschaltet", "press": "gedrückt"}[st["state"]]
+                what = {"on": "eingeschaltet", "off": "ausgeschaltet", "press": "gedrückt", "toggle": "umgeschaltet"}[st["state"]]
                 if not dry:
-                    ok = virtual.press(st["id"]) if st["state"] == "press" else virtual.set_state(st["id"], st["state"] == "on")
+                    ok = (virtual.press(st["id"]) if st["state"] == "press" else virtual.toggle(st["id"]) if st["state"] == "toggle"
+                          else virtual.set_state(st["id"], st["state"] == "on"))
                     if ok:
                         self._rules_wake.set()
                 jobs.append(("virtual", vname, f"Eigener Schalter {vname} {what}", None))

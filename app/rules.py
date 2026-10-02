@@ -217,7 +217,7 @@ def normalize_condition(c: dict) -> dict:
             "from": _hhmm(c.get("from", "00:00"), "Von"), "to": _hhmm(c.get("to", "24:00"), "Bis")}
 
 
-STEP_TYPES = ("switch", "wait", "setpoint", "notify", "virtual")
+STEP_TYPES = ("switch", "toggle", "wait", "setpoint", "notify", "virtual")
 MAX_WAIT_S = 7 * 86400
 
 
@@ -237,6 +237,10 @@ def _normalize_action(a: dict, flow: bool = False) -> dict:
         if st not in ("on", "off"):
             raise RuleError("Aktion: einschalten oder ausschalten")
         return {"device_id": str(a["device_id"]), "state": st}
+    if t == "toggle":                                # Geraet umschalten: laeuft es, wird es ausgeschaltet - sonst eingeschaltet
+        if not a.get("device_id"):
+            raise RuleError("Aktion: Gerät wählen")
+        return {"type": t, "device_id": str(a["device_id"])}
     if t == "wait":
         return {"type": t, "seconds": int(_num(a.get("seconds"), 1, MAX_WAIT_S, "Wartezeit (Sekunden)"))}
     if t == "setpoint":
@@ -251,7 +255,7 @@ def _normalize_action(a: dict, flow: bool = False) -> dict:
         return {"type": t, "text": text[:500]}
     vid = str(a.get("id") or "").strip()
     st = str(a.get("state", "on")).strip().lower()
-    if not vid or st not in ("on", "off", "press"):
+    if not vid or st not in ("on", "off", "press", "toggle"):
         raise RuleError("Eigener Schalter: Schalter und Aktion wählen")
     return {"type": t, "id": vid, "state": st}
 
@@ -278,7 +282,7 @@ STATEFUL = ("at", "budget")          # merken sich Tageszustand je Regel - gehen
 
 
 def compile_rule(r: dict) -> list[dict]:
-    """Baukasten-Regel (WENN / DANN / SONST) in die Regeln fuer die Engine uebersetzen (je Geraet eine). Alte Regeln (on/off) bleiben unveraendert.
+    """Editor-Regel (WENN / DANN / SONST) in die Regeln fuer die Engine uebersetzen (je Geraet eine). Alte Regeln (on/off) bleiben unveraendert.
     DANN an + SONST aus = 'Einschalten, wenn' mit Selbst-Ausschalten; nur DANN an = bleibt an (nie automatisch aus); nur DANN aus = reiner
     Ausschalt-Timer; SONST gilt, wenn die Bedingung NICHT zutrifft (fehlende Daten: dann passiert weder DANN noch SONST)."""
     if "when" not in r:
@@ -330,7 +334,7 @@ def devices_of(r: dict) -> list[str]:
         return [r["device_id"]] if r.get("device_id") else []
     seen: list[str] = []
     for a in (r.get("then") or []) + (r.get("else") or []):
-        if _is_switch(a) and a["device_id"] not in seen:
+        if a.get("type", "switch") in ("switch", "toggle") and a["device_id"] not in seen:
             seen.append(a["device_id"])
     return seen
 
@@ -340,7 +344,7 @@ def all_conditions(r: dict) -> list[dict]:
 
 
 def to_new(r: dict) -> list[dict]:
-    """Alte Regel (Einschalten/Ausschalten) in der Baukasten-Form anzeigen (WENN / DANN / SONST). Mit beiden Teilen werden es zwei Regeln."""
+    """Alte Regel (Einschalten/Ausschalten) in der Editor-Form anzeigen (WENN / DANN / SONST). Mit beiden Teilen werden es zwei Regeln."""
     if "when" in r:
         return [r]
     dev, on, off = r["device_id"], r.get("on") or [], r.get("off") or []
@@ -390,7 +394,7 @@ def normalize_rule(body: dict, rule_id: str | None = None) -> dict:
             for dev_id, (t, e) in _states({"then": then, "else": other}).items():
                 if t and t == e:
                     raise RuleError("Dasselbe Gerät soll bei DANN und SONST gleich geschaltet werden – das ergibt keinen Sinn")
-        first = next((a["device_id"] for a in then + other if _is_switch(a)), "")
+        first = next((a["device_id"] for a in then + other if a.get("type", "switch") in ("switch", "toggle")), "")
         r = {"id": rule_id or uuid.uuid4().hex[:8], "name": str(body.get("name") or "").strip()[:60],
              "device_id": first, "enabled": bool(body.get("enabled", True)),
              "when": {"mode": mode, "conds": conds}, "then": then, "else": other}
@@ -461,14 +465,14 @@ def remove_device(dev_id: str):
                         ids = [i for i in a["device_ids"] if i != dev_id]
                         if ids:
                             out.append({**a, "device_ids": ids})
-                    elif not (_is_switch(a) and a["device_id"] == dev_id):
+                    elif not (a.get("type", "switch") in ("switch", "toggle") and a["device_id"] == dev_id):
                         out.append(a)
                 return out
             r = {**r, "then": strip(r["then"]), "else": strip(r["else"])}
             changed = True
             if not any(a.get("type") != "wait" for a in r["then"] + r["else"]):
                 continue
-            r["device_id"] = next((a["device_id"] for a in r["then"] + r["else"] if _is_switch(a)), "")
+            r["device_id"] = next((a["device_id"] for a in r["then"] + r["else"] if a.get("type", "switch") in ("switch", "toggle")), "")
         elif "when" not in r and r["device_id"] == dev_id:
             changed = True
             continue

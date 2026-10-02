@@ -103,6 +103,13 @@ def press(vid: str) -> bool:
         return True
 
 
+def toggle(vid: str) -> bool:
+    """Schalter umschalten."""
+    with _lock:
+        it = next((x for x in load() if x["id"] == vid), None)
+        return bool(it) and it["kind"] == "switch" and set_state(vid, not it.get("on"))
+
+
 def set_state(vid: str, on: bool) -> bool:
     with _lock:
         items = load()
