@@ -157,6 +157,8 @@ ENDPOINT_AREA = {
     "api_tuya_scan": "settings_geraete", "api_tuya_add": "settings_geraete",
     "api_homematic_info": "settings_geraete", "api_homematic_credentials": "settings_geraete",
     "api_homematic_scan": "settings_geraete", "api_homematic_add": "settings_geraete",
+    "api_homematic_sensor_scan": "settings_geraete", "api_homematic_sensor_add": "settings_geraete",
+    "api_sensor_modify": "settings_geraete", "api_sensors_list": "dashboard",
     "api_shelly_icons": "settings_geraete", "api_shelly_order": "settings_geraete",
     "api_shelly_scan": "settings_geraete", "api_tasmota_scan": "settings_geraete",
     "api_shelly_add": "settings_geraete", "api_shelly_modify": "settings_geraete",
@@ -1038,7 +1040,17 @@ class Controller:
             soc = float(system["battery"]["soc"]) if system else None
         except (KeyError, TypeError, ValueError):
             soc = None
-        return {"soc": soc, "price_ct": price_ct, "prices_today": prices, "pv_tomorrow": st.get("pv_tom")}
+        ctx = {"soc": soc, "price_ct": price_ct, "prices_today": prices, "pv_tomorrow": st.get("pv_tom")}
+        used = {c.get("sensor_id") for r in rules.list_rules() if r.get("enabled", True)
+                for c in (r.get("on") or []) + (r.get("off") or []) if c.get("type") == "sensor"}
+        if used:                                         # nur die Sensoren abfragen, die eine aktive Regel auch braucht
+            try:
+                sens = [s for s in homematic.load_sensors() if s["id"] in used]
+                ctx["sensors"] = homematic.read_values(sens)
+                ctx["sensor_info"] = {s["id"]: s for s in sens}
+            except Exception as e:                       # noqa: BLE001
+                log.warning("Regeln: Sensorwerte nicht lesbar: %s", e)
+        return ctx
 
     def run_surplus(self):
         """Ueberschuss-Automatik fuer Shelly-Geraete (alle 10 s) - eigener Baustein, eigener Schalter, eigener Trockenlauf, eigenes Logbuch.
@@ -2279,6 +2291,49 @@ def api_homematic_add():
     except shelly.ShellyError as e:
         return jsonify(error=str(e)), 400
     return jsonify({"added": len(added)}), 201
+
+
+@app.route("/api/homematic/sensors/scan", methods=["POST"])
+def api_homematic_sensor_scan():
+    """Lesbare Sensoren der CCU suchen (Temperatur, Luftfeuchte, Fenster/Tuer, Bewegung, Anwesenheit, Helligkeit, Leistung)."""
+    try:
+        return jsonify(homematic.sensors_scan())
+    except homematic.HomematicError as e:
+        return jsonify(error=str(e)), 400
+    except Exception as e:                               # noqa: BLE001
+        log.warning("Sensor-Suche fehlgeschlagen: %s", e)
+        return jsonify(error=f"Suche fehlgeschlagen: {e}"), 500
+
+
+@app.route("/api/homematic/sensors/add", methods=["POST"])
+def api_homematic_sensor_add():
+    ids = (request.get_json(silent=True) or {}).get("ids")
+    if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
+        return jsonify(error="Kein Sensor angegeben"), 400
+    try:
+        added = homematic.add_sensors(ids)
+    except homematic.HomematicError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify({"added": len(added)}), 201
+
+
+@app.route("/api/sensors", methods=["GET"])
+def api_sensors_list():
+    """Angelegte Sensoren mit aktuellem Wert (fuer Einstellungen und Regel-Bedingungen)."""
+    try:
+        return jsonify(homematic.list_sensors_with_values())
+    except Exception as e:                               # noqa: BLE001
+        log.warning("Sensorliste: %s", e)
+        return jsonify([])
+
+
+@app.route("/api/sensors/<sensor_id>", methods=["PATCH", "DELETE"])
+def api_sensor_modify(sensor_id):
+    if request.method == "DELETE":
+        ok = homematic.remove_sensor(sensor_id)
+    else:
+        ok = homematic.update_sensor(sensor_id, name=(request.get_json(silent=True) or {}).get("name"))
+    return jsonify(ok=True) if ok else (jsonify(error="nicht gefunden"), 404)
 
 
 @app.route("/api/shelly/icons", methods=["GET"])

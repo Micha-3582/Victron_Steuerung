@@ -20,6 +20,7 @@ app/battery_watchdog.json
 app/shelly_devices.json
 app/tuya_cloud.json
 app/homematic.json
+app/homematic_sensors.json
 app/users.json
 app/secret.key
 app/initial-password.txt

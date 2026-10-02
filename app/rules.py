@@ -19,6 +19,8 @@ Bedingungen:
   at            Um HH:MM Uhr, einmal pro Tag (loest innerhalb von 30 Min nach der Uhrzeit aus). Beim Einschalten bleibt das Geraet danach
                 an, bis eine Ausschalt-Bedingung zutrifft.
   sun_tomorrow  Sonne morgen (VRM-Prognose) ueber/unter X kWh
+  sensor        Homematic-Sensor (siehe homematic.py): Messwerte (Temperatur, Luftfeuchte, Helligkeit, Leistung) unter/ueber X,
+                Ja/Nein-Sensoren (Fenster offen, Bewegung, Anwesenheit) TRUE oder FALSE. Ohne lesbaren Wert gilt die Bedingung als nicht erfuellt.
 
 Regeln sind vollstaendig unabhaengig von der PV-Ueberschuss-Automatik (surplus.py): eigener Hauptschalter, eigener Trockenlauf, eigene Einstellungen,
 eigenes Logbuch. Ein Geraet gehoert entweder zur Ueberschuss-Automatik oder zu Regeln (wird beim Speichern geprueft).
@@ -42,7 +44,7 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 RULES_PATH = os.path.join(_DIR, "rules.json")
 STATE_PATH = os.path.join(_DIR, "rules_state.json")
 
-TYPES = ("time", "price", "cheapest", "budget", "soc", "sun_tomorrow", "at")
+TYPES = ("time", "price", "cheapest", "budget", "soc", "sun_tomorrow", "at", "sensor")
 WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 VERSION = 2
 
@@ -172,6 +174,19 @@ def normalize_condition(c: dict) -> dict:
     if t == "time":
         days = sorted({int(x) for x in (c.get("days") or []) if str(x).isdigit() and 0 <= int(x) <= 6})
         return {"type": t, "from": _hhmm(c.get("from", "00:00"), "Von"), "to": _hhmm(c.get("to", "24:00"), "Bis"), "days": days if len(days) < 7 else []}
+    if t == "sensor":
+        sid = str(c.get("sensor_id") or "").strip()
+        if not sid:
+            raise RuleError("Sensor wählen")
+        if c.get("is") is not None:                  # Ja/Nein-Sensor: TRUE oder FALSE
+            val = c["is"]
+            if isinstance(val, str):
+                val = val.strip().lower() in ("1", "true", "wahr", "ja")
+            return {"type": t, "sensor_id": sid, "is": bool(val)}
+        op = c.get("op", "below")
+        if op not in ("below", "above"):
+            raise RuleError("Vergleich: unter oder über")
+        return {"type": t, "sensor_id": sid, "op": op, "value": _num(c.get("value"), -1000, 100000, "Sensor-Wert")}
     if t in ("price", "soc", "sun_tomorrow"):
         op = c.get("op", "below")
         if op not in ("below", "above"):
@@ -276,6 +291,10 @@ BUDGET_DONE = " – Tagesziel erreicht"
 AT_GRACE_MIN = 30          # "Um HH:MM" loest bis zu 30 Minuten nach der Uhrzeit aus (App-Neustart, kurze Aussetzer)
 
 
+SENSOR_WORDS = {"contact": ("offen", "geschlossen"), "motion": ("Bewegung erkannt", "keine Bewegung"),
+                "presence": ("jemand anwesend", "niemand anwesend")}
+
+
 def eval_condition(c: dict, ctx: dict, ran_min: float = 0.0, fired_today: bool = False, side: str = "on") -> tuple[bool | None, str]:
     """(erfuellt?, Klartext). None = fehlende Daten (zaehlt als nicht erfuellt)."""
     now = ctx["now"]
@@ -301,6 +320,19 @@ def eval_condition(c: dict, ctx: dict, ran_min: float = 0.0, fired_today: bool =
         s = ctx.get("pv_tomorrow")
         txt = f"Sonne morgen {'unter' if c['op'] == 'below' else 'über'} {c['kwh']:g} kWh"
         return (None if s is None else (s < c["kwh"] if c["op"] == "below" else s >= c["kwh"])), txt
+    if t == "sensor":
+        info = (ctx.get("sensor_info") or {}).get(c.get("sensor_id"))
+        if not info:
+            return None, f"Sensor {c.get('sensor_id')} (nicht mehr vorhanden)"
+        val = (ctx.get("sensors") or {}).get(info["id"])
+        name = info.get("name") or info["id"]
+        if "is" in c:
+            words = SENSOR_WORDS.get(info.get("kind"), ("wahr", "falsch"))
+            txt = f"{name}: {words[0] if c['is'] else words[1]} ({'TRUE' if c['is'] else 'FALSE'})"
+            return (None if val is None else bool(val) == c["is"]), txt
+        unit = (" " + info["unit"]) if info.get("unit") else ""
+        txt = f"{name} {'unter' if c['op'] == 'below' else 'über'} {c['value']:g}{unit}"
+        return (None if val is None else (val < c["value"] if c["op"] == "below" else val >= c["value"])), txt
     if t == "cheapest":
         prices = ctx.get("prices_today")
         txt = f"in den {c['hours']} günstigsten Stunden des Tages"

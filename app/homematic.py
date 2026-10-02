@@ -27,6 +27,7 @@ import requests
 log = logging.getLogger("homematic")
 
 CREDENTIALS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "homematic.json")
+SENSORS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "homematic_sensors.json")
 CALL_TIMEOUT = 5.0
 UNREACH_TTL_S = 30.0              # "Nicht erreichbar" je Geraet nur alle 30 s neu fragen (spart Aufrufe je Statusrunde)
 SCAN_TTL_S = 900.0                # Suchergebnis so lange fuer "Hinzufuegen" merken
@@ -38,6 +39,10 @@ _session_id: dict[str, str] = {}                           # CCU-Basisadresse ->
 _unreach_cache: dict[tuple, tuple[float, bool]] = {}       # (interface, geraeteadresse) -> (gueltig bis, nicht erreichbar)
 _scan_cache: dict[str, dict] = {}                          # adresse -> Kandidat
 _scan_ts = 0.0
+_sensor_scan: dict[str, dict] = {}                      # sensor-id -> Kandidat der letzten Sensor-Suche
+_sensor_scan_ts = 0.0
+_value_cache: dict[str, tuple[float, object]] = {}   # sensor-id -> (gueltig bis, Wert)
+VALUE_TTL_S = 5.0
 
 
 class HomematicError(Exception):
@@ -338,3 +343,189 @@ def set_state(d: dict, on: bool, timer_s: int | None = None):
     except HomematicError as e:
         raise HomematicError(f"Schalten fehlgeschlagen: {e}")
     return status(d)
+
+
+# ================================================================ Sensoren (nur lesen)
+# Art -> (Anzeigename, Einheit, binaer?, [Datenpunkte in Reihenfolge der Vorliebe]).
+# Binaere Sensoren liefern wahr/falsch und werden in den Regeln mit "TRUE/FALSE" benutzt, Messwerte mit unter/ueber.
+SENSOR_KINDS = {
+    "temperature": ("Temperatur", "°C", False, ["ACTUAL_TEMPERATURE", "TEMPERATURE"]),
+    "humidity": ("Luftfeuchte", "%", False, ["HUMIDITY", "ACTUAL_HUMIDITY"]),
+    "brightness": ("Helligkeit", "", False, ["ILLUMINATION", "BRIGHTNESS", "CURRENT_ILLUMINATION"]),
+    "power": ("Leistung", "W", False, ["POWER"]),
+    "contact": ("Fenster/Tür", "", True, ["STATE"]),                       # wahr = offen
+    "motion": ("Bewegung", "", True, ["MOTION"]),                          # wahr = Bewegung erkannt
+    "presence": ("Anwesenheit", "", True, ["PRESENCE_DETECTION_STATE"]),   # wahr = jemand da
+}
+# Welche kanaltypen zu welchen Sensorarten gehoeren koennen (Teilstrings des channelType)
+_SENSOR_HINTS = [
+    (("WEATHER", "CLIMATECONTROL", "THERMALCONTROL", "TEMPERATURE"), ("temperature", "humidity")),
+    (("SHUTTER_CONTACT", "ROTARY_HANDLE", "WINDOW", "DOOR_SENSOR"), ("contact",)),
+    (("MOTION_DETECTOR",), ("motion", "brightness")),
+    (("PRESENCE_DETECTION",), ("presence", "brightness")),
+    (("POWERMETER", "ENERGIE_METER", "ENERGY_METER"), ("power",)),
+]
+
+
+def load_sensors() -> list[dict]:
+    try:
+        with open(SENSORS_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _save_sensors(items: list[dict]):
+    with _lock, open(SENSORS_PATH, "w", encoding="utf-8") as f:
+        json.dump(items, f, indent=2, ensure_ascii=False)
+
+
+def sensor_id(address: str, datapoint: str) -> str:
+    return "hmS-" + address.replace(":", "-") + "-" + datapoint
+
+
+def _probe_sensor_channel(item: dict) -> list[dict]:
+    """Prueft einen Kandidaten-Kanal; liefert je lesbarem Datenpunkt einen Sensor-Eintrag."""
+    try:
+        desc = _param_desc(item["interface"], item["address"])
+    except HomematicError:
+        return []
+    out = []
+    for kind in item["kinds"]:
+        label, unit, binary, dps = SENSOR_KINDS[kind]
+        dp = next((d for d in dps if d in desc and (int(desc[d].get("OPERATIONS", 0) or 0) & 1)), None)
+        if not dp:
+            continue
+        if dp == "ILLUMINATION":
+            unit = "lux"
+        out.append({"id": sensor_id(item["address"], dp), "kind": kind, "address": item["address"],
+                    "interface": item["interface"], "datapoint": dp, "unit": unit, "binary": binary,
+                    "model": item["model"], "room": item["room"],
+                    "name": f"{item['name']} – {label}"})
+    return out
+
+
+def discover_sensors(known_ids: set[str]) -> list[dict]:
+    """Alle lesbaren Sensoren der CCU (Temperatur, Luftfeuchte, Fenster/Tuer, Bewegung, Anwesenheit, Helligkeit,
+    Leistung). Merkt sich das Ergebnis fuer `build_sensors`."""
+    global _sensor_scan_ts
+    devices = [d for d in (_call("Device.listAllDetail") or [])
+               if d and d.get("interface") not in SKIP_INTERFACES and d.get("channels")]
+    rooms: dict[str, str] = {}
+    try:
+        for room in _call("Room.getAll") or []:
+            for cid in room.get("channelIds") or []:
+                rooms[str(cid)] = room.get("name") or ""
+    except (HomematicError, AttributeError, TypeError):
+        pass
+    items = []
+    for dev in devices:
+        dtype, dev_name = str(dev.get("type") or ""), str(dev.get("name") or "")
+        for ch in dev["channels"]:
+            up = str(ch.get("channelType") or "").upper()
+            kinds = []
+            for hints, ks in _SENSOR_HINTS:
+                if any(h in up for h in hints):
+                    kinds.extend(k for k in ks if k not in kinds)
+            if not kinds or "SWITCH_VIRTUAL" in up:
+                continue
+            addr, ch_name = str(ch["address"]), str(ch.get("name") or "")
+            name = dev_name if _is_default_name(ch_name, addr, dtype) else ch_name
+            items.append({"address": addr, "interface": dev["interface"], "kinds": kinds, "model": dtype,
+                          "name": name or addr,
+                          "room": rooms.get(str(ch.get("id")), "") or rooms.get(str(dev.get("id")), "")})
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        found = [s for res in ex.map(_probe_sensor_channel, items) for s in res]
+    found.sort(key=lambda f: (f["room"].lower(), f["name"].lower(), f["id"]))
+    with _lock:
+        _sensor_scan.clear()
+        _sensor_scan.update({f["id"]: f for f in found})
+        _sensor_scan_ts = time.time()
+    for f in found:
+        f["known"] = f["id"] in known_ids
+    return found
+
+
+def build_sensors(ids: list[str]) -> list[dict]:
+    if time.time() - _sensor_scan_ts > SCAN_TTL_S or any(i not in _sensor_scan for i in ids):
+        discover_sensors(set())
+    out = []
+    for i in ids:
+        f = _sensor_scan.get(i)
+        if not f:
+            raise HomematicError("Sensor nicht gefunden (in der CCU entfernt?)")
+        out.append({k: f[k] for k in ("id", "kind", "address", "interface", "datapoint", "unit", "binary",
+                                      "model", "room", "name")})
+    return out
+
+
+def read_sensor(sen: dict):
+    """Aktueller Wert: Zahl (Messwert), True/False (binaer) oder None (nicht lesbar/Geraet nicht erreichbar)."""
+    now = time.time()
+    hit = _value_cache.get(sen["id"])
+    if hit and hit[0] > now:
+        return hit[1]
+    try:
+        v = _call("Interface.getValue", {"interface": sen["interface"], "address": sen["address"],
+                                         "valueKey": sen["datapoint"]})
+        if _unreach(sen) or v is None:
+            val = None
+        elif sen.get("binary"):
+            val = bool(float(v)) if not isinstance(v, bool) else v          # Drehgriff: 0 zu, 1 gekippt, 2 offen -> offen = wahr
+        else:
+            val = round(float(v), 1)
+    except (HomematicError, KeyError, TypeError, ValueError):
+        val = None
+    _value_cache[sen["id"]] = (now + VALUE_TTL_S, val)
+    return val
+
+
+def read_values(sensors: list[dict]) -> dict[str, object]:
+    """{sensor-id: Wert} fuer mehrere Sensoren (parallel)."""
+    if not sensors:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(8, len(sensors))) as ex:
+        vals = list(ex.map(read_sensor, sensors))
+    return {s["id"]: v for s, v in zip(sensors, vals)}
+
+
+def sensors_scan() -> list[dict]:
+    return discover_sensors({s["id"] for s in load_sensors()})
+
+
+def add_sensors(ids: list[str]) -> list[dict]:
+    """Legt die gewaehlten Sensoren an (schon vorhandene bleiben unveraendert)."""
+    new = build_sensors(ids)
+    items = load_sensors()
+    have = {s["id"] for s in items}
+    added = [s for s in new if s["id"] not in have]
+    _save_sensors(items + added)
+    return added
+
+
+def update_sensor(sensor_id_: str, name: str | None = None) -> bool:
+    items = load_sensors()
+    for s in items:
+        if s["id"] == sensor_id_:
+            if name is not None:
+                s["name"] = name.strip()[:60] or s["name"]
+            _save_sensors(items)
+            return True
+    return False
+
+
+def remove_sensor(sensor_id_: str) -> bool:
+    items = load_sensors()
+    keep = [s for s in items if s["id"] != sensor_id_]
+    if len(keep) == len(items):
+        return False
+    _save_sensors(keep)
+    return True
+
+
+def list_sensors_with_values() -> list[dict]:
+    """Angelegte Sensoren inkl. aktuellem Wert ('value': Zahl | True/False | None = nicht lesbar)."""
+    items = load_sensors()
+    vals = read_values(items)
+    return [{**s, "value": vals.get(s["id"])} for s in items]
