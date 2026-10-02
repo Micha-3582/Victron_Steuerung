@@ -597,6 +597,7 @@
       <label class="chk"><input type="checkbox" class="fam-cb" data-fam="tasmota"> Tasmota</label>
       <label class="chk"><input type="checkbox" class="fam-cb" data-fam="tuya"> Tuya / Smart Life</label>
       <label class="chk"><input type="checkbox" class="fam-cb" data-fam="homematic"> Homematic / HomematicIP (OpenCCU)</label>
+      <label class="chk"><input type="checkbox" class="fam-cb" data-fam="zigbee"> Zigbee (Phoscon / deCONZ)</label>
     </div>
     <div class="muted" id="fam-hint" style="margin-top:8px" hidden>Noch kein System ausgewählt – kreuze oben an, was du besitzt.</div>
   </div>
@@ -699,12 +700,34 @@
       <button id="hm-scan" class="ghost">Homematic-Geräte suchen</button>
       <button id="hm-sensor-scan" class="ghost">Homematic-Sensoren suchen</button>
       <button id="hm-sp-scan" class="ghost">Homematic-Thermostate suchen</button></div>
-    <div class="muted" style="margin:10px 0 4px">Sensoren (nur lesen: Temperatur, Luftfeuchte, Fenster/Tür, Bewegung, Anwesenheit, Helligkeit, Leistung) –
+
+  
+</div>
+
+<div class="card fam-card" id="fam-zigbee" data-tab="geraete">
+  <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Zigbee (Phoscon / deCONZ)</h2>
+  <div class="muted" style="margin-bottom:10px">Lichter, Steckdosen, Sensoren und Thermostate deines Phoscon-Gateways (ConBee/RaspBee) werden <b>lokal</b> über dessen Schnittstelle gefunden – ohne Cloud.
+    So verbindest du es: In <b>Phoscon</b> unter Einstellungen → Gateway → Erweitert auf <b>„App autorisieren“</b> drücken und danach hier innerhalb einer Minute auf
+    <b>„Mit Gateway verbinden“</b>. (Hast du schon einen API-Schlüssel, trägst du ihn unten ein.)</div>
+  <div class="grid2">
+    <div><label>Gateway-Adresse <span class="qhelp" role="button" tabindex="0" data-help="IP-Adresse des Phoscon-Gateways im Heimnetz, zum Beispiel 192.168.2.66. Läuft die Oberfläche auf einem anderen Port, so angeben: 192.168.2.66:8080.">?</span></label><input id="zb-host" placeholder="z.B. 192.168.2.66" autocomplete="off"></div>
+    <div><label>API-Schlüssel (optional) <span class="qhelp" role="button" tabindex="0" data-help="Nur nötig, wenn du schon einen Schlüssel hast. Sonst leer lassen: dann holt die App ihn selbst vom Gateway (vorher in Phoscon „App autorisieren“). Der Schlüssel wird nur auf dem Server gespeichert und nie wieder angezeigt.">?</span></label><input id="zb-key" type="password" autocomplete="new-password"></div>
+  </div>
+  <div style="margin-top:10px"><button id="zb-connect" class="ghost">Mit Gateway verbinden</button></div>
+  <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">
+    <button id="zb-scan" class="ghost">Zigbee-Geräte suchen</button>
+    <button id="zb-sensor-scan" class="ghost">Zigbee-Sensoren suchen</button>
+    <button id="zb-sp-scan" class="ghost">Zigbee-Thermostate suchen</button></div>
+  <div class="muted" style="margin-top:8px">Gefundene Sensoren und Thermostate erscheinen unten im Fenster „Sensoren &amp; Thermostate“.</div>
+</div>
+
+<div class="card fam-card" id="fam-sensors" data-tab="geraete">
+  <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Sensoren &amp; Thermostate</h2>
+    <div class="muted" style="margin:10px 0 4px">Sensoren von Homematic und Zigbee (nur lesen: Temperatur, Luftfeuchte, Fenster/Tür, Bewegung, Anwesenheit, Helligkeit, Leistung) –
       auf der Seite <a href="/rules" style="color:var(--accent);font-weight:600">Regeln</a> als Bedingung nutzbar („WENN Sensor TRUE/FALSE“ bzw. „unter/über“).</div>
     <div id="hm-sensors" style="display:flex;flex-direction:column;gap:6px"></div>
-    <div class="muted" style="margin:14px 0 4px">Thermostate (Solltemperatur setzen): in Regeln der Art „Ablauf“ nutzbar, zum Beispiel „alle Thermostate auf 25 °C“. Der Wert wird auf den Bereich des Geräts begrenzt (0 °C = „aus“, meist 4,5 °C).</div>
+    <div class="muted" style="margin:14px 0 4px">Thermostate (Solltemperatur setzen, Homematic und Zigbee): in Regeln der Art „Ablauf“ nutzbar, zum Beispiel „alle Thermostate auf 25 °C“. Der Wert wird auf den Bereich des Geräts begrenzt (0 °C = „aus“, meist 4,5 °C).</div>
     <div id="hm-setpoints" style="display:flex;flex-direction:column;gap:6px"></div>
-  
 </div>
 
 <div class="card{{ ' ro-locked' if user_perms.account != 'write' else '' }}" data-tab="system" data-area="account">
@@ -1517,7 +1540,8 @@ function applyFamilies(f) {
   const any = Object.values(f).some(Boolean);
   document.querySelectorAll('.fam-cb').forEach(cb => { cb.checked = !!f[cb.dataset.fam]; });
   const show = (id, v) => { const el = document.getElementById(id); if (el) el.classList.toggle('fam-off', !v); };
-  show('fam-shelly', f.shelly); show('fam-tasmota', f.tasmota); show('fam-tuya', f.tuya); show('fam-homematic', f.homematic);
+  show('fam-shelly', f.shelly); show('fam-tasmota', f.tasmota); show('fam-tuya', f.tuya); show('fam-homematic', f.homematic); show('fam-zigbee', f.zigbee);
+  show('fam-sensors', f.homematic || f.zigbee);
   show('fam-vlan', f.shelly || f.tasmota || f.tuya);
   document.getElementById('fam-hint').hidden = any;
 }
@@ -1609,7 +1633,7 @@ async function loadSensorsAdmin() {
   if (!Array.isArray(list)) return;
   document.getElementById('hm-sensors').innerHTML = list.length ? list.map(s => `<div data-sensor="${escH(s.id)}" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--border);border-radius:10px;padding:8px 10px">
       <button class="ghost" style="font-size:22px;padding:4px 10px" title="Symbol wählen" onclick="sensorPickIcon('${escH(s.id)}')">${escH(s.icon || SENSOR_ICON[s.kind] || '📡')}</button>
-      <div style="flex:1;min-width:150px"><b>${escH(s.name)}</b><div class="muted">${escH(s.model)}${s.room ? ' · ' + escH(s.room) : ''} · <b>${escH(sensorValueText(s))}</b></div></div>
+      <div style="flex:1;min-width:150px"><b>${escH(s.name)}</b><div class="muted">${escH(s.model)}${s.source === 'zigbee' ? ' · Zigbee' : ''}${s.room ? ' · ' + escH(s.room) : ''} · <b>${escH(sensorValueText(s))}</b></div></div>
       ${s.binary ? `<label class="chk" title="Legt fest, was TRUE bedeutet. Ein: ${INV_ON[s.kind] || 'TRUE und FALSE vertauscht'}. Aus: ${INV_OFF[s.kind] || 'wie vom Sensor gemeldet'}."><input type="checkbox" ${s.invert ? 'checked' : ''} onchange="sensorInvert('${escH(s.id)}', this.checked)"> ${INV_LABEL[s.kind] || 'Umkehren'}</label>` : ''}
       <label class="chk" title="Auf dem Dashboard in der Kachel „Sensoren“ zeigen"><input type="checkbox" ${s.show === false ? '' : 'checked'} onchange="sensorShow('${escH(s.id)}', this.checked)"> Dashboard</label>
       <button class="ghost" onclick="sensorRename('${escH(s.id)}', this)" data-name="${escH(s.name)}" title="Umbenennen">✎</button>
@@ -1707,7 +1731,7 @@ async function loadSetpointsAdmin() {
   let list = []; try { list = await (await fetch('/api/homematic/setpoints', { cache: 'no-store' })).json(); } catch (e) { return; }
   if (!Array.isArray(list)) return;
   document.getElementById('hm-setpoints').innerHTML = list.length ? list.map(s => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--border);border-radius:10px;padding:8px 10px">
-      <div style="flex:1;min-width:150px"><b>🌡 ${escH(s.name)}</b><div class="muted">${escH(s.model)}${s.room ? ' · ' + escH(s.room) : ''} · Soll <b>${s.value == null ? '–' : String(s.value).replace('.', ',') + ' °C'}</b> · Bereich ${s.min}–${s.max} °C</div></div>
+      <div style="flex:1;min-width:150px"><b>🌡 ${escH(s.name)}</b><div class="muted">${escH(s.model)}${s.source === 'zigbee' ? ' · Zigbee' : ''}${s.room ? ' · ' + escH(s.room) : ''} · Soll <b>${s.value == null ? '–' : String(s.value).replace('.', ',') + ' °C'}</b> · Bereich ${s.min}–${s.max} °C</div></div>
       <button class="ghost" onclick="spRename('${escH(s.id)}', this)" data-name="${escH(s.name)}" title="Umbenennen">✎</button>
       <button class="ghost" onclick="spRemove('${escH(s.id)}')" title="Entfernen">✕</button></div>`).join('')
     : '<div class="muted">Noch keine Thermostate angelegt.</div>';
@@ -1744,6 +1768,52 @@ async function spAdd(ids) {
   loadSetpointsAdmin();
 }
 loadSetpointsAdmin();
+
+/* --- Zigbee (Phoscon / deCONZ) --- */
+async function loadZigbeeInfo() {
+  let z; try { z = await (await fetch('/api/zigbee', { cache: 'no-store' })).json(); } catch (e) { return; }
+  const h = document.getElementById('zb-host');
+  if (document.activeElement !== h) h.value = z.host || '';
+  document.getElementById('zb-key').placeholder = z.key_set ? '(gespeichert – leer lassen = unverändert)' : '';
+}
+document.getElementById('zb-connect').addEventListener('click', async e => {
+  const b = e.target; b.disabled = true; shellyMsg('Verbinde mit dem Gateway …');
+  try {
+    const r = await shellyApi('/api/zigbee/credentials', 'POST', { host: document.getElementById('zb-host').value, key: document.getElementById('zb-key').value });
+    document.getElementById('zb-key').value = '';
+    shellyMsg(`Verbindung zum Gateway ok ✓${r.name ? ' (' + r.name + ')' : ''} – ${r.devices} Geräte gefunden. Jetzt suchen.`); savedToast(); loadZigbeeInfo();
+  } catch (err) { shellyMsg(err.message, true); }
+  b.disabled = false;
+});
+function zbFoundList(found, addFn, label, meta) {
+  const fresh = found.filter(f => !f.known);
+  shellyMsg(found.length ? `${found.length} ${label} gefunden, ${fresh.length} noch nicht angelegt.` : `Keine ${label} gefunden.`);
+  const row = f => `<div data-key="${escH(f.id)}" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <div style="flex:1;min-width:150px"><b>${escH(f.name)}</b><div class="muted">${escH(f.model)}${f.room ? ' · ' + escH(f.room) : ''}${meta ? ' · ' + escH(meta(f)) : ''}</div></div>
+    <button onclick="${addFn}(['${escH(f.id)}'])">Hinzufügen</button></div>`;
+  const all = fresh.length > 1 ? `<div data-all="1" style="margin-bottom:6px"><button class="ghost" onclick='${addFn}(${JSON.stringify(fresh.map(f => f.id)).replace(/'/g, "&#39;")})'>Alle ${fresh.length} hinzufügen</button></div>` : '';
+  document.getElementById('shelly-found').innerHTML = all + fresh.map(row).join('');
+}
+function zbScanButton(btnId, url, label, busy, addFn, meta) {
+  document.getElementById(btnId).addEventListener('click', async e => {
+    const b = e.target; b.disabled = true; shellyMsg(busy);
+    try { zbFoundList(await shellyApi(url, 'POST'), addFn, label, meta); } catch (err) { shellyMsg(err.message, true); }
+    b.disabled = false;
+  });
+}
+async function zbAdd(url, ids, reload) {
+  try { await shellyApi(url, 'POST', { ids }); } catch (e) { shellyMsg(e.message, true); return; }
+  ids.forEach(i => foundAdded(i));
+  document.querySelectorAll('#shelly-found [data-all]').forEach(r => r.remove());
+  reload();
+}
+const zbAddDevices = ids => zbAdd('/api/zigbee/add', ids, loadShellyAdmin);
+const zbAddSensors = ids => zbAdd('/api/zigbee/sensors/add', ids, loadSensorsAdmin);
+const zbAddSetpoints = ids => zbAdd('/api/zigbee/setpoints/add', ids, loadSetpointsAdmin);
+zbScanButton('zb-scan', '/api/zigbee/scan', 'Lichter/Steckdosen', 'Suche läuft …', 'zbAddDevices', f => f.dimmable ? 'dimmbar' : 'Schalter');
+zbScanButton('zb-sensor-scan', '/api/zigbee/sensors/scan', 'Sensoren', 'Sensor-Suche läuft …', 'zbAddSensors', f => f.binary ? 'Ja/Nein' : (f.unit || ''));
+zbScanButton('zb-sp-scan', '/api/zigbee/setpoints/scan', 'Thermostate', 'Thermostat-Suche läuft …', 'zbAddSetpoints', null);
+loadZigbeeInfo();
 
 /* --- VRM-Zugang (Solar-Prognose) --- */
 function vrmMsg(t, err) { const m = document.getElementById('vrm-msg'); m.textContent = t; m.style.color = err ? '#e5544a' : ''; }

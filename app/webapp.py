@@ -28,6 +28,7 @@ import store
 import surplus
 import tuya
 import homematic
+import zigbee
 import planner
 import autolog
 import notify
@@ -160,6 +161,9 @@ ENDPOINT_AREA = {
     "api_tuya_scan": "settings_geraete", "api_tuya_add": "settings_geraete",
     "api_device_families": "settings_geraete", "api_homematic_info": "settings_geraete", "api_homematic_credentials": "settings_geraete", "api_homematic_push": "settings_geraete",
     "api_homematic_scan": "settings_geraete", "api_homematic_add": "settings_geraete",
+    "api_zigbee_info": "settings_geraete", "api_zigbee_credentials": "settings_geraete", "api_zigbee_pair": "settings_geraete",
+    "api_zigbee_scan": "settings_geraete", "api_zigbee_add": "settings_geraete", "api_zigbee_sensor_scan": "settings_geraete",
+    "api_zigbee_sensor_add": "settings_geraete", "api_zigbee_sp_scan": "settings_geraete", "api_zigbee_sp_add": "settings_geraete",
     "api_homematic_sensor_scan": "settings_geraete", "api_homematic_sensor_add": "settings_geraete",
     "api_sensor_modify": "settings_geraete", "api_sensors_list": "dashboard",
     "api_virtual_list": "dashboard", "api_virtual_press": "dashboard", "api_virtual_set": "dashboard",
@@ -1109,7 +1113,7 @@ class Controller:
         else:
             try:
                 fs = surplus.settings(cfg)["failsafe_min"]
-                timer_s = int(fs * 60) if on and fs > 0 and dev.get("kind") != "tuya" else None
+                timer_s = int(fs * 60) if on and fs > 0 and dev.get("kind") not in ("tuya", "zigbee") else None
                 shelly.set_state(dev["id"], on, timer_s=timer_s)
                 if timer_s:
                     surplus_ctrl.mark_armed(dev["id"])
@@ -1281,7 +1285,7 @@ class Controller:
         else:
             try:
                 fs = rules.settings(cfg)["failsafe_min"]
-                timer_s = int(fs * 60) if on and fs > 0 and dev.get("kind") != "tuya" else None
+                timer_s = int(fs * 60) if on and fs > 0 and dev.get("kind") not in ("tuya", "zigbee") else None
                 shelly.set_state(dev["id"], on, timer_s=timer_s)
                 if timer_s:
                     rule_engine.mark_armed(dev["id"])
@@ -2443,7 +2447,7 @@ def api_homematic_sensor_add():
     return jsonify({"added": len(added)}), 201
 
 
-FAMILIES = ("shelly", "tasmota", "tuya", "homematic")
+FAMILIES = ("shelly", "tasmota", "tuya", "homematic", "zigbee")
 
 
 def _families() -> dict:
@@ -2454,7 +2458,8 @@ def _families() -> dict:
     kinds = {d.get("kind", "shelly") for d in shelly.load_devices()}
     return {"shelly": "shelly" in kinds, "tasmota": "tasmota" in kinds,
             "tuya": "tuya" in kinds or bool(tuya.credentials_public().get("configured")),
-            "homematic": "homematic" in kinds or bool(homematic.credentials_public().get("configured"))}
+            "homematic": "homematic" in kinds or bool(homematic.credentials_public().get("configured")),
+            "zigbee": "zigbee" in kinds or bool(zigbee.credentials_public().get("configured"))}
 
 
 @app.route("/api/device-families", methods=["GET", "POST"])
@@ -2558,6 +2563,96 @@ def api_setpoint_modify(sp_id):
     else:
         ok = homematic.update_setpoint(sp_id, name=(request.get_json(silent=True) or {}).get("name"))
     return jsonify(ok=True) if ok else (jsonify(error="nicht gefunden"), 404)
+
+
+@app.route("/api/zigbee", methods=["GET"])
+def api_zigbee_info():
+    return jsonify(_masked(zigbee.credentials_public(), "settings_geraete", ["host"]))        # ohne Schluessel
+
+
+@app.route("/api/zigbee/credentials", methods=["POST"])
+def api_zigbee_credentials():
+    """Gateway-Adresse (+ optional vorhandener Schluessel) speichern und testen; ohne Schluessel: vom Gateway holen (Phoscon: App autorisieren)."""
+    body = request.get_json(silent=True) or {}
+    try:
+        if (body.get("key") or "").strip():
+            zigbee.save_credentials(body.get("host"), body.get("key"))
+        else:
+            zigbee.save_credentials(body.get("host"))
+            if not zigbee.load_credentials().get("key"):
+                zigbee.pair(body.get("host"))
+        info = zigbee.test_connection()
+    except zigbee.ZigbeeError as e:
+        return jsonify(error=str(e)), 400
+    except Exception as e:                               # noqa: BLE001
+        log.warning("Zigbee-Test fehlgeschlagen: %s", e)
+        return jsonify(error=f"Test fehlgeschlagen: {e}"), 500
+    return jsonify(ok=True, **info)
+
+
+@app.route("/api/zigbee/pair", methods=["POST"])
+def api_zigbee_pair():
+    """Neuen Schluessel vom Gateway holen (in Phoscon vorher "App autorisieren")."""
+    try:
+        zigbee.pair((request.get_json(silent=True) or {}).get("host"))
+        return jsonify(ok=True, **zigbee.test_connection())
+    except zigbee.ZigbeeError as e:
+        return jsonify(error=str(e)), 400
+
+
+def _zb_call(fn, *a):
+    try:
+        return jsonify(fn(*a)), 200
+    except (zigbee.ZigbeeError, shelly.ShellyError) as e:
+        return jsonify(error=str(e)), 400
+
+
+@app.route("/api/zigbee/scan", methods=["POST"])
+def api_zigbee_scan():
+    return _zb_call(shelly.zigbee_scan)
+
+
+@app.route("/api/zigbee/add", methods=["POST"])
+def api_zigbee_add():
+    ids = (request.get_json(silent=True) or {}).get("ids")
+    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+        return jsonify(error="ids fehlt"), 400
+    try:
+        return jsonify(added=shelly.add_zigbee(ids))
+    except shelly.ShellyError as e:
+        return jsonify(error=str(e)), 400
+
+
+@app.route("/api/zigbee/sensors/scan", methods=["POST"])
+def api_zigbee_sensor_scan():
+    return _zb_call(zigbee.sensors_scan)
+
+
+@app.route("/api/zigbee/sensors/add", methods=["POST"])
+def api_zigbee_sensor_add():
+    ids = (request.get_json(silent=True) or {}).get("ids")
+    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+        return jsonify(error="ids fehlt"), 400
+    try:
+        return jsonify(added=zigbee.add_sensors(ids))
+    except zigbee.ZigbeeError as e:
+        return jsonify(error=str(e)), 400
+
+
+@app.route("/api/zigbee/setpoints/scan", methods=["POST"])
+def api_zigbee_sp_scan():
+    return _zb_call(zigbee.setpoints_scan)
+
+
+@app.route("/api/zigbee/setpoints/add", methods=["POST"])
+def api_zigbee_sp_add():
+    ids = (request.get_json(silent=True) or {}).get("ids")
+    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+        return jsonify(error="ids fehlt"), 400
+    try:
+        return jsonify(added=zigbee.add_setpoints(ids))
+    except zigbee.ZigbeeError as e:
+        return jsonify(error=str(e)), 400
 
 
 @app.route("/api/sensors", methods=["GET"])

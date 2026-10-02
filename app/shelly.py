@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 
 import homematic
+import zigbee
 import tasmota
 import tuya
 
@@ -259,6 +260,33 @@ def add_homematic(addresses: list[str]) -> list[dict]:
     return added
 
 
+def zigbee_scan() -> list[dict]:
+    """Lichter/Steckdosen des Zigbee-Gateways. Bereits angelegte sind mit known=True markiert."""
+    known = {d["id"] for d in load_devices() if d.get("kind") == "zigbee"}
+    try:
+        return zigbee.discover(known)
+    except zigbee.ZigbeeError as e:
+        raise ShellyError(str(e))
+
+
+def add_zigbee(ids: list[str]) -> list[dict]:
+    try:
+        entries = zigbee.build_entries(ids)
+    except zigbee.ZigbeeError as e:
+        raise ShellyError(str(e))
+    items = load_devices()
+    have = {d["id"] for d in items}
+    added = []
+    for entry in entries:
+        if entry["id"] in have:
+            continue
+        entry.update({"show": False, "auto": False, "power_w": 0, "min_on_min": 5, "min_off_min": 5})
+        items.append(entry)
+        added.append(entry)
+    _save(items)
+    return added
+
+
 # ---------------------------------------------------------------- Tuya (Gosund & Co.)
 def tuya_scan(networks: list[str] | None = None) -> list[dict]:
     """Tuya-Geraete (Cloud-Schluessel + LAN-Suche). Aktualisiert dabei die IPs bekannter Geraete."""
@@ -386,6 +414,8 @@ def status(d: dict) -> dict:
         return tasmota.status(d)
     if d.get("kind") == "homematic":
         return homematic.status(d)
+    if d.get("kind") == "zigbee":
+        return zigbee.status(d)
     try:
         if d["gen"] >= 2:
             st = _get(d["ip"], f"/rpc/Switch.GetStatus?id={d['channel']}", CALL_TIMEOUT)
@@ -419,6 +449,11 @@ def set_state(dev_id: str, on: bool, timer_s: int | None = None) -> dict:
         try:
             return homematic.set_state(d, on, timer_s)
         except homematic.HomematicError as e:
+            raise ShellyError(str(e))
+    if d.get("kind") == "zigbee":
+        try:
+            return zigbee.set_state(d, on, timer_s)
+        except zigbee.ZigbeeError as e:
             raise ShellyError(str(e))
     if d.get("kind") == "tasmota":
         try:

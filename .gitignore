@@ -47,3 +47,4 @@ app/automation_log_read.json
 app/virtual.json
 app/flows_state.json
 app/homematic_setpoints.json
+app/zigbee.json

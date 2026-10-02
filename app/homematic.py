@@ -497,8 +497,14 @@ def read_sensor(sen: dict):
     if hit and hit[0] > now:
         return hit[1]
     try:
-        v = _get_value(sen["interface"], sen["address"], sen["datapoint"])
-        if _unreach(sen) or v is None:
+        if sen.get("source") == "zigbee":                      # Zigbee-Sensor (Phoscon/deCONZ) im selben Register
+            import zigbee
+            v = zigbee.read_value(sen)
+            unreach = v is None
+        else:
+            v = _get_value(sen["interface"], sen["address"], sen["datapoint"])
+            unreach = _unreach(sen)
+        if unreach or v is None:
             val = None
         elif sen.get("binary"):
             val = _truthy(v) if isinstance(v, (bool, str)) and not str(v).strip().isdigit() else bool(float(v))          # Drehgriff: 0 zu, 1 gekippt, 2 offen -> offen = wahr
@@ -699,6 +705,9 @@ def list_setpoints_with_values() -> list[dict]:
     items = load_setpoints()
 
     def cur(s):
+        if s.get("source") == "zigbee":
+            import zigbee
+            return zigbee.read_setpoint(s)
         try:
             return round(float(_get_value(s["interface"], s["address"], s["datapoint"])), 1)
         except (HomematicError, TypeError, ValueError):
@@ -715,6 +724,13 @@ def set_setpoints(ids: list[str], value: float) -> list[tuple]:
     out = []
     for s in chosen:
         v = min(float(s.get("max", 30.5)), max(float(s.get("min", 4.5)), float(value)))
+        if s.get("source") == "zigbee":
+            import zigbee
+            try:
+                out.append((s["name"], zigbee.set_setpoint(s, value), None))
+            except zigbee.ZigbeeError as e:
+                out.append((s["name"], v, str(e)))
+            continue
         try:
             _call("Interface.setValue", {"interface": s["interface"], "address": s["address"], "valueKey": s["datapoint"], "type": "double", "value": v})
             _pushed.pop((s["interface"], s["address"], s["datapoint"]), None)
@@ -865,7 +881,7 @@ def _local_ip(ccu_ip: str) -> str:
 def _known_interfaces() -> set[str]:
     import shelly
     out = {d.get("interface") for d in shelly.load_devices() if d.get("kind") == "homematic"}
-    out |= {s.get("interface") for s in load_sensors()}
+    out |= {s.get("interface") for s in load_sensors() if s.get("source") != "zigbee"}
     return {i for i in out if i}
 
 
