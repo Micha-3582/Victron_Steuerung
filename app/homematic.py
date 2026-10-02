@@ -533,7 +533,8 @@ def add_sensors(ids: list[str]) -> list[dict]:
     return added
 
 
-def update_sensor(sensor_id_: str, name: str | None = None, show: bool | None = None, invert: bool | None = None) -> bool:
+def update_sensor(sensor_id_: str, name: str | None = None, show: bool | None = None, invert: bool | None = None,
+                  icon: str | None = None) -> bool:
     items = load_sensors()
     for s in items:
         if s["id"] == sensor_id_:
@@ -541,6 +542,10 @@ def update_sensor(sensor_id_: str, name: str | None = None, show: bool | None = 
                 s["name"] = name.strip()[:60] or s["name"]
             if show is not None:
                 s["show"] = bool(show)
+            if icon is not None:
+                icon = icon.strip()
+                if 0 < len(icon) <= 12:
+                    s["icon"] = icon
             if invert is not None:
                 s["invert"] = bool(invert)
                 _value_cache.pop(s["id"], None)           # neuer Wert gleich mit der neuen Bedeutung

@@ -1585,20 +1585,30 @@ function sensorValueText(s) {
   return `${s.value}${s.unit ? ' ' + s.unit : ''}`;
 }
 async function loadSensorsAdmin() {
+  if (!shellyIcons.length) { try { shellyIcons = await (await fetch('/api/shelly/icons')).json(); } catch (e) { /* egal */ } }
   let list = []; try { list = await (await fetch('/api/sensors')).json(); } catch (e) { return; }
   if (!Array.isArray(list)) return;
   document.getElementById('hm-sensors').innerHTML = list.length ? list.map(s => `<div data-sensor="${escH(s.id)}" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--border);border-radius:10px;padding:8px 10px">
+      <button class="ghost" style="font-size:22px;padding:4px 10px" title="Symbol wählen" onclick="sensorPickIcon('${escH(s.id)}')">${escH(s.icon || SENSOR_ICON[s.kind] || '📡')}</button>
       <div style="flex:1;min-width:150px"><b>${escH(s.name)}</b><div class="muted">${escH(s.model)}${s.room ? ' · ' + escH(s.room) : ''} · <b>${escH(sensorValueText(s))}</b></div></div>
       ${s.binary ? `<label class="chk" title="Tauscht die Bedeutung von TRUE und FALSE – für Sensoren, die andersherum verschaltet sind"><input type="checkbox" ${s.invert ? 'checked' : ''} onchange="sensorInvert('${escH(s.id)}', this.checked)"> Umkehren</label>` : ''}
       <label class="chk" title="Auf dem Dashboard in der Kachel „Sensoren“ zeigen"><input type="checkbox" ${s.show === false ? '' : 'checked'} onchange="sensorShow('${escH(s.id)}', this.checked)"> Dashboard</label>
       <button class="ghost" onclick="sensorRename('${escH(s.id)}', this)" data-name="${escH(s.name)}" title="Umbenennen">✎</button>
-      <button class="ghost" onclick="sensorRemove('${escH(s.id)}')" title="Entfernen">✕</button></div>`).join('')
+      <button class="ghost" onclick="sensorRemove('${escH(s.id)}')" title="Entfernen">✕</button>
+      <div id="sicons-${escH(s.id)}" style="display:none;flex-wrap:wrap;gap:4px;width:100%">${[...SENSOR_EXTRA_ICONS, ...shellyIcons].map(ic => `<button class="ghost" style="font-size:20px;padding:2px 8px" onclick="sensorSetIcon('${escH(s.id)}', '${ic}')">${ic}</button>`).join('')}</div></div>`).join('')
     : '<div class="muted">Noch keine Sensoren angelegt.</div>';
 }
 async function sensorRename(id, btn) {
   const n = await uiDialog({ title: 'Sensor umbenennen', label: 'Neuer Name', value: btn.dataset.name });
   if (n === null) return;
   try { await shellyApi('/api/sensors/' + encodeURIComponent(id), 'PATCH', { name: n }); savedToast(); } catch (e) { shellyMsg(e.message, true); }
+  loadSensorsAdmin();
+}
+const SENSOR_ICON = { contact: '🚪', motion: '🏃', presence: '🧍', temperature: '🌡️', humidity: '💧', brightness: '☀️', power: '⚡' };
+const SENSOR_EXTRA_ICONS = ['🚪', '🪟', '🏃', '🧍', '🚶', '👀', '🔑', '🚨', '📬', '🚗', '🚲', '🐕', '🐈', '🔥', '💦', '🌡️', '☀️', '⚡'];
+function sensorPickIcon(id) { const el = document.getElementById('sicons-' + id); el.style.display = el.style.display === 'none' ? 'flex' : 'none'; }
+async function sensorSetIcon(id, icon) {
+  try { await shellyApi('/api/sensors/' + encodeURIComponent(id), 'PATCH', { icon }); savedToast(); } catch (e) { shellyMsg(e.message, true); }
   loadSensorsAdmin();
 }
 async function sensorInvert(id, on) {
@@ -1633,7 +1643,7 @@ async function hmSensorAdd(ids) {
   document.querySelectorAll('#shelly-found [data-all]').forEach(r => r.remove());
   loadSensorsAdmin();
 }
-loadSensorsAdmin(); setInterval(loadSensorsAdmin, 15000);
+loadSensorsAdmin(); setInterval(() => { if (![...document.querySelectorAll('[id^=sicons-]')].some(e => e.style.display === 'flex')) loadSensorsAdmin(); }, 15000);
 
 /* --- VRM-Zugang (Solar-Prognose) --- */
 function vrmMsg(t, err) { const m = document.getElementById('vrm-msg'); m.textContent = t; m.style.color = err ? '#e5544a' : ''; }
