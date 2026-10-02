@@ -155,7 +155,7 @@ ENDPOINT_AREA = {
     "api_vrm_info": "settings_vrm", "api_vrm_credentials": "settings_vrm", "api_vrm_restore": "settings_vrm",
     "api_tuya_info": "settings_geraete", "api_tuya_credentials": "settings_geraete",
     "api_tuya_scan": "settings_geraete", "api_tuya_add": "settings_geraete",
-    "api_homematic_info": "settings_geraete", "api_homematic_credentials": "settings_geraete", "api_homematic_push": "settings_geraete",
+    "api_device_families": "settings_geraete", "api_homematic_info": "settings_geraete", "api_homematic_credentials": "settings_geraete", "api_homematic_push": "settings_geraete",
     "api_homematic_scan": "settings_geraete", "api_homematic_add": "settings_geraete",
     "api_homematic_sensor_scan": "settings_geraete", "api_homematic_sensor_add": "settings_geraete",
     "api_sensor_modify": "settings_geraete", "api_sensors_list": "dashboard",
@@ -2344,6 +2344,31 @@ def api_homematic_sensor_add():
     return jsonify({"added": len(added)}), 201
 
 
+FAMILIES = ("shelly", "tasmota", "tuya", "homematic")
+
+
+def _families() -> dict:
+    """Welche Smart-Home-Systeme der Nutzer verwendet. Ohne gespeicherte Auswahl: was schon eingerichtet ist (Geraete/Zugang)."""
+    saved = store.load_config().get("device_families")
+    if isinstance(saved, dict):
+        return {k: bool(saved.get(k)) for k in FAMILIES}
+    kinds = {d.get("kind", "shelly") for d in shelly.load_devices()}
+    return {"shelly": "shelly" in kinds, "tasmota": "tasmota" in kinds,
+            "tuya": "tuya" in kinds or bool(tuya.credentials_public().get("configured")),
+            "homematic": "homematic" in kinds or bool(homematic.credentials_public().get("configured"))}
+
+
+@app.route("/api/device-families", methods=["GET", "POST"])
+def api_device_families():
+    """Auswahl der Smart-Home-Systeme (Einstellungen -> Geraete): blendet nicht benoetigte Such-/Einrichtungsbereiche aus."""
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        cfg = store.load_config()
+        cfg["device_families"] = {k: bool(body.get(k)) for k in FAMILIES}
+        store.save_config(cfg)
+    return jsonify(families=_families(), chosen=isinstance(store.load_config().get("device_families"), dict))
+
+
 @app.route("/api/sensors", methods=["GET"])
 def api_sensors_list():
     """Angelegte Sensoren mit aktuellem Wert (fuer Einstellungen und Regel-Bedingungen)."""
@@ -2359,7 +2384,8 @@ def api_sensor_modify(sensor_id):
     if request.method == "DELETE":
         ok = homematic.remove_sensor(sensor_id)
     else:
-        ok = homematic.update_sensor(sensor_id, name=(request.get_json(silent=True) or {}).get("name"))
+        body = request.get_json(silent=True) or {}
+        ok = homematic.update_sensor(sensor_id, name=body.get("name"), show=body.get("show") if isinstance(body.get("show"), bool) else None)
     return jsonify(ok=True) if ok else (jsonify(error="nicht gefunden"), 404)
 
 

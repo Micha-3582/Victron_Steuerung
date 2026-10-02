@@ -531,12 +531,14 @@ def add_sensors(ids: list[str]) -> list[dict]:
     return added
 
 
-def update_sensor(sensor_id_: str, name: str | None = None) -> bool:
+def update_sensor(sensor_id_: str, name: str | None = None, show: bool | None = None) -> bool:
     items = load_sensors()
     for s in items:
         if s["id"] == sensor_id_:
             if name is not None:
                 s["name"] = name.strip()[:60] or s["name"]
+            if show is not None:
+                s["show"] = bool(show)
             _save_sensors(items)
             return True
     return False

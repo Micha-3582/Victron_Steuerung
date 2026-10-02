@@ -147,6 +147,10 @@
   <h2>Geräte</h2>
   <div class="sysgrid" id="shelly-grid"></div>
 </div>
+<div class="card full" id="sensors-card" hidden style="margin-bottom:14px">
+  <h2>Sensoren</h2>
+  <div class="sysgrid" id="sensors-grid"></div>
+</div>
 
 <style>
   #weather-card .wx-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
@@ -268,7 +272,10 @@ const TILE_IDS = {
 const ORDER_IDS = { ...TILE_IDS, show_shelly_card: 'shelly-card', show_weather_card: 'weather-card', show_plansim_card: 'plansim-card', show_savings_card: 'savings-card' };
 function applyTileOrder(order) {
   const keys = Object.keys(ORDER_IDS), given = (order || []).filter(k => keys.includes(k));
-  [...given, ...keys.filter(k => !given.includes(k))].forEach((k, i) => { const el = $(ORDER_IDS[k]); if (el) el.style.order = i; });
+  [...given, ...keys.filter(k => !given.includes(k))].forEach((k, i) => {
+    const el = $(ORDER_IDS[k]); if (el) el.style.order = i * 2;
+    if (k === 'show_shelly_card') { const sc = $('sensors-card'); if (sc) sc.style.order = i * 2 + 1; }      // Sensoren direkt unter den Geraeten
+  });
 }
 // Eingeschraenkte Konten (siehe Einstellungen -> System -> Weitere Benutzer): "Schreiben" auf
 // Dashboard darf Geraete schalten, Override setzen und Ladetermine anlegen, "Lesen" nur ansehen.
@@ -868,6 +875,7 @@ async function load() {
   }
   applyEnergyDayUI();
   loadShelly();
+  loadSensors();
 
   const banner = $('banner');
   if (d.last_error) banner.innerHTML = `<div class="banner err">Fehler: ${d.last_error}</div>`;
@@ -1555,6 +1563,7 @@ loadMonth();
 loadPriceMinDay();
 setInterval(load, 15000);      // Plan/Preise/Termine (langsamer)
 setInterval(loadLive, 2000);   // Live-Werte vom Cerbo (wie Victron: alle 2 s)
+setInterval(() => loadSensors(), 5000);   // Sensoren (Ja/Nein)
 setInterval(loadWeek, 300000);  // Wochenrückblick (ändert sich langsam)
 setInterval(loadMonth, 300000); // Monatsüberblick (ändert sich langsam)
 
@@ -1584,6 +1593,26 @@ async function loadShelly() {
           onchange="shellySwitch('${escH(d.id)}', this.checked, this)"><span class="slider"></span></label>`}
       </div>
       <div class="systile-s">${stat}</div></div>`;
+  }).join('');
+}
+/* Sensoren (nur lesen): Ja/Nein als Punkt - gruen = Ja, rot = Nein; Messwerte als Zahl */
+const SENSOR_WORDS = { contact: ['offen', 'geschlossen'], motion: ['Bewegung', 'keine Bewegung'], presence: ['anwesend', 'niemand da'] };
+async function loadSensors() {
+  const card = $('sensors-card');
+  if (!shellyEnabled) { card.hidden = true; return; }
+  let list;
+  try { list = await (await fetch('/api/sensors', { cache: 'no-store' })).json(); } catch (e) { return; }
+  list = Array.isArray(list) ? list.filter(s => s.show !== false) : [];
+  if (!shellyEnabled || !list.length) { card.hidden = true; return; }
+  card.hidden = false;
+  $('sensors-grid').innerHTML = list.map(s => {
+    const v = s.value, ok = v !== null && v !== undefined, w = SENSOR_WORDS[s.kind] || ['Ja', 'Nein'];
+    const big = !ok ? '<span style="font-size:22px;font-weight:700;color:var(--muted)">–</span>'
+      : s.binary ? `<span style="display:inline-block;width:26px;height:26px;border-radius:50%;background:${v ? 'var(--green)' : '#e5544a'};box-shadow:0 0 10px ${v ? 'var(--green)' : '#e5544a'}66"></span>`
+                 : `<span style="font-size:22px;font-weight:700;font-variant-numeric:tabular-nums">${escH(String(v).replace('.', ','))}${s.unit ? ' ' + escH(s.unit) : ''}</span>`;
+    const sub = !ok ? 'kein Wert' : s.binary ? (v ? 'Ja – ' + w[0] : 'Nein – ' + w[1]) : escH(s.room || '');
+    return `<div class="systile" ${ok ? '' : 'style="opacity:.55"'}><div class="systile-t">${escH(s.name)}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">${big}</div><div class="systile-s">${sub}</div></div>`;
   }).join('');
 }
 /* Meldungen im eigenen Stil statt Browser-Dialog (Fehler bleiben laenger stehen) */

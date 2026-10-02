@@ -583,25 +583,37 @@
   </div>
 </div>
 
+<style>.chk{display:inline-flex;align-items:center;gap:8px;margin:0;font-weight:normal;cursor:pointer}.chk input{width:auto;margin:0}</style>
 <div class="card" id="shelly-admin">
   <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Geräte (Shelly, Tasmota, Tuya &amp; Homematic)</h2>
   <div class="muted" style="margin-bottom:12px">Shelly-, Tasmota-, Tuya-/Gosund- und Homematic-Geräte (über die OpenCCU) suchen, benennen und mit einem Symbol versehen.
     Was ein Gerät automatisch tun soll (zum Beispiel bei günstigem Strom oder PV-Überschuss einschalten),
     legst du auf der Seite <a href="/automation" style="color:var(--accent);font-weight:600">Automatik</a> fest.</div>
+  <div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:12px">
+    <b>Welche Smart-Home-Systeme hast du?</b>
+    <div class="muted" style="margin:2px 0 8px">Nur was du ankreuzt, wird unten zum Suchen und Einrichten angeboten. Schon eingerichtete Geräte bleiben immer sichtbar.</div>
+    <div style="display:flex;gap:18px;flex-wrap:wrap">
+      <label class="chk"><input type="checkbox" class="fam-cb" data-fam="shelly"> Shelly</label>
+      <label class="chk"><input type="checkbox" class="fam-cb" data-fam="tasmota"> Tasmota</label>
+      <label class="chk"><input type="checkbox" class="fam-cb" data-fam="tuya"> Tuya / Smart Life</label>
+      <label class="chk"><input type="checkbox" class="fam-cb" data-fam="homematic"> Homematic / HomematicIP (OpenCCU)</label>
+    </div>
+    <div class="muted" id="fam-hint" style="margin-top:8px" hidden>Noch kein System ausgewählt – kreuze oben an, was du besitzt.</div>
+  </div>
   <div id="shelly-devs" style="display:flex;flex-direction:column;gap:10px"></div>
-  <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <button id="shelly-scan" class="ghost">Shellys suchen</button>
-    <button id="tasmota-scan" class="ghost">Tasmota suchen</button>
+  <div id="fam-shelly-row" style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <button id="shelly-scan" class="ghost" data-fam-show="shelly">Shellys suchen</button>
+    <button id="tasmota-scan" class="ghost" data-fam-show="tasmota">Tasmota suchen</button>
     <input type="text" id="shelly-ip" placeholder="oder IP (Shelly/Tasmota), z.B. 192.168.2.55" style="flex:1;min-width:190px"> <span class="qhelp" role="button" tabindex="0" data-help="IP-Adresse eines einzelnen Shelly- oder Tasmota-Geräts, falls die Suche es nicht findet. Danach auf Hinzufügen klicken.">?</span>
     <button id="shelly-add" class="ghost">Hinzufügen</button>
   </div>
-  <div style="margin-top:14px">
+  <div id="fam-vlan" style="margin-top:14px">
     <label>Weitere Netze / VLANs für die Suche (optional) <span class="qhelp" role="button" tabindex="0" data-help="Zusätzliche Netze für die Gerätesuche, zum Beispiel 192.168.178.0/24, mehrere durch Komma getrennt. Nur nötig, wenn Geräte in einem anderen VLAN stehen. Der Server muss dorthin routen dürfen.">?</span></label>
     <input id="scan-networks" placeholder="z.B. 192.168.178.0/24, 192.168.48.0/21" autocomplete="off">
     <div class="muted">Standardmäßig wird nur das Netz des Servers durchsucht. Geräte in anderen VLANs hier eintragen (gilt für Shelly, Tasmota
       und Tuya; der Server muss dorthin routen dürfen). Die Suche dauert dann etwas länger.</div>
   </div>
-  <div style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px">
+  <div id="fam-tuya" style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px">
     <b>Tuya / Smart Life (z.B. Gosund)</b>
     <div class="muted" style="margin:4px 0 10px">Die Geräte werden <b>lokal im Heimnetz</b> geschaltet. Die Tuya-Cloud wird nur
       einmal gebraucht, um die Geräteschlüssel abzuholen.</div>
@@ -622,7 +634,7 @@
     </details>
     <div style="margin-top:10px"><button id="tuya-scan" class="ghost">Tuya-Geräte suchen</button></div>
   </div>
-  <div style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px">
+  <div id="fam-homematic" style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px">
     <b>Homematic / HomematicIP (OpenCCU)</b>
     <div class="muted" style="margin:4px 0 10px">Schaltbare Geräte (Steckdosen, Lichter, Dimmer) werden <b>lokal über die CCU</b> gefunden und
       geschaltet – ohne Cloud. Messende Steckdosen liefern zusätzlich ihre Leistung.</div>
@@ -1460,6 +1472,25 @@ async function loadHomematicInfo() {
   document.getElementById('hm-pass').placeholder = h.password_set ? '(gespeichert – leer lassen = unverändert)' : '';
   document.getElementById('hm-setup').open = !h.configured;
 }
+/* --- Auswahl der Smart-Home-Systeme --- */
+function applyFamilies(f) {
+  const any = Object.values(f).some(Boolean);
+  document.querySelectorAll('.fam-cb').forEach(cb => { cb.checked = !!f[cb.dataset.fam]; });
+  const show = (id, v) => { const el = document.getElementById(id); if (el) el.hidden = !v; };
+  document.querySelectorAll('[data-fam-show]').forEach(b => { b.hidden = !f[b.dataset.famShow]; });
+  const ipRow = document.getElementById('fam-shelly-row');
+  ipRow.style.display = (f.shelly || f.tasmota) ? 'flex' : 'none';
+  show('fam-vlan', f.shelly || f.tasmota || f.tuya); show('fam-tuya', f.tuya); show('fam-homematic', f.homematic);
+  document.getElementById('fam-hint').hidden = any;
+}
+async function loadFamilies() {
+  try { const r = await (await fetch('/api/device-families', { cache: 'no-store' })).json(); if (r.families) applyFamilies(r.families); } catch (e) { /* egal */ }
+}
+document.querySelectorAll('.fam-cb').forEach(cb => cb.addEventListener('change', async () => {
+  const body = {}; document.querySelectorAll('.fam-cb').forEach(x => { body[x.dataset.fam] = x.checked; });
+  try { const r = await shellyApi('/api/device-families', 'POST', body); applyFamilies(r.families); savedToast(); } catch (e) { shellyMsg(e.message, true); loadFamilies(); }
+}));
+loadFamilies();
 async function loadHomematicPush() {
   let p; try { p = await (await fetch('/api/homematic/push', { cache: 'no-store' })).json(); } catch (e) { return; }
   if (p.error) return;
@@ -1528,6 +1559,7 @@ async function loadSensorsAdmin() {
   if (!Array.isArray(list)) return;
   document.getElementById('hm-sensors').innerHTML = list.length ? list.map(s => `<div data-sensor="${escH(s.id)}" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--border);border-radius:10px;padding:8px 10px">
       <div style="flex:1;min-width:150px"><b>${escH(s.name)}</b><div class="muted">${escH(s.model)}${s.room ? ' · ' + escH(s.room) : ''} · <b>${escH(sensorValueText(s))}</b></div></div>
+      <label class="chk" title="Auf dem Dashboard in der Kachel „Sensoren“ zeigen"><input type="checkbox" ${s.show === false ? '' : 'checked'} onchange="sensorShow('${escH(s.id)}', this.checked)"> Dashboard</label>
       <button class="ghost" onclick="sensorRename('${escH(s.id)}', this)" data-name="${escH(s.name)}" title="Umbenennen">✎</button>
       <button class="ghost" onclick="sensorRemove('${escH(s.id)}')" title="Entfernen">✕</button></div>`).join('')
     : '<div class="muted">Noch keine Sensoren angelegt.</div>';
@@ -1537,6 +1569,9 @@ async function sensorRename(id, btn) {
   if (n === null) return;
   try { await shellyApi('/api/sensors/' + encodeURIComponent(id), 'PATCH', { name: n }); savedToast(); } catch (e) { shellyMsg(e.message, true); }
   loadSensorsAdmin();
+}
+async function sensorShow(id, on) {
+  try { await shellyApi('/api/sensors/' + encodeURIComponent(id), 'PATCH', { show: on }); savedToast(); } catch (e) { shellyMsg(e.message, true); loadSensorsAdmin(); }
 }
 async function sensorRemove(id) {
   if (!await uiDialog({ title: 'Sensor entfernen?', message: 'Der Sensor wird nur aus dieser Liste entfernt. Regeln, die ihn benutzen, gelten dann als nicht erfüllt, bis du sie anpasst.', okText: 'Entfernen' })) return;
