@@ -34,6 +34,8 @@ import notify
 import opslog
 import price_cache
 import rules
+import flows
+import virtual
 import report
 import updater
 import vrm
@@ -53,6 +55,7 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger("webapp")
 surplus_ctrl = surplus.SurplusController()
 rule_engine = rules.RuleEngine()
+flow_engine = flows.FlowEngine()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -159,6 +162,10 @@ ENDPOINT_AREA = {
     "api_homematic_scan": "settings_geraete", "api_homematic_add": "settings_geraete",
     "api_homematic_sensor_scan": "settings_geraete", "api_homematic_sensor_add": "settings_geraete",
     "api_sensor_modify": "settings_geraete", "api_sensors_list": "dashboard",
+    "api_virtual_list": "dashboard", "api_virtual_press": "dashboard", "api_virtual_set": "dashboard",
+    "api_virtual_add": "settings_geraete", "api_virtual_modify": "settings_geraete",
+    "api_setpoint_scan": "settings_geraete", "api_setpoint_add": "settings_geraete", "api_setpoint_list": "dashboard",
+    "api_setpoint_modify": "settings_geraete",
     "api_shelly_icons": "settings_geraete", "api_shelly_order": "settings_geraete",
     "api_shelly_scan": "settings_geraete", "api_tasmota_scan": "settings_geraete",
     "api_shelly_add": "settings_geraete", "api_shelly_modify": "settings_geraete",
@@ -188,7 +195,7 @@ for _f in ("tibber_token", "tariff_mode", "fixed_price_ct", "max_charge_soc", "a
     FIELD_AREA[_f] = "settings_tarif"
 for _f in ("app_display_name", "show_live_values", "show_energy_chart", "show_flow_chart",
            "show_week_overview", "show_month_overview", "show_tibber_card", "show_override_card",
-           "show_price_plan", "show_charge_log", "show_ev_card", "show_shelly_card", "show_sensors_card",
+           "show_price_plan", "show_charge_log", "show_ev_card", "show_shelly_card", "show_sensors_card", "show_virtual_card",
            "show_weather_card", "show_plansim_card", "show_savings_card", "tile_order",
            "chart_energy_hourly", "chart_flow_hourly"):
     FIELD_AREA[_f] = "settings_anzeige"
@@ -1154,8 +1161,15 @@ class Controller:
                                 log.warning("Sicherheits-Timer %s: %s", d["name"], e)
                     ctx = self._rules_ctx(cfg, system, now)
                     ctx["devices"] = {d["id"]: d for d in devs}                      # Zustand/Leistung anderer Geraete als Bedingung
+                    ctx["virtual"] = virtual.snapshot()                              # eigene Schalter/Knoepfe
+                    pressed = virtual.pressed_ids()
                     for act in rule_engine.step(now, ctx, cfg, devs, rules.compile_all(all_rules)):
                         self._apply_rule(act, dry, cfg)
+                    for ev in flow_engine.step(now, ctx, [r for r in all_rules if flows.is_flow(r)]):
+                        self._log_flow_event(ev, dry)
+                    for act in flow_engine.advance(skip_waits=dry):
+                        self._apply_flow(act, dry, cfg)
+                    virtual.consume(pressed)                                         # Knopfdruck war genau einen Durchlauf lang sichtbar
                     if time.time() - last_flush > 60:
                         rule_engine.flush()
                         last_flush = time.time()
@@ -1163,12 +1177,73 @@ class Controller:
                     rule_engine.reset()
                     rule_engine.disarm_all()    # Timer laufen aus -> Geraete schalten sich selbst ab
                     self._rules_dry_on.clear()
+                    for ev in flow_engine.cancel_all("Regeln insgesamt ausgeschaltet – laufender Ablauf abgebrochen"):
+                        self._log_flow_event(ev, False)
+                    flow_engine.forget()
+                    virtual.consume(virtual.pressed_ids())
             except Exception as e:                       # noqa: BLE001
                 log.warning("Regel-Engine: %s", e)
             fast = any(c.get("type") in ("sensor", "device") for r in rules.list_rules() if r.get("enabled", True) for c in rules.all_conditions(r))
             iv = 10 if homematic.push_active() else (2 if fast else 10)      # mit Push (Meldung der CCU) genuegt die Reserve-Runde; sonst alle 2 s abfragen
+            nd = flow_engine.next_due()
+            if nd:
+                iv = min(iv, max(0.2, nd - time.time()))                       # laufender Ablauf: genau zum naechsten Schritt aufwachen
             self._rules_wake.wait(iv)                    # Meldung der CCU weckt sofort
             self._stop.wait(0.05)
+
+    def _log_flow_event(self, ev, dry: bool):
+        kind, rule, why = ev
+        text = ("(Trockenlauf) " if dry else "") + f"Regel „{rule.get('name', '')}“: {why}"
+        log.info("Regeln: %s", text)
+        opslog.log("rules", text, dry=dry)
+        autolog.log("rules", text, dev=rule.get("name", ""), action=kind, dry=dry, rule=rule.get("id"))
+
+    def _apply_flow(self, act, dry: bool, cfg: dict):
+        """Ein Schritt eines Ablaufs: Geraet schalten, Sollwert setzen, Nachricht senden, eigenen Schalter setzen."""
+        st, rule = act["step"], act["rule"]
+        after = f" (nach {int(act['after_s'] // 60)} min {int(act['after_s'] % 60)} s)" if dry and act.get("after_s") else ""
+        t = st.get("type", "switch")
+        jobs = []                                         # (aktion-fuers-logbuch, geraet, text, ok, fehler)
+        names = {d["id"]: d["name"] for d in shelly.load_devices()}
+        if t == "switch":
+            on = st["state"] == "on"
+            name = names.get(st["device_id"], st["device_id"])
+            err = None
+            if not dry:
+                try:
+                    shelly.set_state(st["device_id"], on, timer_s=0 if on else None)
+                except shelly.ShellyError as e:
+                    err = str(e)
+            jobs.append(("on" if on else "off", name, f"{name} {'eingeschaltet' if on else 'ausgeschaltet'}", err))
+        elif t == "setpoint":
+            if dry:
+                names_sp = [s["name"] for s in homematic.load_setpoints() if "*" in st["device_ids"] or s["id"] in st["device_ids"]]
+                jobs.append(("setpoint", ", ".join(names_sp) or "Thermostate", f"Solltemperatur {st['value']:g} °C würde gesetzt: {', '.join(names_sp) or '–'}", None))
+            else:
+                try:
+                    for name, v, err in homematic.set_setpoints(st["device_ids"], st["value"]):
+                        jobs.append(("setpoint" if not err else "fail", name, f"{name}: Solltemperatur {v:g} °C" if not err else f"{name}: Solltemperatur setzen fehlgeschlagen ({err})", err))
+                except homematic.HomematicError as e:
+                    jobs.append(("fail", "Thermostate", f"Solltemperatur setzen fehlgeschlagen ({e})", str(e)))
+        elif t == "notify":
+            sent = False if dry else notify.message(st["text"], cfg)
+            jobs.append(("notify", "Telegram", f"Nachricht {'gesendet' if sent else ('würde gesendet' if dry else 'NICHT gesendet (Telegram nicht eingerichtet)')}: {st['text']}", None if (sent or dry) else "Telegram nicht eingerichtet"))
+        elif t == "virtual":
+            vname = next((v["name"] for v in virtual.load() if v["id"] == st["id"]), None)
+            if vname is None:
+                jobs.append(("fail", st["id"], "Eigener Schalter existiert nicht mehr", "weg"))
+            else:
+                what = {"on": "eingeschaltet", "off": "ausgeschaltet", "press": "gedrückt"}[st["state"]]
+                if not dry:
+                    ok = virtual.press(st["id"]) if st["state"] == "press" else virtual.set_state(st["id"], st["state"] == "on")
+                    if ok:
+                        self._rules_wake.set()
+                jobs.append(("virtual", vname, f"Eigener Schalter {vname} {what}", None))
+        for action, dev, text, err in jobs:
+            full = ("(Trockenlauf) " if dry else "") + f"Regel „{rule}“: {text}{after}"
+            log.info("Regeln: %s", full)
+            opslog.log("rules", full, dry=dry)
+            autolog.log("rules", full, dev=dev, action=("fail" if err else action), dry=dry, rule=act["rule_id"])
 
     def _apply_rule(self, act, dry: bool, cfg: dict):
         action, dev, why, rule_id = act
@@ -1416,6 +1491,7 @@ def api_status():
           "show_ev_card": bool(cfg.get("show_ev_card", True)),
           "show_shelly_card": bool(cfg.get("show_shelly_card", True)),
           "show_sensors_card": bool(cfg.get("show_sensors_card", True)),
+          "show_virtual_card": bool(cfg.get("show_virtual_card", True)),
           "show_weather_card": bool(cfg.get("show_weather_card", True)),
           "show_savings_card": bool(cfg.get("show_savings_card", True)),
           "show_plansim_card": bool(cfg.get("show_plansim_card", True)) and cfg.get("tariff_mode") != "fixed",
@@ -1671,7 +1747,7 @@ def api_config():
                "show_live_values", "show_energy_chart", "show_flow_chart",
                "show_week_overview", "show_month_overview", "show_tibber_card",
                "show_override_card", "show_price_plan", "show_charge_log",
-               "show_ev_card", "show_shelly_card", "show_sensors_card", "show_weather_card", "show_plansim_card", "show_savings_card", "pv_auto_calibration", "smart_planner_enabled", "surplus_enabled", "surplus_dry_run", "rules_enabled", "rules_dry_run", "rules_manual_hold_min", "rules_failsafe_min",
+               "show_ev_card", "show_shelly_card", "show_sensors_card", "show_virtual_card", "show_weather_card", "show_plansim_card", "show_savings_card", "pv_auto_calibration", "smart_planner_enabled", "surplus_enabled", "surplus_dry_run", "rules_enabled", "rules_dry_run", "rules_manual_hold_min", "rules_failsafe_min",
                "surplus_min_soc", "tile_order", "scan_networks",
                "has_pv_inverter", "has_mppt", "tariff_mode",
                "fixed_price_ct", "pv_inverters",
@@ -1862,7 +1938,7 @@ def api_rules_get():
     return jsonify({"enabled": rules.enabled(cfg), "dry_run": rules.dry_run(cfg),
                     "settings": rules.settings(cfg), "defaults": rules.DEFAULTS, "bounds": rules.BOUNDS,
                     "tariff_mode": cfg.get("tariff_mode", "tibber"),
-                    "rules": [n for r in rules.list_rules() for n in rules.to_new(r)], "status": rules.rollup_status(dict(rule_engine.status)), "owner": dict(rule_engine.owner),
+                    "rules": [n for r in rules.list_rules() for n in rules.to_new(r)], "status": {**rules.rollup_status(dict(rule_engine.status)), **dict(flow_engine.status)}, "owner": dict(rule_engine.owner),
                     "events": autolog.recent("rules", 8)})
 
 
@@ -2370,6 +2446,88 @@ def api_device_families():
         cfg["device_families"] = {k: bool(body.get(k)) for k in FAMILIES}
         store.save_config(cfg)
     return jsonify(families=_families(), chosen=isinstance(store.load_config().get("device_families"), dict))
+
+
+@app.route("/api/virtual", methods=["GET"])
+def api_virtual_list():
+    return jsonify(virtual.load())
+
+
+@app.route("/api/virtual", methods=["POST"])
+def api_virtual_add():
+    body = request.get_json(silent=True) or {}
+    try:
+        return jsonify(virtual.add(body.get("name"), body.get("kind"), body.get("icon"))), 201
+    except virtual.VirtualError as e:
+        return jsonify(error=str(e)), 400
+
+
+@app.route("/api/virtual/<vid>", methods=["PATCH", "DELETE"])
+def api_virtual_modify(vid):
+    if request.method == "DELETE":
+        ok = virtual.remove(vid)
+    else:
+        body = request.get_json(silent=True) or {}
+        ok = virtual.update(vid, name=body.get("name") if isinstance(body.get("name"), str) else None,
+                            icon=body.get("icon") if isinstance(body.get("icon"), str) else None,
+                            show=body.get("show") if isinstance(body.get("show"), bool) else None)
+    return jsonify(ok=True) if ok else (jsonify(error="nicht gefunden"), 404)
+
+
+@app.route("/api/virtual/<vid>/press", methods=["POST"])
+def api_virtual_press(vid):
+    if not virtual.press(vid):
+        return jsonify(error="Knopf nicht gefunden"), 404
+    opslog.log("rules", f"Eigener Knopf {next((v['name'] for v in virtual.load() if v['id'] == vid), vid)} gedrückt", dry=False)
+    ctrl._rules_wake.set()
+    return jsonify(ok=True)
+
+
+@app.route("/api/virtual/<vid>/set", methods=["POST"])
+def api_virtual_set(vid):
+    if not virtual.set_state(vid, bool((request.get_json(silent=True) or {}).get("on"))):
+        return jsonify(error="Schalter nicht gefunden"), 404
+    ctrl._rules_wake.set()
+    return jsonify(ok=True)
+
+
+@app.route("/api/homematic/setpoints", methods=["GET"])
+def api_setpoint_list():
+    try:
+        return jsonify(homematic.list_setpoints_with_values())
+    except Exception as e:                               # noqa: BLE001
+        log.warning("Thermostatliste: %s", e)
+        return jsonify([])
+
+
+@app.route("/api/homematic/setpoints/scan", methods=["POST"])
+def api_setpoint_scan():
+    try:
+        return jsonify(homematic.setpoints_scan())
+    except homematic.HomematicError as e:
+        return jsonify(error=str(e)), 400
+
+
+@app.route("/api/homematic/setpoints/add", methods=["POST"])
+def api_setpoint_add():
+    ids = (request.get_json(silent=True) or {}).get("ids")
+    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+        return jsonify(error="ids fehlt"), 400
+    try:
+        return jsonify(added=homematic.add_setpoints(ids))
+    except homematic.HomematicError as e:
+        return jsonify(error=str(e)), 400
+
+
+@app.route("/api/homematic/setpoints/<sp_id>", methods=["PATCH", "DELETE"])
+def api_setpoint_modify(sp_id):
+    if request.method == "DELETE":
+        ok = homematic.remove_setpoint(sp_id)
+        if ok:
+            rules.remove_device(sp_id)
+    else:
+        ok = homematic.update_setpoint(sp_id, name=(request.get_json(silent=True) or {}).get("name"))
+    return jsonify(ok=True) if ok else (jsonify(error="nicht gefunden"), 404)
 
 
 @app.route("/api/sensors", methods=["GET"])

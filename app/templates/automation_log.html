@@ -21,7 +21,8 @@ const MODULE = {{ module | tojson }};
 const $ = id => document.getElementById(id);
 const escH = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt = ts => `${ts.slice(8, 10)}.${ts.slice(5, 7)}. ${ts.slice(11, 16)}`;
-const BADGE = { on: ['an', 'var(--cheap)'], off: ['aus', '#e5544a'], fail: ['Fehler', '#e5544a'], adopt: ['bereits an', 'var(--cheap)'], manual: ['von Hand', 'var(--muted)'], paused: ['Pause', 'var(--muted)'] };
+const BADGE = { on: ['an', 'var(--cheap)'], off: ['aus', '#e5544a'], fail: ['Fehler', '#e5544a'], adopt: ['bereits an', 'var(--cheap)'], manual: ['von Hand', 'var(--muted)'], paused: ['Pause', 'var(--muted)'],
+  start: ['Ablauf', 'var(--accent)'], cancel: ['abgebrochen', 'var(--muted)'], setpoint: ['Sollwert', 'var(--cheap)'], notify: ['Nachricht', 'var(--accent)'], virtual: ['Schalter', 'var(--accent)'] };
 async function load() {
   const days = $('days').value;
   let d;

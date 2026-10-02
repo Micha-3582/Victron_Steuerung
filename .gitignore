@@ -44,3 +44,6 @@ app/rules_state.json
 app/surplus_log.jsonl
 app/rules_log.jsonl
 app/automation_log_read.json
+app/virtual.json
+app/flows_state.json
+app/homematic_setpoints.json

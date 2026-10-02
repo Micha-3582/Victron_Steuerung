@@ -147,6 +147,10 @@
   <h2>Geräte</h2>
   <div class="sysgrid" id="shelly-grid"></div>
 </div>
+<div class="card full" id="virtual-card" hidden style="margin-bottom:14px">
+  <h2>Eigene Schalter</h2>
+  <div class="sysgrid" id="virtual-grid"></div>
+</div>
 <div class="card full" id="sensors-card" hidden style="margin-bottom:14px">
   <h2>Sensoren</h2>
   <div class="sysgrid" id="sensors-grid"></div>
@@ -269,7 +273,7 @@ const TILE_IDS = {
   show_charge_log: 'charge-log-card', show_ev_card: 'ev-card',
 };
 // Reihenfolge der Kacheln (Einstellungen -> Kacheln); Standard = Reihenfolge dieser Liste.
-const ORDER_IDS = { ...TILE_IDS, show_shelly_card: 'shelly-card', show_sensors_card: 'sensors-card', show_weather_card: 'weather-card', show_plansim_card: 'plansim-card', show_savings_card: 'savings-card' };
+const ORDER_IDS = { ...TILE_IDS, show_shelly_card: 'shelly-card', show_sensors_card: 'sensors-card', show_virtual_card: 'virtual-card', show_weather_card: 'weather-card', show_plansim_card: 'plansim-card', show_savings_card: 'savings-card' };
 function applyTileOrder(order) {
   const keys = Object.keys(ORDER_IDS), given = (order || []).filter(k => keys.includes(k));
   [...given, ...keys.filter(k => !given.includes(k))].forEach((k, i) => { const el = $(ORDER_IDS[k]); if (el) el.style.order = i; });
@@ -290,11 +294,13 @@ if (DASHBOARD_LEVEL === 'read') {
   });
 }
 
-let sensorsEnabled = true, shellyEnabled = true, weatherEnabled = true, plansimEnabled = true, savingsEnabled = true;
+let virtualEnabled = true, sensorsEnabled = true, shellyEnabled = true, weatherEnabled = true, plansimEnabled = true, savingsEnabled = true;
 function applyTileVisibility(ui) {
   applyTileOrder(ui.tile_order);
   shellyEnabled = ui.show_shelly_card !== false;
   sensorsEnabled = ui.show_sensors_card !== false;
+  virtualEnabled = ui.show_virtual_card !== false;
+  if (typeof loadVirtual === 'function') loadVirtual();
   if (typeof loadSensors === 'function') loadSensors();
   if (weatherEnabled !== (ui.show_weather_card !== false)) { weatherEnabled = ui.show_weather_card !== false; if (typeof loadWeather === 'function') loadWeather(); }
   if (plansimEnabled !== (ui.show_plansim_card !== false)) { plansimEnabled = ui.show_plansim_card !== false; if (typeof loadPlansim === 'function') loadPlansim(); }
@@ -875,6 +881,7 @@ async function load() {
   applyEnergyDayUI();
   loadShelly();
   loadSensors();
+  loadVirtual();
 
   const banner = $('banner');
   if (d.last_error) banner.innerHTML = `<div class="banner err">Fehler: ${d.last_error}</div>`;
@@ -1562,7 +1569,7 @@ loadMonth();
 loadPriceMinDay();
 setInterval(load, 15000);      // Plan/Preise/Termine (langsamer)
 setInterval(loadLive, 2000);   // Live-Werte vom Cerbo (wie Victron: alle 2 s)
-setInterval(() => loadSensors(), 5000);   // Sensoren (Ja/Nein)
+setInterval(() => { loadSensors(); loadVirtual(); }, 5000);   // Sensoren (Ja/Nein) und eigene Schalter
 setInterval(loadWeek, 300000);  // Wochenrückblick (ändert sich langsam)
 setInterval(loadMonth, 300000); // Monatsüberblick (ändert sich langsam)
 
@@ -1616,6 +1623,33 @@ async function loadSensors() {
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-size:30px;line-height:1.1">${ic}</span>${big}</div><div class="systile-s">${sub}</div></div>`;
   }).join('');
 }
+/* Eigene Schalter & Knoepfe (Software): Knopf = Drucktaste, Schalter = Kippschalter */
+async function loadVirtual() {
+  const card = $('virtual-card');
+  if (!virtualEnabled) { card.hidden = true; return; }
+  let list;
+  try { list = await (await fetch('/api/virtual', { cache: 'no-store' })).json(); } catch (e) { return; }
+  list = Array.isArray(list) ? list.filter(v => v.show !== false) : [];
+  if (!virtualEnabled || !list.length) { card.hidden = true; return; }
+  if (document.activeElement && document.activeElement.closest && document.activeElement.closest('#virtual-grid')) return;     // nicht waehrend der Bedienung neu zeichnen
+  card.hidden = false;
+  $('virtual-grid').innerHTML = list.map(v => `<div class="systile"><div class="systile-t">${escH(v.name)}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-size:30px;line-height:1.1">${escH(v.icon)}</span>
+      ${v.kind === 'button' ? `<button type="button" onclick="virtualPress('${escH(v.id)}', this)">Drücken</button>`
+        : `<label class="switch"><input type="checkbox" ${v.on ? 'checked' : ''} onchange="virtualSet('${escH(v.id)}', this.checked, this)"><span class="slider"></span></label>`}</div>
+    <div class="systile-s">${v.kind === 'button' ? 'Knopf' : (v.on ? 'an' : 'aus')}</div></div>`).join('');
+}
+async function virtualCall(url, body, el) {
+  if (DASHBOARD_LEVEL !== 'write') { showToast('Dieses Konto darf nur ansehen, nicht schalten.'); loadVirtual(); return; }
+  el.disabled = true;
+  try {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    if (!r.ok) showToast((await r.json().catch(() => ({}))).error || `Fehlgeschlagen (Server-Antwort ${r.status})`, true);
+  } catch (e) { showToast('Server nicht erreichbar', true); }
+  loadVirtual();
+}
+const virtualPress = (id, el) => virtualCall('/api/virtual/' + encodeURIComponent(id) + '/press', {}, el).then(() => showToast('Gedrückt ✓'));
+const virtualSet = (id, on, el) => virtualCall('/api/virtual/' + encodeURIComponent(id) + '/set', { on }, el);
 /* Meldungen im eigenen Stil statt Browser-Dialog (Fehler bleiben laenger stehen) */
 function showToast(text, isErr) {
   let t = document.getElementById('app-toast');

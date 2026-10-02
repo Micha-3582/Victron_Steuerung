@@ -607,6 +607,19 @@
   </div>
 </div>
 
+<div class="card" id="virtual-admin" data-tab="geraete">
+  <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Eigene Schalter &amp; Knöpfe (Software)</h2>
+  <div class="muted" style="margin-bottom:10px">Schalter und Knöpfe, hinter denen kein Gerät steckt – sie erscheinen auf dem Dashboard in einer eigenen Kachel und lösen Regeln aus
+    (zum Beispiel „Warmwasser-Timer“: Knopf drücken → Pumpe an, 60 Minuten warten, Pumpe wieder aus). Was passieren soll, baust du auf der Seite
+    <a href="/rules" style="color:var(--accent);font-weight:600">Regeln</a> (Art „Ablauf“).</div>
+  <div id="virtual-list" style="display:flex;flex-direction:column;gap:6px"></div>
+  <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <input id="virt-name" placeholder="Name, z.B. Warmwasser-Timer" style="flex:1;min-width:200px" autocomplete="off">
+    <select id="virt-kind" style="width:auto"><option value="switch">Schalter (bleibt an/aus)</option><option value="button">Knopf (wird gedrückt)</option></select>
+    <button id="virt-add" class="ghost">Anlegen</button>
+  </div>
+</div>
+
 <div class="card fam-card" id="fam-shelly" data-tab="geraete">
   <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Shelly</h2>
   <div class="muted" style="margin-bottom:10px">Shelly-Geräte (Gen1 bis Gen3) im Heimnetz suchen oder einzeln per IP hinzufügen.</div>
@@ -684,10 +697,13 @@
     </div>
     <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">
       <button id="hm-scan" class="ghost">Homematic-Geräte suchen</button>
-      <button id="hm-sensor-scan" class="ghost">Homematic-Sensoren suchen</button></div>
+      <button id="hm-sensor-scan" class="ghost">Homematic-Sensoren suchen</button>
+      <button id="hm-sp-scan" class="ghost">Homematic-Thermostate suchen</button></div>
     <div class="muted" style="margin:10px 0 4px">Sensoren (nur lesen: Temperatur, Luftfeuchte, Fenster/Tür, Bewegung, Anwesenheit, Helligkeit, Leistung) –
       auf der Seite <a href="/rules" style="color:var(--accent);font-weight:600">Regeln</a> als Bedingung nutzbar („WENN Sensor TRUE/FALSE“ bzw. „unter/über“).</div>
     <div id="hm-sensors" style="display:flex;flex-direction:column;gap:6px"></div>
+    <div class="muted" style="margin:14px 0 4px">Thermostate (Solltemperatur setzen): in Regeln der Art „Ablauf“ nutzbar, zum Beispiel „alle Thermostate auf 25 °C“. Der Wert wird auf den Bereich des Geräts begrenzt (0 °C = „aus“, meist 4,5 °C).</div>
+    <div id="hm-setpoints" style="display:flex;flex-direction:column;gap:6px"></div>
   
 </div>
 
@@ -1644,6 +1660,86 @@ async function hmSensorAdd(ids) {
   loadSensorsAdmin();
 }
 loadSensorsAdmin(); setInterval(() => { if (![...document.querySelectorAll('[id^=sicons-]')].some(e => e.style.display === 'flex')) loadSensorsAdmin(); }, 15000);
+
+/* --- Eigene Schalter & Knoepfe --- */
+const VIRT_KIND = { button: 'Knopf', switch: 'Schalter' };
+async function loadVirtualAdmin() {
+  if (!shellyIcons.length) { try { shellyIcons = await (await fetch('/api/shelly/icons')).json(); } catch (e) { /* egal */ } }
+  let list = []; try { list = await (await fetch('/api/virtual', { cache: 'no-store' })).json(); } catch (e) { return; }
+  if (!Array.isArray(list)) return;
+  document.getElementById('virtual-list').innerHTML = list.length ? list.map(v => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--border);border-radius:10px;padding:8px 10px">
+      <button class="ghost" style="font-size:22px;padding:4px 10px" title="Symbol wählen" onclick="virtPickIcon('${escH(v.id)}')">${escH(v.icon)}</button>
+      <div style="flex:1;min-width:150px"><b>${escH(v.name)}</b><div class="muted">${VIRT_KIND[v.kind]}${v.kind === 'switch' ? ' · ' + (v.on ? 'an' : 'aus') : ''}</div></div>
+      <label class="chk"><input type="checkbox" ${v.show === false ? '' : 'checked'} onchange="virtPatch('${escH(v.id)}', { show: this.checked })"> Dashboard</label>
+      <button class="ghost" onclick="virtRename('${escH(v.id)}', this)" data-name="${escH(v.name)}" title="Umbenennen">✎</button>
+      <button class="ghost" onclick="virtRemove('${escH(v.id)}')" title="Entfernen">✕</button>
+      <div id="vicons-${escH(v.id)}" style="display:none;flex-wrap:wrap;gap:4px;width:100%">${shellyIcons.map(ic => `<button class="ghost" style="font-size:20px;padding:2px 8px" onclick="virtPatch('${escH(v.id)}', { icon: '${ic}' })">${ic}</button>`).join('')}</div></div>`).join('')
+    : '<div class="muted">Noch keine eigenen Schalter oder Knöpfe.</div>';
+}
+function virtPickIcon(id) { const el = document.getElementById('vicons-' + id); el.style.display = el.style.display === 'none' ? 'flex' : 'none'; }
+async function virtPatch(id, body) {
+  try { await shellyApi('/api/virtual/' + encodeURIComponent(id), 'PATCH', body); savedToast(); } catch (e) { shellyMsg(e.message, true); }
+  loadVirtualAdmin();
+}
+async function virtRename(id, btn) {
+  const n = await uiDialog({ title: 'Umbenennen', label: 'Neuer Name', value: btn.dataset.name });
+  if (n !== null && n.trim()) virtPatch(id, { name: n });
+}
+async function virtRemove(id) {
+  if (!await uiDialog({ title: 'Entfernen?', message: 'Regeln, die diesen Schalter benutzen, laufen dann nicht mehr, bis du sie anpasst.', okText: 'Entfernen' })) return;
+  await shellyApi('/api/virtual/' + encodeURIComponent(id), 'DELETE'); savedToast('Entfernt ✓'); loadVirtualAdmin();
+}
+document.getElementById('virt-add').addEventListener('click', async () => {
+  const name = document.getElementById('virt-name').value.trim();
+  if (!name) { document.getElementById('virt-name').focus(); return; }
+  try { await shellyApi('/api/virtual', 'POST', { name, kind: document.getElementById('virt-kind').value }); document.getElementById('virt-name').value = ''; savedToast('Angelegt ✓'); }
+  catch (e) { shellyMsg(e.message, true); }
+  loadVirtualAdmin();
+});
+loadVirtualAdmin(); setInterval(() => { if (![...document.querySelectorAll('[id^=vicons-]')].some(e => e.style.display === 'flex')) loadVirtualAdmin(); }, 15000);
+
+/* --- Homematic-Thermostate --- */
+async function loadSetpointsAdmin() {
+  let list = []; try { list = await (await fetch('/api/homematic/setpoints', { cache: 'no-store' })).json(); } catch (e) { return; }
+  if (!Array.isArray(list)) return;
+  document.getElementById('hm-setpoints').innerHTML = list.length ? list.map(s => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--border);border-radius:10px;padding:8px 10px">
+      <div style="flex:1;min-width:150px"><b>🌡 ${escH(s.name)}</b><div class="muted">${escH(s.model)}${s.room ? ' · ' + escH(s.room) : ''} · Soll <b>${s.value == null ? '–' : String(s.value).replace('.', ',') + ' °C'}</b> · Bereich ${s.min}–${s.max} °C</div></div>
+      <button class="ghost" onclick="spRename('${escH(s.id)}', this)" data-name="${escH(s.name)}" title="Umbenennen">✎</button>
+      <button class="ghost" onclick="spRemove('${escH(s.id)}')" title="Entfernen">✕</button></div>`).join('')
+    : '<div class="muted">Noch keine Thermostate angelegt.</div>';
+}
+async function spRename(id, btn) {
+  const n = await uiDialog({ title: 'Thermostat umbenennen', label: 'Neuer Name', value: btn.dataset.name });
+  if (n === null) return;
+  try { await shellyApi('/api/homematic/setpoints/' + encodeURIComponent(id), 'PATCH', { name: n }); savedToast(); } catch (e) { shellyMsg(e.message, true); }
+  loadSetpointsAdmin();
+}
+async function spRemove(id) {
+  if (!await uiDialog({ title: 'Thermostat entfernen?', message: 'Nur aus dieser Liste – am Gerät ändert sich nichts. Es wird auch aus Regeln entfernt.', okText: 'Entfernen' })) return;
+  await shellyApi('/api/homematic/setpoints/' + encodeURIComponent(id), 'DELETE'); savedToast('Entfernt ✓'); loadSetpointsAdmin();
+}
+document.getElementById('hm-sp-scan').addEventListener('click', async e => {
+  const b = e.target; b.disabled = true; shellyMsg('Thermostat-Suche läuft … (bei vielen Geräten einige Sekunden)');
+  try {
+    const found = await shellyApi('/api/homematic/setpoints/scan', 'POST');
+    const fresh = found.filter(f => !f.known);
+    shellyMsg(found.length ? `${found.length} Thermostate gefunden, ${fresh.length} noch nicht angelegt.` : 'Keine Thermostate gefunden.');
+    const row = f => `<div data-key="${escH(f.id)}" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="flex:1;min-width:150px"><b>${escH(f.name)}</b><div class="muted">${escH(f.model)}${f.room ? ' · ' + escH(f.room) : ''} · ${escH(f.address)}</div></div>
+      <button onclick="spAdd(['${escH(f.id)}'])">Hinzufügen</button></div>`;
+    const all = fresh.length > 1 ? `<div data-all="1" style="margin-bottom:6px"><button class="ghost" onclick='spAdd(${JSON.stringify(fresh.map(f => f.id)).replace(/'/g, "&#39;")})'>Alle ${fresh.length} hinzufügen</button></div>` : '';
+    document.getElementById('shelly-found').innerHTML = all + fresh.map(row).join('');
+  } catch (err) { shellyMsg(err.message, true); }
+  b.disabled = false;
+});
+async function spAdd(ids) {
+  try { await shellyApi('/api/homematic/setpoints/add', 'POST', { ids }); }
+  catch (e) { shellyMsg(e.message, true); return; }
+  ids.forEach(i => foundAdded(i));
+  document.querySelectorAll('#shelly-found [data-all]').forEach(r => r.remove());
+  loadSetpointsAdmin();
+}
+loadSetpointsAdmin();
 
 /* --- VRM-Zugang (Solar-Prognose) --- */
 function vrmMsg(t, err) { const m = document.getElementById('vrm-msg'); m.textContent = t; m.style.color = err ? '#e5544a' : ''; }

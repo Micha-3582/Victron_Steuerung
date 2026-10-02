@@ -189,6 +189,15 @@ def push(key: str, text: str, cfg: dict | None = None) -> bool:
     return True
 
 
+def message(text: str, cfg: dict | None = None) -> bool:
+    """Freie Nachricht aus einer Regel (Aktion „Nachricht senden“): geht immer raus, sobald Telegram eingerichtet ist."""
+    cfg = cfg if cfg is not None else store.load_config()
+    if not configured():
+        return False
+    _send_async(_prefix(cfg) + text)
+    return True
+
+
 def is_active(key: str) -> bool:
     with _lock:
         return key in _state()["events"]

@@ -71,6 +71,7 @@ DASHBOARD_TILES = [
     ("show_charge_log", "Ladevorgänge (heute)", "Protokoll geplanter/durchgeführter Ladungen."),
     ("show_ev_card", "Manuelle Ladetermine", "Formular zum Anlegen eines Ladetermins."),
     ("show_shelly_card", "Geräte (Smart Home)", "Schalter für Steckdosen, Lichter und andere Aktoren (Shelly, Tasmota, Tuya, Homematic)."),
+    ("show_virtual_card", "Eigene Schalter (Software)", "Selbst angelegte Knöpfe und Schalter, die Regeln auslösen oder ein Programm starten."),
     ("show_sensors_card", "Sensoren (Smart Home)", "Ja/Nein-Anzeige und Messwerte der Sensoren (z. B. Fenster, Bewegung, Temperatur)."),
     ("show_savings_card", "Ersparnis", "Was PV, Akku und Steuerung gegenüber „alles aus dem Netz“ sparen."),
     ("show_plansim_card", "Ladeplan-Simulation (Test)", "Vorschlag des EMS-Planers im Vergleich zur bisherigen Steuerung – steuert nichts. Nur bei dynamischem Tarif."),

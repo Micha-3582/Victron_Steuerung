@@ -570,6 +570,161 @@ def list_sensors_with_values() -> list[dict]:
     return [{**s, "value": vals.get(s["id"])} for s in items]
 
 
+# ================================================================ Thermostate (Solltemperatur setzen)
+# Heizkoerper-/Wandthermostate (HmIP: SET_POINT_TEMPERATURE, BidCos: SET_TEMPERATURE). Eigenes Register, denn es sind keine Schalter.
+# Regeln der Art "Ablauf" setzen damit die Solltemperatur ("alle Thermostate auf 25 Grad"); der Wert wird auf den Bereich des Geraets begrenzt
+# (z. B. 0 Grad -> 4,5 Grad = "aus").
+SETPOINTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "homematic_setpoints.json")
+_SETPOINT_KEYS = ("SET_POINT_TEMPERATURE", "SET_TEMPERATURE")
+_SETPOINT_HINTS = ("CLIMATECONTROL", "THERMALCONTROL", "HEATING")
+_setpoint_scan: dict[str, dict] = {}
+_setpoint_scan_ts = 0.0
+
+
+def load_setpoints() -> list[dict]:
+    try:
+        with open(SETPOINTS_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _save_setpoints(items: list[dict]):
+    with _lock, open(SETPOINTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(items, f, indent=2, ensure_ascii=False)
+
+
+def setpoint_id(address: str) -> str:
+    return "hmT-" + address.replace(":", "-")
+
+
+def _probe_setpoint_channel(item: dict) -> dict | None:
+    try:
+        desc = _param_desc(item["interface"], item["address"])
+    except HomematicError:
+        return None
+    for key in _SETPOINT_KEYS:
+        p = desc.get(key)
+        if _writable(p):
+            try:
+                lo, hi = float(p.get("MIN", 4.5)), float(p.get("MAX", 30.5))
+            except (TypeError, ValueError):
+                lo, hi = 4.5, 30.5
+            return {**item, "id": setpoint_id(item["address"]), "datapoint": key, "min": lo, "max": hi}
+    return None
+
+
+def discover_setpoints(known_ids: set[str]) -> list[dict]:
+    global _setpoint_scan_ts
+    devices = [d for d in (_call("Device.listAllDetail") or []) if d and d.get("interface") not in SKIP_INTERFACES and d.get("channels")]
+    rooms: dict[str, str] = {}
+    try:
+        for room in _call("Room.getAll") or []:
+            for cid in room.get("channelIds") or []:
+                rooms[str(cid)] = room.get("name") or ""
+    except (HomematicError, AttributeError, TypeError):
+        pass
+    items = []
+    for dev in devices:
+        dtype, dev_name = str(dev.get("type") or ""), str(dev.get("name") or "")
+        for ch in dev["channels"]:
+            up = str(ch.get("channelType") or "").upper()
+            if not any(h in up for h in _SETPOINT_HINTS):
+                continue
+            addr, ch_name = str(ch["address"]), str(ch.get("name") or "")
+            items.append({"address": addr, "interface": dev["interface"], "model": dtype,
+                          "name": (dev_name if _is_default_name(ch_name, addr, dtype) else ch_name) or addr,
+                          "room": rooms.get(str(ch.get("id")), "") or rooms.get(str(dev.get("id")), "")})
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        found = [f for f in ex.map(_probe_setpoint_channel, items) if f]
+    found.sort(key=lambda f: (f["room"].lower(), f["name"].lower(), f["id"]))
+    with _lock:
+        _setpoint_scan.clear()
+        _setpoint_scan.update({f["id"]: f for f in found})
+        _setpoint_scan_ts = time.time()
+    for f in found:
+        f["known"] = f["id"] in known_ids
+    return found
+
+
+def setpoints_scan() -> list[dict]:
+    return discover_setpoints({s["id"] for s in load_setpoints()})
+
+
+def add_setpoints(ids: list[str]) -> list[dict]:
+    if time.time() - _setpoint_scan_ts > SCAN_TTL_S or any(i not in _setpoint_scan for i in ids):
+        discover_setpoints(set())
+    items = load_setpoints()
+    have = {s["id"] for s in items}
+    added = []
+    for i in ids:
+        f = _setpoint_scan.get(i)
+        if not f:
+            raise HomematicError("Thermostat nicht gefunden (in der CCU entfernt?)")
+        if i in have:
+            continue
+        item = {k: f[k] for k in ("id", "address", "interface", "datapoint", "min", "max", "model", "room", "name")}
+        items.append(item)
+        added.append(item)
+    if added:
+        _save_setpoints(items)
+    return added
+
+
+def update_setpoint(sp_id: str, name: str | None = None) -> bool:
+    items = load_setpoints()
+    for s in items:
+        if s["id"] == sp_id:
+            if name is not None:
+                s["name"] = name.strip()[:60] or s["name"]
+            _save_setpoints(items)
+            return True
+    return False
+
+
+def remove_setpoint(sp_id: str) -> bool:
+    items = load_setpoints()
+    keep = [s for s in items if s["id"] != sp_id]
+    if len(keep) == len(items):
+        return False
+    _save_setpoints(keep)
+    return True
+
+
+def list_setpoints_with_values() -> list[dict]:
+    """Thermostate inkl. aktueller Solltemperatur (None = nicht lesbar)."""
+    items = load_setpoints()
+
+    def cur(s):
+        try:
+            return round(float(_get_value(s["interface"], s["address"], s["datapoint"])), 1)
+        except (HomematicError, TypeError, ValueError):
+            return None
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(items)))) as ex:
+        vals = list(ex.map(cur, items))
+    return [{**s, "value": v} for s, v in zip(items, vals)]
+
+
+def set_setpoints(ids: list[str], value: float) -> list[tuple]:
+    """Solltemperatur setzen ('*' = alle angelegten Thermostate). Rueckgabe: [(name, gesetzter Wert, Fehlertext|None)]."""
+    items = load_setpoints()
+    chosen = items if "*" in ids else [s for s in items if s["id"] in ids]
+    out = []
+    for s in chosen:
+        v = min(float(s.get("max", 30.5)), max(float(s.get("min", 4.5)), float(value)))
+        try:
+            _call("Interface.setValue", {"interface": s["interface"], "address": s["address"], "valueKey": s["datapoint"], "type": "double", "value": v})
+            _pushed.pop((s["interface"], s["address"], s["datapoint"]), None)
+            out.append((s["name"], v, None))
+        except HomematicError as e:
+            out.append((s["name"], v, str(e)))
+    for i in ids:
+        if i != "*" and not any(s["id"] == i for s in items):
+            out.append((i, float(value), "Thermostat nicht mehr vorhanden"))
+    return out
+
+
 # ================================================================ Push: XML-RPC-Rueckkanal der CCU (wie ioBroker hm-rpc)
 # Die App meldet sich per `init` bei den Funk-Schnittstellen der CCU an; die CCU schickt dann nur bei Aenderungen ein `event`.
 # Faellt der Rueckkanal aus (Port gesperrt, CCU neu gestartet ...), fragt die App wie bisher ab - die Regeln laufen immer weiter.
