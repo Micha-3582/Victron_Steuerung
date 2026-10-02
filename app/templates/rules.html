@@ -286,7 +286,11 @@ function statusHtml(r) {                          // Status gibt es nur fuer die
   if (!saved || sig(saved) !== sig(r)) return '';
   const st = (S.A.status || {})[r.id];
   if (!st) return '';
-  return st.state === 'on' ? '<span>🟢 läuft</span>' : '<span class="muted">⚪ läuft nicht</span>';        // nur zwei Zustaende
+  const warn = !S.A.enabled ? '<div style="color:#e5544a">⚠ Die Regeln sind insgesamt ausgeschaltet („Regeln aktiv“ ganz oben) – es wird nichts geschaltet.</div>'
+    : S.A.dry_run ? '<div style="color:#f0a030">🧪 Trockenlauf ist an – es wird nur protokolliert (Logbuch), nichts wirklich geschaltet.</div>' : '';
+  const why = st.text ? ` <span class="muted">– ${escH(st.text)}</span>` : '';
+  const conds = (st.conds || []).length ? `<div class="muted" style="margin-top:4px">${st.conds.map(c => (c.ok === true ? '✅ ' : c.ok === false ? '❌ ' : '❔ ') + escH(c.text)).join('<br>')}</div>` : '';
+  return warn + (st.state === 'on' ? '<span>🟢 läuft</span>' : '<span class="muted">⚪ läuft nicht</span>') + why + conds;
 }
 const statusBlock = r => { const h = statusHtml(r); return h ? `<div style="margin-top:10px">${h}</div>` : ''; };
 /* Blockly-artige Bloecke: blau = WENN, gruen = DANN, orange = SONST */
