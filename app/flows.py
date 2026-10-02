@@ -157,7 +157,8 @@ class FlowEngine:
                     continue
                 run["due"] = None
                 out.append({"rule_id": run["rule_id"], "rule": run.get("rule", ""), "branch": run["branch"], "step": st, "after_s": offset})
-            if run["idx"] >= len(run["steps"]):
+            waiting = bool(run.get("due")) and run["due"] > now_ts and not skip_waits          # eine Wartezeit als letzter Schritt zaehlt mit
+            if run["idx"] >= len(run["steps"]) and not waiting:
                 self.runs.remove(run)
                 changed = True
                 for vid in run.get("reset") or []:             # Ablauf normal zu Ende: den ausloesenden Schalter wieder ausschalten
