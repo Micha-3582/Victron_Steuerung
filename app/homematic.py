@@ -272,6 +272,13 @@ def build_entries(addresses: list[str]) -> list[dict]:
 
 
 # ---------------------------------------------------------------- Status / Schalten
+def _truthy(v) -> bool:
+    """Wahrheitswert aus der CCU-Antwort - alte Funk-Geraete (BidCos) liefern teils Texte wie "false"/"0" statt echter Booleans."""
+    if isinstance(v, str):
+        return v.strip().lower() not in ("", "false", "0", "no", "off", "null", "none")
+    return bool(v)
+
+
 def _unreach(d: dict) -> bool:
     dev_addr = str(d["address"]).split(":")[0]
     key = (d["interface"], dev_addr)
@@ -280,8 +287,8 @@ def _unreach(d: dict) -> bool:
     if hit and hit[0] > now:
         return hit[1]
     try:
-        v = bool(_call("Interface.getValue", {"interface": d["interface"], "address": dev_addr + ":0",
-                                              "valueKey": "UNREACH"}))
+        v = _truthy(_call("Interface.getValue", {"interface": d["interface"], "address": dev_addr + ":0",
+                                                 "valueKey": "UNREACH"}))
     except HomematicError:
         v = False                      # Kanal :0 nicht lesbar -> nicht als offline werten
     _unreach_cache[key] = (now + UNREACH_TTL_S, v)
@@ -296,7 +303,7 @@ def status(d: dict) -> dict:
         if _unreach(d):
             return {"online": False, "on": None, "power": None,
                     "error": "Die CCU meldet das Gerät als nicht erreichbar (UNREACH) – Funkverbindung/Strom prüfen"}
-        on = bool(v) if dp == "STATE" else float(v or 0) > 0
+        on = _truthy(v) if dp == "STATE" else float(v or 0) > 0
         power = None
         if d.get("power_addr"):
             try:
@@ -473,7 +480,7 @@ def read_sensor(sen: dict):
         if _unreach(sen) or v is None:
             val = None
         elif sen.get("binary"):
-            val = bool(float(v)) if not isinstance(v, bool) else v          # Drehgriff: 0 zu, 1 gekippt, 2 offen -> offen = wahr
+            val = _truthy(v) if isinstance(v, (bool, str)) and not str(v).strip().isdigit() else bool(float(v))          # Drehgriff: 0 zu, 1 gekippt, 2 offen -> offen = wahr
         else:
             val = round(float(v), 1)
     except (HomematicError, KeyError, TypeError, ValueError):
