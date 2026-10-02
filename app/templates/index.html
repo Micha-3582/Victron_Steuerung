@@ -1576,6 +1576,7 @@ setInterval(loadMonth, 300000); // Monatsüberblick (ändert sich langsam)
 
 /* --- Shelly-Geraete (Auswahl/Symbole in den Einstellungen; hier nur Schalten + Sortieren) --- */
 const escH = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let shellyCache = [];
 let shellyDragActive = false;   // waehrend Verschieben: Neuaufbau pausieren
 async function loadShelly() {
   if (shellyDragActive) return;
@@ -1586,12 +1587,13 @@ async function loadShelly() {
   if (!shellyEnabled) { card.hidden = true; return; }   // waehrend des Wartens ausgeschaltet worden - sonst zeigt dieser noch "veraltete" Aufruf die Kachel doch wieder
   if (shellyDragActive) return;
   if (!Array.isArray(list) || !list.length) { card.hidden = true; return; }
+  shellyCache = list;
   card.hidden = false;
   $('shelly-grid').innerHTML = list.map(d => {
     const stat = !d.online ? 'nicht erreichbar'
       : (d.on ? 'an' : 'aus') + (d.power != null && d.switchable !== false ? ` · ${Math.round(d.power)} W` : '') + (d.automated ? ' · Auto' : '') + (d.switchable === false ? ' · Überwachung' : '');
     return `<div class="systile" data-tile-id="${escH(d.id)}" ${d.online ? '' : 'style="opacity:.55"'}>
-      <div class="systile-t">${escH(d.name)}</div>
+      <div class="systile-t">${escH(d.name)}${d.pin_set && d.switchable !== false ? ' 🔑' : ''}</div>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
         <span style="font-size:30px;line-height:1.1">${escH(d.icon)}</span>
         ${d.switchable === false
@@ -1721,12 +1723,25 @@ function showToast(text, isErr) {
 }
 async function shellySwitch(id, on, el) {
   if (DASHBOARD_LEVEL !== 'write') { showToast('Dieses Konto darf nur ansehen, nicht schalten.'); return; }
-  el.disabled = true;
-  try {
-    const r = await fetch('/api/shelly/' + encodeURIComponent(id) + '/switch', { method: 'POST',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on }) });
-    if (!r.ok) showToast((await r.json().catch(() => ({}))).error || `Schalten fehlgeschlagen (Server-Antwort ${r.status})`, true);
-  } catch (e) { showToast('Schalten fehlgeschlagen – Server nicht erreichbar', true); }
+  const dv = (shellyCache || []).find(x => x.id === id) || {};
+  let needsPin = !!dv.pin_set, hint = dv.name, body = { on };
+  for (;;) {
+    if (needsPin) {
+      const pin = await askPin(hint);
+      if (pin === null) { loadShelly(); return; }                           // abgebrochen: Schalter springt zurueck
+      body.pin = pin;
+    }
+    el.disabled = true;
+    try {
+      const r = await fetch('/api/shelly/' + encodeURIComponent(id) + '/switch', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (r.ok) break;
+      const j = await r.json().catch(() => ({}));
+      if (j.pin_required && !j.locked) { showToast(j.error || 'PIN falsch', true); el.disabled = false; hint = 'Falsche PIN – bitte erneut'; continue; }
+      showToast(j.error || `Schalten fehlgeschlagen (Server-Antwort ${r.status})`, true);
+    } catch (e) { showToast('Schalten fehlgeschlagen – Server nicht erreichbar', true); }
+    break;
+  }
   loadShelly();
   setTimeout(loadShelly, 2000);   // Leistungsmessung des Shelly braucht einen Moment
 }

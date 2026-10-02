@@ -1383,6 +1383,7 @@ async function loadShellyAdmin() {
         <div style="flex:1;min-width:150px"><b>${escH(d.name)}</b>
           <div class="muted">${escH(d.model)} · ${escH(d.ip)} · <span class="dev-stat">${escH(shellyStatText(d))}</span></div></div>
         <div style="display:flex;gap:8px;margin-left:auto">
+        ${d.switchable === false ? '' : `<button class="ghost" onclick="shellyPin('${id}', ${d.pin_set ? 'true' : 'false'})" title="${d.pin_set ? 'PIN ändern oder entfernen' : 'Sicherheits-PIN (4 Ziffern) für das Dashboard festlegen'}">🔑${d.pin_set ? ' PIN' : ''}</button>`}
         <button class="ghost" onclick="shellyRename('${id}', this)" data-name="${escH(d.name)}" title="Umbenennen">✎</button>
         <button class="ghost dev-power" data-on="${d.on ? '1' : '0'}" style="${d.on ? POWER_ON_STYLE : ''}" onclick="shellyTest('${id}', this)" ${d.online && d.switchable !== false ? '' : 'disabled'} title="${d.switchable === false ? 'Nur Überwachung – nicht schaltbar' : 'Testschalten'}">${PWR_ICON}</button>
         <button class="ghost" onclick="shellyRemove('${id}')" title="Entfernen">✕</button>
@@ -1413,9 +1414,25 @@ async function shellyRename(id, btn) {
   try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { name: n }); savedToast(); } catch (e) { shellyMsg(e.message, true); }
   loadShellyAdmin();
 }
+async function shellyPin(id, has) {
+  const pin = await uiDialog({ title: 'Sicherheits-PIN', message: 'Ist eine PIN gesetzt, fragt das Dashboard sie ab, bevor dieses Gerät schaltet. Regeln und Automatik brauchen die PIN nicht.' + (has ? ' Leer lassen und bestätigen entfernt die PIN.' : ''),
+    label: '4 Ziffern', type: 'password', okText: has ? 'Speichern' : 'PIN setzen' });
+  if (pin === null) return;
+  if (pin !== '' && !/^\d{4}$/.test(pin)) { shellyMsg('Die PIN muss aus genau 4 Ziffern bestehen.', true); return; }
+  if (pin === '' && !has) return;
+  try { await shellyApi('/api/shelly/' + encodeURIComponent(id), 'PATCH', { pin }); savedToast(pin ? 'PIN gesetzt' : 'PIN entfernt'); } catch (e) { shellyMsg(e.message, true); }
+  loadShellyAdmin();
+}
 async function shellyTest(id, btn) {
   const on = btn.dataset.on !== '1';
-  try { await shellyApi('/api/shelly/' + encodeURIComponent(id) + '/switch', 'POST', { on }); shellyMsg(''); }
+  const dev = (await (await fetch('/api/shelly')).json().catch(() => [])).find?.(x => x.id === id) || {};
+  let body = { on };
+  if (dev.pin_set) {                                                       // geschuetztes Geraet: PIN fragen
+    const pin = await uiDialog({ title: 'PIN eingeben', label: '4 Ziffern', type: 'password', okText: 'Schalten' });
+    if (pin === null) return;
+    body.pin = pin;
+  }
+  try { await shellyApi('/api/shelly/' + encodeURIComponent(id) + '/switch', 'POST', body); shellyMsg(''); }
   catch (e) { shellyMsg(e.message, true); }
   refreshShellyStatus();
   // Der Leistungsmesser des Shelly braucht einen Moment - Anzeige kurz danach nachziehen

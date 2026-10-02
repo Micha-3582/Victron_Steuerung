@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 
 import homematic
+import pins
 import zigbee
 import tasmota
 import tuya
@@ -371,6 +372,32 @@ def update(dev_id: str, name: str | None = None, icon: str | None = None,
     return False
 
 
+def set_pin(dev_id: str, pin: str | None) -> bool:
+    """Sicherheits-PIN (4 Ziffern) fuer die Bedienung am Dashboard setzen/entfernen - fuer alle Geraete gleich, egal von welchem System."""
+    if pin:
+        try:
+            pins.validate(pin)
+        except pins.PinError as e:
+            raise ShellyError(str(e))
+    items = load_devices()
+    for d in items:
+        if d["id"] == dev_id:
+            pins.apply(d, pin)
+            _save(items)
+            return True
+    return False
+
+
+def has_pin(dev_id: str) -> bool:
+    d = _find(dev_id)
+    return bool(d and d.get("pin_hash"))
+
+
+def check_pin(dev_id: str, pin) -> bool:
+    d = _find(dev_id)
+    return True if not d else pins.check(d, pin)
+
+
 def reorder(ids: list[str]) -> None:
     """Neue Reihenfolge fuer die genannten Geraete. Sie belegen nur die Plaetze, die sie
     schon hatten - nicht genannte (z.B. nicht aufs Dashboard freigegebene) behalten ihre Position."""
@@ -488,7 +515,8 @@ def list_with_status(only_shown: bool = False, ids: set | None = None) -> list[d
         states = list(ex.map(status, items))
     out = []
     for d, st in zip(items, states):
-        pub = {k: v for k, v in d.items() if k not in ("password", "user", "local_key")}
+        pub = {k: v for k, v in d.items() if k not in ("password", "user", "local_key", "pin_hash", "pin_salt")}
+        pub["pin_set"] = bool(d.get("pin_hash"))
         pub.setdefault("icon", DEFAULT_ICON)
         pub.setdefault("show", False)
         pub.setdefault("auto", False)

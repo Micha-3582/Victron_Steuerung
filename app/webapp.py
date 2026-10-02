@@ -2561,9 +2561,11 @@ _pin_fails: dict[str, list] = {}                          # schalter-id -> [Fehl
 PIN_MAX_FAILS, PIN_LOCK_S = 5, 300
 
 
-def _pin_gate(vid: str):
-    """None = darf durch (keine PIN noetig oder richtig). Sonst eine Fehlerantwort (403/429). 5 Fehlversuche sperren den Schalter 5 Minuten."""
-    if not virtual.has_pin(vid):
+def _pin_gate(vid: str, has_fn=None, check_fn=None):
+    """None = darf durch (keine PIN noetig oder richtig). Sonst eine Fehlerantwort (403/429). 5 Fehlversuche sperren den Schalter 5 Minuten.
+    Standard: eigene Schalter/Knoepfe; mit has_fn/check_fn auch fuer Geraete (Schluessel mit Praefix, damit sich die Sperren nicht mischen)."""
+    has_fn, check_fn = has_fn or virtual.has_pin, check_fn or virtual.check_pin
+    if not has_fn(vid):
         return None
     now = time.time()
     rec = _pin_fails.get(vid)
@@ -2575,13 +2577,13 @@ def _pin_gate(vid: str):
     pin = (request.get_json(silent=True) or {}).get("pin")
     if not pin:
         return jsonify(error="PIN erforderlich", pin_required=True), 403
-    if virtual.check_pin(vid, str(pin)):
+    if check_fn(vid, str(pin)):
         _pin_fails.pop(vid, None)
         return None
     rec = _pin_fails.setdefault(vid, [0, now])
     rec[0] += 1
     left = PIN_MAX_FAILS - rec[0]
-    log.warning("Falsche PIN am eigenen Schalter %s (%d von %d)", vid, rec[0], PIN_MAX_FAILS)
+    log.warning("Falsche PIN an Schalter bzw. Gerät %s (%d von %d)", vid, rec[0], PIN_MAX_FAILS)
     return jsonify(error="PIN falsch" + (f" – noch {left} Versuche" if left > 0 else " – gesperrt für 5 Minuten"), pin_required=True), 403
 
 
@@ -2862,6 +2864,10 @@ def api_shelly_modify(dev_id):
     else:
         body = request.get_json(silent=True) or {}
         try:
+            if "pin" in body:                                              # PIN setzen / mit leerem Wert entfernen
+                if not shelly.set_pin(dev_id, str(body.get("pin") or "")):
+                    return jsonify(error="nicht gefunden"), 404
+                _pin_fails.pop(dev_id, None)
             ok = shelly.update(dev_id, name=body.get("name"), icon=body.get("icon"),
                                show=body.get("show"), auto=body.get("auto"),
                                power_w=body.get("power_w"), min_on_min=body.get("min_on_min"),
@@ -2874,6 +2880,9 @@ def api_shelly_modify(dev_id):
 
 @app.route("/api/shelly/<dev_id>/switch", methods=["POST"])
 def api_shelly_switch(dev_id):
+    blocked = _pin_gate(dev_id, shelly.has_pin, shelly.check_pin)               # Sicherheits-PIN (falls eingerichtet) - gilt fuer jedes Geraet
+    if blocked:
+        return blocked
     on = bool((request.get_json(silent=True) or {}).get("on"))
     try:
         result = shelly.set_state(dev_id, on, timer_s=0 if on else None)     # 0 = evtl. laufenden Auto-Timer aufheben
