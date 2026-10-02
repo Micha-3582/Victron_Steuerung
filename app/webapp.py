@@ -1126,7 +1126,11 @@ class Controller:
                 all_rules = rules.list_rules()
                 if rules.enabled(cfg) and (all_rules or rule_engine.owner):        # auch mit nur ausgeschalteten/geloeschten Regeln: was sie eingeschaltet haben, wird abgeschaltet
                     dry = rules.dry_run(cfg)
-                    devs = shelly.list_with_status()
+                    need = set(rule_engine.owner)                       # nur Geraete abfragen, die Regeln betreffen (macht die Runde schnell)
+                    for r in all_rules:
+                        need.update(rules.devices_of(r))
+                        need.update(c["device_id"] for c in rules.all_conditions(r) if c.get("type") == "device")
+                    devs = shelly.list_with_status(ids=need)
                     if dry:      # Trockenlauf: mit gedachtem statt echtem Zustand rechnen
                         for d in devs:
                             if d["id"] in self._rules_dry_on:
@@ -1156,7 +1160,8 @@ class Controller:
                     self._rules_dry_on.clear()
             except Exception as e:                       # noqa: BLE001
                 log.warning("Regel-Engine: %s", e)
-            self._stop.wait(10)
+            fast = any(c.get("type") in ("sensor", "device") for r in rules.list_rules() if r.get("enabled", True) for c in rules.all_conditions(r))
+            self._stop.wait(2 if fast else 10)           # Regeln mit Sensor/Geraet als Bedingung reagieren innerhalb weniger Sekunden
 
     def _apply_rule(self, act, dry: bool, cfg: dict):
         action, dev, why, rule_id = act

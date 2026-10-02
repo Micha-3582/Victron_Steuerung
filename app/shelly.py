@@ -441,10 +441,12 @@ def set_state(dev_id: str, on: bool, timer_s: int | None = None) -> dict:
     return status(d)
 
 
-def list_with_status(only_shown: bool = False) -> list[dict]:
+def list_with_status(only_shown: bool = False, ids: set | None = None) -> list[dict]:
     """Angelegte Geraete inkl. Live-Status (parallel abgefragt). Ohne Passwort.
     only_shown: nur die fuers Dashboard freigegebenen (Reihenfolge wie gespeichert)."""
     items = [d for d in load_devices() if d.get("show")] if only_shown else load_devices()
+    if ids is not None:                                    # nur bestimmte Geraete abfragen (schnelle Regelrunde)
+        items = [d for d in items if d["id"] in ids]
     if not items:
         return []
     with ThreadPoolExecutor(max_workers=min(16, len(items))) as ex:

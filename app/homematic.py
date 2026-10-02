@@ -42,7 +42,7 @@ _scan_ts = 0.0
 _sensor_scan: dict[str, dict] = {}                      # sensor-id -> Kandidat der letzten Sensor-Suche
 _sensor_scan_ts = 0.0
 _value_cache: dict[str, tuple[float, object]] = {}   # sensor-id -> (gueltig bis, Wert)
-VALUE_TTL_S = 5.0
+VALUE_TTL_S = 1.0
 
 
 class HomematicError(Exception):
