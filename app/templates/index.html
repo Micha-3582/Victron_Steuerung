@@ -1603,8 +1603,8 @@ async function loadShelly() {
   }).join('');
 }
 /* Sensoren (nur lesen): Ja/Nein als Punkt - gruen = Ja, rot = Nein; Messwerte als Zahl */
-const SENSOR_ICON = { contact: '🚪', motion: '🏃', presence: '🧍', temperature: '🌡️', humidity: '💧', brightness: '☀️', power: '⚡' };
-const SENSOR_WORDS = { contact: ['offen', 'geschlossen'], motion: ['Bewegung', 'keine Bewegung'], presence: ['anwesend', 'niemand da'] };
+const SENSOR_ICON = { lock: '🔒', contact: '🚪', motion: '🏃', presence: '🧍', temperature: '🌡️', humidity: '💧', brightness: '☀️', power: '⚡' };
+const SENSOR_WORDS = { lock: ['verriegelt', 'entriegelt'], contact: ['offen', 'geschlossen'], motion: ['Bewegung', 'keine Bewegung'], presence: ['anwesend', 'niemand da'] };
 async function loadSensors() {
   const card = $('sensors-card');
   if (!sensorsEnabled) { card.hidden = true; return; }

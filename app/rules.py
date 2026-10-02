@@ -513,7 +513,7 @@ BUDGET_DONE = " – Tagesziel erreicht"
 AT_GRACE_MIN = 30          # "Um HH:MM" loest bis zu 30 Minuten nach der Uhrzeit aus (App-Neustart, kurze Aussetzer)
 
 
-SENSOR_WORDS = {"contact": ("offen", "geschlossen"), "motion": ("Bewegung erkannt", "keine Bewegung"),
+SENSOR_WORDS = {"lock": ("verriegelt", "entriegelt"), "contact": ("offen", "geschlossen"), "motion": ("Bewegung erkannt", "keine Bewegung"),
                 "presence": ("jemand anwesend", "niemand anwesend")}
 
 

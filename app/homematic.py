@@ -384,6 +384,7 @@ SENSOR_KINDS = {
     "contact": ("Fenster/Tür", "", True, ["STATE"]),                       # wahr = offen
     "motion": ("Bewegung", "", True, ["MOTION"]),                          # wahr = Bewegung erkannt
     "presence": ("Anwesenheit", "", True, ["PRESENCE_DETECTION_STATE"]),   # wahr = jemand da
+    "lock": ("Türschloss", "", True, ["LOCK_STATE"]),                      # wahr = verriegelt (HmIP-DLD: LOCK_STATE 1 = verriegelt, 2 = entriegelt)
 }
 # Welche kanaltypen zu welchen Sensorarten gehoeren koennen (Teilstrings des channelType)
 _SENSOR_HINTS = [
@@ -392,6 +393,7 @@ _SENSOR_HINTS = [
     (("MOTION_DETECTOR",), ("motion", "brightness")),
     (("PRESENCE_DETECTION",), ("presence", "brightness")),
     (("POWERMETER", "ENERGIE_METER", "ENERGY_METER"), ("power",)),
+    (("LOCK",), ("lock",)),                                                   # Tuerschlossantrieb (nur Zustand lesen, nicht schalten)
 ]
 
 
@@ -518,8 +520,12 @@ def read_sensor(sen: dict):
         if unreach or v is None:
             val = None
         elif sen.get("binary"):
-            val = _truthy(v) if isinstance(v, (bool, str)) and not str(v).strip().isdigit() else bool(float(v))          # Drehgriff: 0 zu, 1 gekippt, 2 offen -> offen = wahr
-            if sen.get("invert"):
+            if sen.get("datapoint") == "LOCK_STATE":                       # Aufzaehlung: 0 unbekannt, 1 verriegelt, 2 entriegelt (auch als Text)
+                t = str(v).strip().upper()
+                val = True if t in ("1", "LOCKED") else False if t in ("2", "UNLOCKED") else None
+            else:
+                val = _truthy(v) if isinstance(v, (bool, str)) and not str(v).strip().isdigit() else bool(float(v))          # Drehgriff: 0 zu, 1 gekippt, 2 offen -> offen = wahr
+            if val is not None and sen.get("invert"):
                 val = not val                              # Sensor andersherum verschaltet: Bedeutung von TRUE/FALSE vertauschen
         else:
             val = round(float(v), 1)

@@ -146,7 +146,7 @@ const COND_DEFAULT = {
   at: { type: 'at', time: '23:30', days: [] }, time: { type: 'time', from: '09:00', to: '16:00', days: [] }, price: { type: 'price', op: 'below', ct: 25 },
   budget: { type: 'budget', minutes: 120, from: '06:00', to: '22:00' }, soc: { type: 'soc', op: 'above', pct: 50 }, sun_tomorrow: { type: 'sun_tomorrow', op: 'above', kwh: 15 },
 };
-const BIN_WORDS = { contact: ['offen', 'geschlossen'], motion: ['Bewegung erkannt', 'keine Bewegung'], presence: ['jemand anwesend', 'niemand anwesend'] };
+const BIN_WORDS = { lock: ['verriegelt', 'entriegelt'], contact: ['offen', 'geschlossen'], motion: ['Bewegung erkannt', 'keine Bewegung'], presence: ['jemand anwesend', 'niemand anwesend'] };
 const SENSOR_DEFAULT_VALUE = { temperature: 20, humidity: 60, brightness: 100, power: 100 };
 function sensorDefault(sid) {                      // neue Sensor-Bedingung: Ja/Nein-Sensor -> TRUE, Messwert -> "ueber" Standardwert
   const s = (S.sensors || []).find(x => x.id === sid) || (S.sensors || [])[0];

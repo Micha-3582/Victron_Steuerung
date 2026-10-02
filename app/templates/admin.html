@@ -1618,10 +1618,10 @@ async function hmAdd(addresses) {
 }
 loadHomematicInfo();
 /* Sensoren */
-const SENSOR_WORDS = { contact: ['offen', 'geschlossen'], motion: ['Bewegung erkannt', 'keine Bewegung'], presence: ['jemand anwesend', 'niemand anwesend'] };
-const INV_LABEL = { contact: 'TRUE = geschlossen', motion: 'TRUE = keine Bewegung', presence: 'TRUE = niemand da' };
-const INV_ON = { contact: 'TRUE = geschlossen, FALSE = offen', motion: 'TRUE = keine Bewegung', presence: 'TRUE = niemand anwesend' };
-const INV_OFF = { contact: 'TRUE = offen, FALSE = geschlossen', motion: 'TRUE = Bewegung erkannt', presence: 'TRUE = jemand anwesend' };
+const SENSOR_WORDS = { lock: ['verriegelt', 'entriegelt'], contact: ['offen', 'geschlossen'], motion: ['Bewegung erkannt', 'keine Bewegung'], presence: ['jemand anwesend', 'niemand anwesend'] };
+const INV_LABEL = { lock: 'TRUE = entriegelt', contact: 'TRUE = geschlossen', motion: 'TRUE = keine Bewegung', presence: 'TRUE = niemand da' };
+const INV_ON = { lock: 'TRUE = entriegelt, FALSE = verriegelt', contact: 'TRUE = geschlossen, FALSE = offen', motion: 'TRUE = keine Bewegung', presence: 'TRUE = niemand anwesend' };
+const INV_OFF = { lock: 'TRUE = verriegelt, FALSE = entriegelt', contact: 'TRUE = offen, FALSE = geschlossen', motion: 'TRUE = Bewegung erkannt', presence: 'TRUE = jemand anwesend' };
 function sensorValueText(s) {
   if (s.value === null || s.value === undefined) return 'nicht lesbar';
   if (s.binary) { let w = SENSOR_WORDS[s.kind] || ['wahr', 'falsch']; if (s.invert && SENSOR_WORDS[s.kind]) w = [w[1], w[0]]; return s.value ? `TRUE – ${w[0]}` : `FALSE – ${w[1]}`; }
@@ -1647,7 +1647,7 @@ async function sensorRename(id, btn) {
   try { await shellyApi('/api/sensors/' + encodeURIComponent(id), 'PATCH', { name: n }); savedToast(); } catch (e) { shellyMsg(e.message, true); }
   loadSensorsAdmin();
 }
-const SENSOR_ICON = { contact: '🚪', motion: '🏃', presence: '🧍', temperature: '🌡️', humidity: '💧', brightness: '☀️', power: '⚡' };
+const SENSOR_ICON = { lock: '🔒', contact: '🚪', motion: '🏃', presence: '🧍', temperature: '🌡️', humidity: '💧', brightness: '☀️', power: '⚡' };
 const SENSOR_EXTRA_ICONS = ['🚪', '🪟', '🏃', '🧍', '🚶', '👀', '🔑', '🚨', '📬', '🚗', '🚲', '🐕', '🐈', '🔥', '💦', '🌡️', '☀️', '⚡'];
 function sensorPickIcon(id) { const el = document.getElementById('sicons-' + id); el.style.display = el.style.display === 'none' ? 'flex' : 'none'; }
 async function sensorSetIcon(id, icon) {
