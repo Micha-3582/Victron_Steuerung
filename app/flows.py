@@ -102,8 +102,9 @@ class FlowEngine:
                             events.append(("cancel", r, ("Bedingung nicht mehr erfüllt – der laufende Ablauf wird vorzeitig beendet" + (", die SONST-Schritte starten" if steps else ""))
                                            if not res else "neu ausgelöst – der laufende Ablauf wird durch den neuen ersetzt"))
                     if steps:
+                        reset = [c["id"] for c in r["when"]["conds"] if c["type"] == "virtual" and c.get("is") == "on"] if (res and r.get("reset_trigger")) else []
                         self.runs.append({"id": uuid.uuid4().hex[:8], "rule_id": rid, "rule": r.get("name", ""), "branch": branch,
-                                          "steps": steps, "idx": 0, "due": None, "start": time.time()})
+                                          "steps": steps, "idx": 0, "due": None, "start": time.time(), "reset": reset})
                         events.append(("start", r, ("Auslöser: " if res else "Bedingung nicht mehr erfüllt: ") + txt + f" – {'DANN' if res else 'SONST'}-Ablauf startet"))
                 if prev != res:
                     changed = True
@@ -158,6 +159,9 @@ class FlowEngine:
             if run["idx"] >= len(run["steps"]):
                 self.runs.remove(run)
                 changed = True
+                for vid in run.get("reset") or []:             # Ablauf normal zu Ende: den ausloesenden Schalter wieder ausschalten
+                    out.append({"rule_id": run["rule_id"], "rule": run.get("rule", ""), "branch": run["branch"],
+                                "step": {"type": "virtual", "id": vid, "state": "off"}, "after_s": offset})
         if changed:
             self._save()
         return out

@@ -1569,7 +1569,7 @@ loadMonth();
 loadPriceMinDay();
 setInterval(load, 15000);      // Plan/Preise/Termine (langsamer)
 setInterval(loadLive, 2000);   // Live-Werte vom Cerbo (wie Victron: alle 2 s)
-setInterval(() => { loadSensors(); loadVirtual(); }, 5000);   // Sensoren (Ja/Nein) und eigene Schalter
+setInterval(() => { loadSensors(); loadVirtual(); }, 3000);   // Sensoren (Ja/Nein) und eigene Schalter
 setInterval(loadWeek, 300000);  // Wochenrückblick (ändert sich langsam)
 setInterval(loadMonth, 300000); // Monatsüberblick (ändert sich langsam)
 
@@ -1637,8 +1637,18 @@ async function loadVirtual() {
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-size:30px;line-height:1.1">${escH(v.icon)}</span>
       ${v.kind === 'button' ? `<button type="button" onclick="virtualPress('${escH(v.id)}', this)">Drücken</button>`
         : `<label class="switch"><input type="checkbox" ${v.on ? 'checked' : ''} onchange="virtualSet('${escH(v.id)}', this.checked, this)"><span class="slider"></span></label>`}</div>
-    <div class="systile-s">${v.kind === 'button' ? 'Knopf' : (v.on ? 'an' : 'aus')}${v.running ? ` · Ablauf läuft, noch ${fmtRemain(v.running.remaining_s)}` : ''}</div></div>`).join('');
+    <div class="systile-s">${v.kind === 'button' ? 'Knopf' : (v.on ? 'an' : 'aus')}${v.running ? ` · Ablauf läuft, noch <span class="vrem" data-rem="${v.running.remaining_s}">${fmtRemain(v.running.remaining_s)}</span>` : ''}</div></div>`).join('');
+  virtualFetchedAt = Date.now();
 }
+let virtualFetchedAt = 0, virtualLast = 0;
+function tickVirtual() {                          // Restzeit sekundengenau herunterzaehlen (der Server wird nur alle paar Sekunden gefragt)
+  const els = document.querySelectorAll('#virtual-grid .vrem'); if (!els.length) return;
+  const passed = Math.floor((Date.now() - virtualFetchedAt) / 1000);
+  let zero = false;
+  els.forEach(e => { const left = Math.max(0, +e.dataset.rem - passed); e.textContent = fmtRemain(left); if (left <= 0) zero = true; });
+  if (zero && Date.now() - virtualLast > 1500) { virtualLast = Date.now(); loadVirtual(); }       // Ablauf zu Ende: Zustand gleich neu holen
+}
+setInterval(tickVirtual, 1000);
 const fmtRemain = s => s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min` : s >= 120 ? `${Math.floor(s / 60)} min` : `${s} s`;
 async function virtualCall(url, body, el) {
   if (DASHBOARD_LEVEL !== 'write') { showToast('Dieses Konto darf nur ansehen, nicht schalten.'); loadVirtual(); return; }
