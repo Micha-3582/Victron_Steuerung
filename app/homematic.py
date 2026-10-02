@@ -409,6 +409,17 @@ def _save_sensors(items: list[dict]):
         json.dump(items, f, indent=2, ensure_ascii=False)
 
 
+def reorder_sensors(ids: list[str]) -> None:
+    """Neue Reihenfolge fuer die genannten Sensoren (sie belegen nur die Plaetze, die sie schon hatten)."""
+    items = load_sensors()
+    by_id = {s["id"]: s for s in items}
+    ids = [i for i in ids if i in by_id]
+    slots = sorted(n for n, s in enumerate(items) if s["id"] in set(ids))
+    for slot, i in zip(slots, ids):
+        items[slot] = by_id[i]
+    _save_sensors(items)
+
+
 def sensor_id(address: str, datapoint: str) -> str:
     return "hmS-" + address.replace(":", "-") + "-" + datapoint
 

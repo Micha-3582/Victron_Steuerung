@@ -294,6 +294,7 @@ if (DASHBOARD_LEVEL === 'read') {
   });
 }
 
+let sensorsDragActive = false, virtualDragActive = false;
 let virtualEnabled = true, sensorsEnabled = true, shellyEnabled = true, weatherEnabled = true, plansimEnabled = true, savingsEnabled = true;
 function applyTileVisibility(ui) {
   applyTileOrder(ui.tile_order);
@@ -1612,6 +1613,7 @@ async function loadSensors() {
   list = Array.isArray(list) ? list.filter(s => s.show !== false) : [];
   if (!sensorsEnabled || !list.length) { card.hidden = true; return; }
   card.hidden = false;
+  if (sensorsDragActive) return;
   $('sensors-grid').innerHTML = list.map(s => {
     const v = s.value, ok = v !== null && v !== undefined, w = SENSOR_WORDS[s.kind] ? (s.invert ? [SENSOR_WORDS[s.kind][1], SENSOR_WORDS[s.kind][0]] : SENSOR_WORDS[s.kind]) : ['Ja', 'Nein'];
     const big = !ok ? '<span style="font-size:22px;font-weight:700;color:var(--muted)">–</span>'
@@ -1619,7 +1621,7 @@ async function loadSensors() {
                  : `<span style="font-size:22px;font-weight:700;font-variant-numeric:tabular-nums">${escH(String(v).replace('.', ','))}${s.unit ? ' ' + escH(s.unit) : ''}</span>`;
     const sub = !ok ? 'kein Wert' : s.binary ? (v ? w[0] : w[1]) : escH(s.room || '');
     const ic = escH(s.icon || SENSOR_ICON[s.kind] || '📡');
-    return `<div class="systile" ${ok ? '' : 'style="opacity:.55"'}><div class="systile-t">${escH(s.name)}</div>
+    return `<div class="systile" data-tile-id="${escH(s.id)}" ${ok ? '' : 'style="opacity:.55"'}><div class="systile-t">${escH(s.name)}</div>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-size:30px;line-height:1.1">${ic}</span>${big}</div><div class="systile-s">${sub}</div></div>`;
   }).join('');
 }
@@ -1633,7 +1635,8 @@ async function loadVirtual() {
   if (!virtualEnabled || !list.length) { card.hidden = true; return; }
   if (Date.now() - virtualTouched < 1200) return;                                    // gerade bedient: kurz nicht dazwischenzeichnen (der Aufruf nach dem Klick zeichnet ohnehin neu)
   card.hidden = false;
-  $('virtual-grid').innerHTML = list.map(v => `<div class="systile"><div class="systile-t">${escH(v.name)}</div>
+  if (virtualDragActive) return;
+  $('virtual-grid').innerHTML = list.map(v => `<div class="systile" data-tile-id="${escH(v.id)}"><div class="systile-t">${escH(v.name)}</div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-size:30px;line-height:1.1">${escH(v.icon)}</span>
       ${v.kind === 'button' ? `<button type="button" onclick="virtualPress('${escH(v.id)}', this)">Drücken</button>`
         : `<label class="switch"><input type="checkbox" ${v.on ? 'checked' : ''} onchange="virtualSet('${escH(v.id)}', this.checked, this)"><span class="slider"></span></label>`}</div>
@@ -1685,26 +1688,28 @@ async function shellySwitch(id, on, el) {
   setTimeout(loadShelly, 2000);   // Leistungsmessung des Shelly braucht einen Moment
 }
 /* Umsortieren wie bei den Live-Werten: lang druecken, dann ueber andere Kachel ziehen. */
-function initShellyDragging() {
-  const g = $('shelly-grid');
+function initShellyDragging() { makeSortable('shelly-grid', '/api/shelly/order', v => { shellyDragActive = v; }); }
+/* Umsortieren per langem Druecken und Ziehen - fuer Geraete-, Sensoren- und Schalter-Kacheln */
+function makeSortable(gridId, saveUrl, setActive) {
+  const g = $(gridId);
   const LONG_PRESS_MS = 500, MOVE_TOLERANCE = 10;
   let pending = null, dragEl = null;
   const cancelPending = () => {
-    if (pending) { clearTimeout(pending.timer); pending = null; if (!dragEl) shellyDragActive = false; }
+    if (pending) { clearTimeout(pending.timer); pending = null; if (!dragEl) setActive(false); }
   };
   const endDrag = () => {
     if (!dragEl) return;
     dragEl.classList.remove('dragging'); g.classList.remove('reordering');
     const ids = [...g.querySelectorAll('.systile')].map(el => el.dataset.tileId);
-    dragEl = null; shellyDragActive = false;
-    fetch('/api/shelly/order', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    dragEl = null; setActive(false);
+    fetch(saveUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids }) });
   };
   g.addEventListener('pointerdown', e => {
     const el = e.target.closest('.systile');
-    if (!el || e.target.closest('.switch')) return;      // Schalter bleibt normal bedienbar
+    if (!el || e.target.closest('.switch, button')) return;      // Schalter und Knoepfe bleiben normal bedienbar
     cancelPending();
-    shellyDragActive = true;
+    setActive(true);
     pending = { el, x: e.clientX, y: e.clientY, timer: setTimeout(() => {
       pending = null; dragEl = el; g.classList.add('reordering'); el.classList.add('dragging');
       if (navigator.vibrate) navigator.vibrate(15);
@@ -1732,6 +1737,8 @@ function initShellyDragging() {
   g.addEventListener('touchmove', e => { if (dragEl && e.cancelable) e.preventDefault(); }, { passive: false });   // Verschieben aktiv: Seite nicht mitscrollen
 }
 initShellyDragging();
+makeSortable('sensors-grid', '/api/sensors/order', v => { sensorsDragActive = v; });
+makeSortable('virtual-grid', '/api/virtual/order', v => { virtualDragActive = v; });
 setInterval(loadShelly, 15000);
 
 /* --- Solar-Prognose aus dem VRM-Portal: fliesst in den Energieverlauf ein (Zugang in den Einstellungen; Server puffert 30 min) --- */

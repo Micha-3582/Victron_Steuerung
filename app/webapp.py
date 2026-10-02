@@ -166,7 +166,7 @@ ENDPOINT_AREA = {
     "api_zigbee_sensor_add": "settings_geraete", "api_zigbee_sp_scan": "settings_geraete", "api_zigbee_sp_add": "settings_geraete",
     "api_homematic_sensor_scan": "settings_geraete", "api_homematic_sensor_add": "settings_geraete",
     "api_sensor_modify": "settings_geraete", "api_sensors_list": "dashboard",
-    "api_virtual_list": "dashboard", "api_virtual_press": "dashboard", "api_virtual_set": "dashboard",
+    "api_sensors_order": "settings_geraete", "api_virtual_order": "settings_geraete", "api_virtual_list": "dashboard", "api_virtual_press": "dashboard", "api_virtual_set": "dashboard",
     "api_virtual_add": "settings_geraete", "api_virtual_modify": "settings_geraete",
     "api_setpoint_scan": "settings_geraete", "api_setpoint_add": "settings_geraete", "api_setpoint_list": "dashboard",
     "api_setpoint_modify": "settings_geraete",
@@ -2495,6 +2495,24 @@ def api_virtual_add():
         return jsonify(virtual.add(body.get("name"), body.get("kind"), body.get("icon"))), 201
     except virtual.VirtualError as e:
         return jsonify(error=str(e)), 400
+
+
+@app.route("/api/virtual/order", methods=["POST"])
+def api_virtual_order():
+    ids = (request.get_json(silent=True) or {}).get("ids")
+    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+        return jsonify(error="ids fehlt"), 400
+    virtual.reorder(ids)
+    return jsonify(ok=True)
+
+
+@app.route("/api/sensors/order", methods=["POST"])
+def api_sensors_order():
+    ids = (request.get_json(silent=True) or {}).get("ids")
+    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+        return jsonify(error="ids fehlt"), 400
+    homematic.reorder_sensors(ids)
+    return jsonify(ok=True)
 
 
 @app.route("/api/virtual/<vid>", methods=["PATCH", "DELETE"])
