@@ -10,7 +10,10 @@ Reine Logik ohne Netzwerk.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
+import re
 import threading
 import uuid
 
@@ -90,6 +93,54 @@ def reorder(ids: list[str]):
         pos = {i: n for n, i in enumerate(ids)}
         items.sort(key=lambda x: pos.get(x["id"], len(ids)))
         _save(items)
+
+
+# ---- Sicherheits-PIN (4 Ziffern) fuer Bedienung ueber das Dashboard: Knopf/Schalter geht erst nach richtiger Eingabe durch.
+# Gespeichert wird nur ein Hash (PBKDF2 mit eigenem Salz). Regeln/Ablaeufe loesen Knoepfe selbst aus und brauchen keine PIN.
+PIN_RE = re.compile(r"^\d{4}$")
+
+
+def _hash_pin(pin: str, salt: bytes) -> str:
+    return hashlib.pbkdf2_hmac("sha256", pin.encode(), salt, 60000).hex()
+
+
+def set_pin(vid: str, pin: str | None) -> bool:
+    """PIN setzen (4 Ziffern) bzw. mit None/'' entfernen."""
+    if pin and not PIN_RE.match(str(pin)):
+        raise VirtualError("Die PIN muss aus genau 4 Ziffern bestehen")
+    with _lock:
+        items = load()
+        for it in items:
+            if it["id"] == vid:
+                if pin:
+                    salt = os.urandom(16)
+                    it["pin_salt"], it["pin_hash"] = salt.hex(), _hash_pin(str(pin), salt)
+                else:
+                    it.pop("pin_salt", None)
+                    it.pop("pin_hash", None)
+                _save(items)
+                return True
+    return False
+
+
+def has_pin(vid: str) -> bool:
+    return any(x["id"] == vid and x.get("pin_hash") for x in load())
+
+
+def check_pin(vid: str, pin) -> bool:
+    it = next((x for x in load() if x["id"] == vid), None)
+    if not it or not it.get("pin_hash"):
+        return True                                   # keine PIN eingerichtet
+    if not isinstance(pin, str) or not PIN_RE.match(pin):
+        return False
+    return hmac.compare_digest(_hash_pin(pin, bytes.fromhex(it["pin_salt"])), it["pin_hash"])
+
+
+def public(item: dict) -> dict:
+    """Fuer die Anzeige: ohne Hash und Salz, mit pin_set."""
+    out = {k: v for k, v in item.items() if k not in ("pin_hash", "pin_salt")}
+    out["pin_set"] = bool(item.get("pin_hash"))
+    return out
 
 
 def press(vid: str) -> bool:

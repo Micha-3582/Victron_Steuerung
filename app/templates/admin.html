@@ -1701,7 +1701,8 @@ async function loadVirtualAdmin() {
   if (!Array.isArray(list)) return;
   document.getElementById('virtual-list').innerHTML = list.length ? list.map(v => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--border);border-radius:10px;padding:8px 10px">
       <button class="ghost" style="font-size:22px;padding:4px 10px" title="Symbol wählen" onclick="virtPickIcon('${escH(v.id)}')">${escH(v.icon)}</button>
-      <div style="flex:1;min-width:150px"><b>${escH(v.name)}</b><div class="muted">${VIRT_KIND[v.kind]}${v.kind === 'switch' ? ' · ' + (v.on ? 'an' : 'aus') : ''}</div></div>
+      <div style="flex:1;min-width:150px"><b>${escH(v.name)}</b><div class="muted">${VIRT_KIND[v.kind]}${v.kind === 'switch' ? ' · ' + (v.on ? 'an' : 'aus') : ''}${v.pin_set ? ' · 🔑 PIN geschützt' : ''}</div></div>
+      <button class="ghost" onclick="virtPin('${escH(v.id)}', ${v.pin_set ? 'true' : 'false'})" title="${v.pin_set ? 'PIN ändern oder entfernen' : 'Sicherheits-PIN (4 Ziffern) für das Dashboard festlegen'}">🔑 ${v.pin_set ? 'PIN ändern' : 'PIN'}</button>
       <label class="chk"><input type="checkbox" ${v.show === false ? '' : 'checked'} onchange="virtPatch('${escH(v.id)}', { show: this.checked })"> Dashboard</label>
       <button class="ghost" onclick="virtRename('${escH(v.id)}', this)" data-name="${escH(v.name)}" title="Umbenennen">✎</button>
       <button class="ghost" onclick="virtRemove('${escH(v.id)}')" title="Entfernen">✕</button>
@@ -1712,6 +1713,14 @@ function virtPickIcon(id) { const el = document.getElementById('vicons-' + id); 
 async function virtPatch(id, body) {
   try { await shellyApi('/api/virtual/' + encodeURIComponent(id), 'PATCH', body); savedToast(); } catch (e) { shellyMsg(e.message, true); }
   loadVirtualAdmin();
+}
+async function virtPin(id, has) {
+  const pin = await uiDialog({ title: 'Sicherheits-PIN', message: 'Ist eine PIN gesetzt, fragt das Dashboard sie ab, bevor der Knopf bzw. Schalter reagiert. Regeln und Abläufe brauchen die PIN nicht.' + (has ? ' Leer lassen und bestätigen entfernt die PIN.' : ''),
+    label: '4 Ziffern', type: 'password', okText: has ? 'Speichern' : 'PIN setzen' });
+  if (pin === null) return;
+  if (pin !== '' && !/^\d{4}$/.test(pin)) { shellyMsg('Die PIN muss aus genau 4 Ziffern bestehen.', true); return; }
+  if (pin === '' && !has) return;
+  virtPatch(id, { pin });
 }
 async function virtRename(id, btn) {
   const n = await uiDialog({ title: 'Umbenennen', label: 'Neuer Name', value: btn.dataset.name });

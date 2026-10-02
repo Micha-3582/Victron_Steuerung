@@ -2499,7 +2499,7 @@ def api_device_families():
 @app.route("/api/virtual", methods=["GET"])
 def api_virtual_list():
     """Eigene Schalter/Knoepfe; 'running' = ein von diesem Schalter ausgeloester Ablauf laeuft noch (mit Restzeit)."""
-    items = virtual.load()
+    items = [virtual.public(x) for x in virtual.load()]                 # ohne PIN-Hash
     flow_rules = [r for r in rules.list_rules() if flows.is_flow(r)]
     for v in items:
         for r in flow_rules:
@@ -2544,14 +2544,52 @@ def api_virtual_modify(vid):
         ok = virtual.remove(vid)
     else:
         body = request.get_json(silent=True) or {}
+        if "pin" in body:                                                  # PIN setzen / mit leerem Wert entfernen
+            try:
+                if not virtual.set_pin(vid, str(body.get("pin") or "")):
+                    return jsonify(error="nicht gefunden"), 404
+            except virtual.VirtualError as e:
+                return jsonify(error=str(e)), 400
+            _pin_fails.pop(vid, None)
         ok = virtual.update(vid, name=body.get("name") if isinstance(body.get("name"), str) else None,
                             icon=body.get("icon") if isinstance(body.get("icon"), str) else None,
                             show=body.get("show") if isinstance(body.get("show"), bool) else None)
     return jsonify(ok=True) if ok else (jsonify(error="nicht gefunden"), 404)
 
 
+_pin_fails: dict[str, list] = {}                          # schalter-id -> [Fehlversuche, Zeit des ersten]
+PIN_MAX_FAILS, PIN_LOCK_S = 5, 300
+
+
+def _pin_gate(vid: str):
+    """None = darf durch (keine PIN noetig oder richtig). Sonst eine Fehlerantwort (403/429). 5 Fehlversuche sperren den Schalter 5 Minuten."""
+    if not virtual.has_pin(vid):
+        return None
+    now = time.time()
+    rec = _pin_fails.get(vid)
+    if rec and rec[0] >= PIN_MAX_FAILS and now - rec[1] < PIN_LOCK_S:
+        return jsonify(error=f"Zu viele falsche Eingaben – bitte {int(PIN_LOCK_S - (now - rec[1])) // 60 + 1} Minuten warten", pin_required=True, locked=True), 429
+    if rec and now - rec[1] >= PIN_LOCK_S:
+        _pin_fails.pop(vid, None)
+        rec = None
+    pin = (request.get_json(silent=True) or {}).get("pin")
+    if not pin:
+        return jsonify(error="PIN erforderlich", pin_required=True), 403
+    if virtual.check_pin(vid, str(pin)):
+        _pin_fails.pop(vid, None)
+        return None
+    rec = _pin_fails.setdefault(vid, [0, now])
+    rec[0] += 1
+    left = PIN_MAX_FAILS - rec[0]
+    log.warning("Falsche PIN am eigenen Schalter %s (%d von %d)", vid, rec[0], PIN_MAX_FAILS)
+    return jsonify(error="PIN falsch" + (f" – noch {left} Versuche" if left > 0 else " – gesperrt für 5 Minuten"), pin_required=True), 403
+
+
 @app.route("/api/virtual/<vid>/press", methods=["POST"])
 def api_virtual_press(vid):
+    blocked = _pin_gate(vid)
+    if blocked:
+        return blocked
     if not virtual.press(vid):
         return jsonify(error="Knopf nicht gefunden"), 404
     opslog.log("rules", f"Eigener Knopf {next((v['name'] for v in virtual.load() if v['id'] == vid), vid)} gedrückt", dry=False)
@@ -2561,6 +2599,9 @@ def api_virtual_press(vid):
 
 @app.route("/api/virtual/<vid>/set", methods=["POST"])
 def api_virtual_set(vid):
+    blocked = _pin_gate(vid)
+    if blocked:
+        return blocked
     if not virtual.set_state(vid, bool((request.get_json(silent=True) or {}).get("on"))):
         return jsonify(error="Schalter nicht gefunden"), 404
     ctrl._rules_wake.set()
