@@ -188,7 +188,7 @@ for _f in ("tibber_token", "tariff_mode", "fixed_price_ct", "max_charge_soc", "a
     FIELD_AREA[_f] = "settings_tarif"
 for _f in ("app_display_name", "show_live_values", "show_energy_chart", "show_flow_chart",
            "show_week_overview", "show_month_overview", "show_tibber_card", "show_override_card",
-           "show_price_plan", "show_charge_log", "show_ev_card", "show_shelly_card",
+           "show_price_plan", "show_charge_log", "show_ev_card", "show_shelly_card", "show_sensors_card",
            "show_weather_card", "show_plansim_card", "show_savings_card", "tile_order",
            "chart_energy_hourly", "chart_flow_hourly"):
     FIELD_AREA[_f] = "settings_anzeige"
@@ -1415,6 +1415,7 @@ def api_status():
           "show_charge_log": bool(cfg.get("show_charge_log", True)),
           "show_ev_card": bool(cfg.get("show_ev_card", True)),
           "show_shelly_card": bool(cfg.get("show_shelly_card", True)),
+          "show_sensors_card": bool(cfg.get("show_sensors_card", True)),
           "show_weather_card": bool(cfg.get("show_weather_card", True)),
           "show_savings_card": bool(cfg.get("show_savings_card", True)),
           "show_plansim_card": bool(cfg.get("show_plansim_card", True)) and cfg.get("tariff_mode") != "fixed",
@@ -1670,7 +1671,7 @@ def api_config():
                "show_live_values", "show_energy_chart", "show_flow_chart",
                "show_week_overview", "show_month_overview", "show_tibber_card",
                "show_override_card", "show_price_plan", "show_charge_log",
-               "show_ev_card", "show_shelly_card", "show_weather_card", "show_plansim_card", "show_savings_card", "pv_auto_calibration", "smart_planner_enabled", "surplus_enabled", "surplus_dry_run", "rules_enabled", "rules_dry_run", "rules_manual_hold_min", "rules_failsafe_min",
+               "show_ev_card", "show_shelly_card", "show_sensors_card", "show_weather_card", "show_plansim_card", "show_savings_card", "pv_auto_calibration", "smart_planner_enabled", "surplus_enabled", "surplus_dry_run", "rules_enabled", "rules_dry_run", "rules_manual_hold_min", "rules_failsafe_min",
                "surplus_min_soc", "tile_order", "scan_networks",
                "has_pv_inverter", "has_mppt", "tariff_mode",
                "fixed_price_ct", "pv_inverters",

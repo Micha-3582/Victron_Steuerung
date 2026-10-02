@@ -269,13 +269,10 @@ const TILE_IDS = {
   show_charge_log: 'charge-log-card', show_ev_card: 'ev-card',
 };
 // Reihenfolge der Kacheln (Einstellungen -> Kacheln); Standard = Reihenfolge dieser Liste.
-const ORDER_IDS = { ...TILE_IDS, show_shelly_card: 'shelly-card', show_weather_card: 'weather-card', show_plansim_card: 'plansim-card', show_savings_card: 'savings-card' };
+const ORDER_IDS = { ...TILE_IDS, show_shelly_card: 'shelly-card', show_sensors_card: 'sensors-card', show_weather_card: 'weather-card', show_plansim_card: 'plansim-card', show_savings_card: 'savings-card' };
 function applyTileOrder(order) {
   const keys = Object.keys(ORDER_IDS), given = (order || []).filter(k => keys.includes(k));
-  [...given, ...keys.filter(k => !given.includes(k))].forEach((k, i) => {
-    const el = $(ORDER_IDS[k]); if (el) el.style.order = i * 2;
-    if (k === 'show_shelly_card') { const sc = $('sensors-card'); if (sc) sc.style.order = i * 2 + 1; }      // Sensoren direkt unter den Geraeten
-  });
+  [...given, ...keys.filter(k => !given.includes(k))].forEach((k, i) => { const el = $(ORDER_IDS[k]); if (el) el.style.order = i; });
 }
 // Eingeschraenkte Konten (siehe Einstellungen -> System -> Weitere Benutzer): "Schreiben" auf
 // Dashboard darf Geraete schalten, Override setzen und Ladetermine anlegen, "Lesen" nur ansehen.
@@ -293,10 +290,12 @@ if (DASHBOARD_LEVEL === 'read') {
   });
 }
 
-let shellyEnabled = true, weatherEnabled = true, plansimEnabled = true, savingsEnabled = true;
+let sensorsEnabled = true, shellyEnabled = true, weatherEnabled = true, plansimEnabled = true, savingsEnabled = true;
 function applyTileVisibility(ui) {
   applyTileOrder(ui.tile_order);
   shellyEnabled = ui.show_shelly_card !== false;
+  sensorsEnabled = ui.show_sensors_card !== false;
+  if (typeof loadSensors === 'function') loadSensors();
   if (weatherEnabled !== (ui.show_weather_card !== false)) { weatherEnabled = ui.show_weather_card !== false; if (typeof loadWeather === 'function') loadWeather(); }
   if (plansimEnabled !== (ui.show_plansim_card !== false)) { plansimEnabled = ui.show_plansim_card !== false; if (typeof loadPlansim === 'function') loadPlansim(); }
   if (savingsEnabled !== (ui.show_savings_card !== false)) { savingsEnabled = ui.show_savings_card !== false; if (typeof loadSavings === 'function') loadSavings(); }
@@ -1600,11 +1599,11 @@ const SENSOR_ICON = { contact: '🚪', motion: '🏃', presence: '🧍', tempera
 const SENSOR_WORDS = { contact: ['offen', 'geschlossen'], motion: ['Bewegung', 'keine Bewegung'], presence: ['anwesend', 'niemand da'] };
 async function loadSensors() {
   const card = $('sensors-card');
-  if (!shellyEnabled) { card.hidden = true; return; }
+  if (!sensorsEnabled) { card.hidden = true; return; }
   let list;
   try { list = await (await fetch('/api/sensors', { cache: 'no-store' })).json(); } catch (e) { return; }
   list = Array.isArray(list) ? list.filter(s => s.show !== false) : [];
-  if (!shellyEnabled || !list.length) { card.hidden = true; return; }
+  if (!sensorsEnabled || !list.length) { card.hidden = true; return; }
   card.hidden = false;
   $('sensors-grid').innerHTML = list.map(s => {
     const v = s.value, ok = v !== null && v !== undefined, w = SENSOR_WORDS[s.kind] || ['Ja', 'Nein'];
