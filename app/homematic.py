@@ -103,7 +103,7 @@ def save_credentials(host: str, user: str, password: str = ""):
 # ---------------------------------------------------------------- JSON-RPC
 def _base(c: dict) -> str:
     if not c.get("host"):
-        raise HomematicError("Homematic ist noch nicht eingerichtet (Einstellungen → Geräte → Homematic)")
+        raise HomematicError("Homematic ist noch nicht eingerichtet (Einstellungen → Smart Home → Homematic)")
     scheme, ip = _split_host(c["host"])
     return f"{scheme}://{ip}"
 

@@ -35,7 +35,7 @@ AREAS = [
     ("settings_vrm", "Einstellungen: VRM", "Victron-VRM-Anbindung. Zugangsdaten nur bei „Schreiben“ sichtbar."),
     ("settings_wetter", "Einstellungen: Wetter", "Standort für die Wettervorhersage."),
     ("settings_meldungen", "Einstellungen: Meldungen", "Telegram-Benachrichtigungen. Bot-Token nur bei „Schreiben“ sichtbar."),
-    ("settings_geraete", "Einstellungen: Geräte", "Shelly/Tuya/Tasmota-Geräteverwaltung. Zugangsdaten und die IP-Adressen der Geräte sind nur bei „Schreiben“ im Klartext sichtbar."),
+    ("settings_geraete", "Einstellungen: Smart Home", "Smart-Home-Verwaltung (Shelly, Tasmota, Tuya, Homematic, Sensoren, eigene Schalter). Zugangsdaten und die IP-Adressen der Geräte sind nur bei „Schreiben“ im Klartext sichtbar."),
     ("settings_anzeige", "Einstellungen: Dashboard-Kacheln", "Welche Kacheln das Dashboard zeigt und in welcher Reihenfolge."),
     ("settings_system", "Einstellungen: System", "Trockenlauf, Abfrage-Intervalle, App-Update."),
     ("account", "Eigenes Konto", "Eigenen Benutzernamen und eigenes Passwort ändern können. Bei „Kein Zugriff“ bleiben Name und Passwort fest (z.B. für einen geteilten Demo-Zugang)."),

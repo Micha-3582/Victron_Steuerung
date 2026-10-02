@@ -17,7 +17,7 @@
     <b>DANN</b> und optional <b>SONST</b>. Es gibt zwei Arten: <b>Zustand halten</b> (Geräte folgen der Bedingung, z. B. „Licht an, solange die Tür offen ist“) und <b>Ablauf</b> (startet einmal, wenn die Bedingung eintritt – mit Warten,
     Thermostat-Sollwerten, Telegram-Nachricht und eigenen Schaltern, z. B. „Warmwasser-Timer“). Fehlt ein Messwert (Sensor oder Gerät nicht erreichbar), passiert nichts. Zustands-Regeln übernehmen laufende Geräte; von Hand ausgeschaltete bleiben aus, bis die Bedingung einmal nicht mehr stimmt;
     eine „ausschalten“-Regel gewinnt gegen jede „einschalten“-Regel desselben Geräts. Schaltest du die Regeln insgesamt aus, werden laufende Abläufe abgebrochen.
-    Die Geräte richtest du unter Einstellungen → Geräte ein.
+    Die Geräte richtest du unter Einstellungen → Smart Home ein.
     <b>Änderungen werden erst mit „Speichern“ (Leiste unten) übernommen.</b></div>
   <div style="display:flex;align-items:center;gap:14px">
     <label class="switch" style="margin:0"><input type="checkbox" id="rules_enabled"><span class="slider"></span></label>
@@ -246,7 +246,7 @@ function actRow(a, branch, flow) {
       <div style="display:flex;gap:10px;flex-wrap:wrap;width:100%;align-items:center">
         <label class="chk"><input type="checkbox" class="a-spall" ${all ? 'checked' : ''} onchange="spAll(this)"> alle</label>
         ${list.map(x => `<label class="chk"><input type="checkbox" class="a-sp" value="${escH(x.id)}" ${all || (a.device_ids || []).includes(x.id) ? 'checked' : ''} ${all ? 'disabled' : ''} onchange="ruleEdited(this)"> ${escH(x.name)}</label>`).join('')}
-        ${list.length ? '' : '<span class="muted">Noch keine Thermostate – unter Einstellungen → Geräte → Homematic „Thermostate suchen“.</span>'}</div>`;
+        ${list.length ? '' : '<span class="muted">Noch keine Thermostate – unter Einstellungen → Smart Home → Homematic „Thermostate suchen“.</span>'}</div>`;
   } else if (t === 'notify') {
     body = `<b>✉ Telegram</b> <input class="a-text" placeholder="Nachricht, z.B. Warmwasser ist fertig" value="${escH(a.text || '')}" style="flex:1;min-width:220px" oninput="ruleEdited(this)">`;
   } else if (t === 'virtual') {
@@ -379,6 +379,7 @@ function ruleHtml(r) {
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <input class="r-name" placeholder="Name der Regel (Pflicht)" value="${escH(r.name)}" oninput="ruleEdited(this)" style="flex:1;min-width:160px;font-weight:600${r.name && r.name.trim() ? '' : ';border-color:#e5544a'}">
       <label class="switch" style="margin:0" title="Regel an/aus"><input type="checkbox" class="r-en" ${r.enabled !== false ? 'checked' : ''} onchange="ruleEdited(this)"><span class="slider"></span></label>
+      <button class="ghost" onclick="ruleCopy('${id}')" title="Regel kopieren">⧉</button>
       <button class="ghost" onclick="ruleDelete('${id}')" title="Regel löschen">✕</button>
     </div>
     <div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="muted">Art der Regel:</span>
@@ -427,7 +428,17 @@ function ruleRow(r) {
     <div style="flex:1;min-width:200px;cursor:pointer" onclick="editOpen('${id}')"><b>${escH(r.name || '(ohne Namen)')}</b>${st ? ' <span style="margin-left:6px">' + st + '</span>' : ''}
       <div class="muted" style="margin-top:2px">${escH(sum)}</div></div>
     <button class="ghost" onclick="editOpen('${id}')" title="Regel bearbeiten">✎</button>
+    <button class="ghost" onclick="ruleCopy('${id}')" title="Regel kopieren">⧉</button>
     <button class="ghost" onclick="ruleDelete('${id}')" title="Regel löschen">✕</button></div>`;
+}
+function ruleCopy(id) {                           // Kopie mit dem Namen "Kopie <alter Name>", zunaechst ausgeschaltet; gleich im Regel-Editor zum Anpassen
+  const src = R.find(x => x.id === id); if (!src) return;
+  const box = document.querySelector(`[data-rule="${id}"]`); if (box) syncRule(box);       // offene, noch nicht uebernommene Eingaben mitnehmen
+  const c = clone(src); c.id = 'new-' + (++newId); c.name = 'Kopie ' + (src.name || ''); c.enabled = false;
+  R.push(c); EDIT = c.id; touch(); renderRules();
+  const n = document.querySelector('.r-name'); if (n) { n.focus(); n.select(); }
+  window.scrollTo({ top: $('rules-card').offsetTop, behavior: 'smooth' });
+  savedToast('Kopie angelegt – Name anpassen, dann Speichern');
 }
 function listToggle(id, on) { const r = R.find(x => x.id === id); if (r) { r.enabled = on; touch(); } }
 function editOpen(id) { EDIT = id; renderRules(); renderWizard(); window.scrollTo({ top: $('rules-card').offsetTop, behavior: 'smooth' }); }
