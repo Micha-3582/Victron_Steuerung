@@ -221,7 +221,7 @@ function collectCond(row) {
   if (t === 'device') return v('c-dk') === 'power' ? { type: t, device_id: v('c-dev'), op: v('c-op'), value: v('c-val') } : { type: t, device_id: v('c-dev'), is: v('c-dk') };
   return { type: 'sun_tomorrow', op: v('c-op'), kwh: v('c-kwh') };
 }
-const STEP_TYPES = [['switch', 'Gerät ein-/ausschalten'], ['toggle', 'Gerät umschalten (an ↔ aus)'], ['wait', 'Warten'], ['setpoint', 'Thermostate: Solltemperatur setzen'], ['notify', 'Telegram-Nachricht senden'], ['virtual', 'Eigenen Schalter setzen / Knopf drücken']];
+const STEP_TYPES = [['switch', 'Gerät ein-/ausschalten'], ['toggle', 'Gerät umschalten (an ↔ aus)'], ['wait', 'Warten'], ['setpoint', 'Thermostate: Solltemperatur setzen'], ['notify', 'Telegram-Nachricht senden'], ['virtual', 'Eigenen Schalter setzen / Knopf drücken'], ['lock', 'Türschloss: öffnen / entriegeln / verriegeln']];
 function actRow(a, branch, flow) {
   const t = a.type || 'switch', sel = (cls, val, list, w) => `<select class="${cls}" style="width:${w || 'auto'}" onchange="ruleEdited(this)">${optHtml(list, val)}</select>`;
   let body = '';
@@ -249,6 +249,10 @@ function actRow(a, branch, flow) {
         ${list.length ? '' : '<span class="muted">Noch keine Thermostate – unter Einstellungen → Smart Home → Homematic „Thermostate suchen“.</span>'}</div>`;
   } else if (t === 'notify') {
     body = `<b>✉ Telegram</b> <input class="a-text" placeholder="Nachricht, z.B. Warmwasser ist fertig" value="${escH(a.text || '')}" style="flex:1;min-width:220px" oninput="ruleEdited(this)">`;
+  } else if (t === 'lock') {
+    const list = S.locks || [], lk = list.find(x => x.id === a.id), opts = list.map(x => [escH(x.id), '🔒 ' + escH(x.name)]); if (!lk) opts.unshift([escH(a.id), '(Schloss fehlt)']);
+    const warn = lk && a.state !== 'lock' && !lk.allow_open ? '<div style="color:#e5544a;width:100%">⚠ Dieses Schloss ist nicht zum Entriegeln/Öffnen durch Regeln freigegeben (Einstellungen → Smart Home → Türschlösser) – so lässt sich die Regel nicht speichern.</div>' : '';
+    body = `<b>🔒 Türschloss</b> ${sel('a-lid', a.id, opts)} ${sel('a-lst', a.state, [['open', 'Tür öffnen (Falle ziehen)'], ['unlock', 'entriegeln'], ['lock', 'verriegeln']])}${list.length ? '' : '<span class="muted">Noch kein Türschloss angelegt – Einstellungen → Smart Home → Homematic-Türschlösser suchen.</span>'}${warn}`;
   } else if (t === 'virtual') {
     const list = S.virtual || [], opts = list.map(x => [escH(x.id), escH(x.icon + ' ' + x.name)]); if (!list.some(x => x.id === a.id)) opts.unshift([escH(a.id), '(Schalter fehlt)']);
     body = `<b>🎚 Eigener Schalter</b> ${sel('a-vid', a.id, opts)} ${sel('a-vst', a.state, [['on', 'einschalten'], ['off', 'ausschalten'], ['toggle', 'umschalten'], ['press', 'drücken (Knopf)']])}`;
@@ -264,6 +268,7 @@ function collectAct(x) {
   if (t === 'setpoint') return { type: t, device_ids: q('a-spall').checked ? ['*'] : [...x.querySelectorAll('.a-sp:checked')].map(c => c.value), value: q('a-spv').value };
   if (t === 'notify') return { type: t, text: q('a-text').value };
   if (t === 'virtual') return { type: t, id: q('a-vid').value, state: q('a-vst').value };
+  if (t === 'lock') return { type: t, id: q('a-lid').value, state: q('a-lst').value };
   return { device_id: q('a-dev').value, state: q('a-state').value };
 }
 function collectRule(box) {
@@ -324,6 +329,7 @@ function actAddSel(sel, branch) {
     switch: () => ({ device_id: d ? d.id : '', state: branch === 'else' ? 'off' : 'on' }), toggle: () => ({ type: 'toggle', device_id: d ? d.id : '' }), wait: () => ({ type: 'wait', seconds: 60 }),
     setpoint: () => ({ type: 'setpoint', device_ids: ['*'], value: 21 }), notify: () => ({ type: 'notify', text: '' }),
     virtual: () => ({ type: 'virtual', id: ((S.virtual || [])[0] || {}).id || '', state: 'on' }),
+    lock: () => ({ type: 'lock', id: ((S.locks || [])[0] || {}).id || '', state: 'lock' }),
   };
   r[branch].push(mk[t]());
   if (t !== 'switch' && r.mode !== 'flow') { r.mode = 'flow'; r.abort_on_fall = flowAbortDefault(r); savedToast('Regel-Art auf „Ablauf“ gestellt'); }
@@ -413,10 +419,12 @@ function condSummary(c) {
   if (c.type === 'device') return 'is' in c ? `${devName(c.device_id)} ist ${c.is === 'on' ? 'an' : 'aus'}` : `${devName(c.device_id)} Leistung ${cmp} ${c.value} W`;
   return c.type;
 }
+const LOCK_WORD = { open: 'öffnen', unlock: 'entriegeln', lock: 'verriegeln' };
 const VSTATE_WORD = { on: 'an', off: 'aus', toggle: 'umschalten', press: 'drücken' };
 const actSummary = a => {
   const t = a.type || 'switch';
   if (t === 'toggle') return `umschalten: ${devName(a.device_id)}`;
+  if (t === 'lock') { const k = (S.locks || []).find(x => x.id === a.id); return `Türschloss ${k ? k.name : '?'} ${LOCK_WORD[a.state]}`; }
   if (t === 'wait') { const s = a.seconds || 0; return 'warte ' + (s % 3600 === 0 ? s / 3600 + ' h' : s % 60 === 0 ? s / 60 + ' min' : s + ' s'); }
   if (t === 'setpoint') return `Thermostate ${(a.device_ids || []).includes('*') ? '(alle)' : '(' + (a.device_ids || []).length + ')'} → ${a.value} °C`;
   if (t === 'notify') return `Telegram „${(a.text || '').slice(0, 25)}${(a.text || '').length > 25 ? '…' : ''}“`;
@@ -471,7 +479,8 @@ async function loadServer() {
   let sensors = []; try { const sj = await (await fetch('/api/sensors')).json(); sensors = Array.isArray(sj) ? sj : []; } catch (e) { /* ohne Sensoren weiter */ }
   let virt = []; try { const vj = await (await fetch('/api/virtual')).json(); virt = Array.isArray(vj) ? vj : []; } catch (e) { /* ohne */ }
   let sps = []; try { const sj = await (await fetch('/api/homematic/setpoints')).json(); sps = Array.isArray(sj) ? sj : []; } catch (e) { /* ohne */ }
-  S = { devs: Array.isArray(devs) ? devs : [], A, sensors, virtual: virt, setpoints: sps };
+  let lks = []; try { const lj = await (await fetch('/api/homematic/locks')).json(); lks = Array.isArray(lj) ? lj : []; } catch (e) { /* ohne */ }
+  S = { devs: Array.isArray(devs) ? devs : [], A, sensors, virtual: virt, setpoints: sps, locks: lks };
 }
 async function refresh() {                        // alle 10 s: Status auffrischen, den Entwurf nie anfassen
   try { await loadServer(); } catch (e) { return; }

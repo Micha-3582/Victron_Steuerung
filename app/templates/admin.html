@@ -699,7 +699,8 @@
     <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">
       <button id="hm-scan" class="ghost">Homematic-Geräte suchen</button>
       <button id="hm-sensor-scan" class="ghost">Homematic-Sensoren suchen</button>
-      <button id="hm-sp-scan" class="ghost">Homematic-Thermostate suchen</button></div>
+      <button id="hm-sp-scan" class="ghost">Homematic-Thermostate suchen</button>
+      <button id="hm-lock-scan" class="ghost">Homematic-Türschlösser suchen</button></div>
 
   
 </div>
@@ -718,16 +719,19 @@
     <button id="zb-scan" class="ghost">Zigbee-Geräte suchen</button>
     <button id="zb-sensor-scan" class="ghost">Zigbee-Sensoren suchen</button>
     <button id="zb-sp-scan" class="ghost">Zigbee-Thermostate suchen</button></div>
-  <div class="muted" style="margin-top:8px">Gefundene Sensoren und Thermostate erscheinen unten im Fenster „Sensoren &amp; Thermostate“.</div>
+  <div class="muted" style="margin-top:8px">Gefundene Sensoren und Thermostate erscheinen unten im Fenster „Sensoren, Thermostate &amp; Türschlösser“.</div>
 </div>
 
 <div class="card fam-card" id="fam-sensors" data-tab="geraete">
-  <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Sensoren &amp; Thermostate</h2>
+  <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Sensoren, Thermostate &amp; Türschlösser</h2>
     <div class="muted" style="margin:10px 0 4px">Sensoren von Homematic und Zigbee (nur lesen: Temperatur, Luftfeuchte, Fenster/Tür, Bewegung, Anwesenheit, Helligkeit, Leistung) –
       auf der Seite <a href="/rules" style="color:var(--accent);font-weight:600">Regeln</a> als Bedingung nutzbar („WENN Sensor TRUE/FALSE“ bzw. „unter/über“).</div>
     <div id="hm-sensors" style="display:flex;flex-direction:column;gap:6px"></div>
     <div class="muted" style="margin:14px 0 4px">Thermostate (Solltemperatur setzen, Homematic und Zigbee): in Regeln der Art „Ablauf“ nutzbar, zum Beispiel „alle Thermostate auf 25 °C“. Der Wert wird auf den Bereich des Geräts begrenzt (0 °C = „aus“, meist 4,5 °C).</div>
     <div id="hm-setpoints" style="display:flex;flex-direction:column;gap:6px"></div>
+    <div class="muted" style="margin:14px 0 4px">Türschlösser (Homematic IP): Der Zustand erscheint als Sensor. Zum <b>Verriegeln</b>, <b>Entriegeln</b> und <b>Öffnen</b> per Regel (Art „Ablauf“) wird das Schloss hier angelegt –
+      <b>Entriegeln und Öffnen</b> ist aus Sicherheitsgründen erst erlaubt, wenn du es beim jeweiligen Schloss ausdrücklich freigibst.</div>
+    <div id="hm-locks" style="display:flex;flex-direction:column;gap:6px"></div>
 </div>
 
 <div class="card{{ ' ro-locked' if user_perms.account != 'write' else '' }}" data-tab="system" data-area="account">
@@ -1768,6 +1772,51 @@ async function spAdd(ids) {
   loadSetpointsAdmin();
 }
 loadSetpointsAdmin();
+
+/* --- Homematic-Tuerschloesser (Aktion fuer Regeln) --- */
+async function loadLocksAdmin() {
+  let list = []; try { list = await (await fetch('/api/homematic/locks', { cache: 'no-store' })).json(); } catch (e) { return; }
+  if (!Array.isArray(list)) return;
+  document.getElementById('hm-locks').innerHTML = list.length ? list.map(x => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--border);border-radius:10px;padding:8px 10px">
+      <div style="flex:1;min-width:150px"><b>🔒 ${escH(x.name)}</b><div class="muted">${escH(x.model)}${x.room ? ' · ' + escH(x.room) : ''} · <b>${x.locked === true ? 'verriegelt' : x.locked === false ? 'entriegelt' : 'unbekannt'}</b></div></div>
+      <label class="chk" title="Aus: Regeln dürfen dieses Schloss nur verriegeln. An: Regeln dürfen es auch entriegeln und die Tür öffnen."><input type="checkbox" ${x.allow_open ? 'checked' : ''} onchange="lockAllow('${escH(x.id)}', this.checked)"> Regeln dürfen entriegeln / öffnen</label>
+      <button class="ghost" onclick="lockRename('${escH(x.id)}', this)" data-name="${escH(x.name)}" title="Umbenennen">✎</button>
+      <button class="ghost" onclick="lockRemove('${escH(x.id)}')" title="Entfernen">✕</button></div>`).join('')
+    : '<div class="muted">Noch keine Türschlösser für Regeln angelegt.</div>';
+}
+async function lockAllow(id, on) {
+  if (on && !await uiDialog({ title: 'Entriegeln und Öffnen freigeben?', message: 'Regeln der Art „Ablauf“ können dieses Schloss dann entriegeln und die Tür öffnen – auch wenn niemand zu Hause ist. Jede solche Aktion steht im Logbuch (und wird per Telegram gemeldet, falls eingerichtet).', okText: 'Freigeben' })) { loadLocksAdmin(); return; }
+  try { await shellyApi('/api/homematic/locks/' + encodeURIComponent(id), 'PATCH', { allow_open: on }); savedToast(on ? 'Freigegeben' : 'Gesperrt – betroffene Regeln wurden ausgeschaltet'); } catch (e) { shellyMsg(e.message, true); }
+  loadLocksAdmin();
+}
+async function lockRename(id, btn) {
+  const n = await uiDialog({ title: 'Türschloss umbenennen', label: 'Neuer Name', value: btn.dataset.name });
+  if (n === null) return;
+  try { await shellyApi('/api/homematic/locks/' + encodeURIComponent(id), 'PATCH', { name: n }); savedToast(); } catch (e) { shellyMsg(e.message, true); }
+  loadLocksAdmin();
+}
+async function lockRemove(id) {
+  if (!await uiDialog({ title: 'Türschloss entfernen?', message: 'Nur aus dieser Liste – am Schloss ändert sich nichts. Es wird auch aus Regeln entfernt.', okText: 'Entfernen' })) return;
+  await shellyApi('/api/homematic/locks/' + encodeURIComponent(id), 'DELETE'); savedToast('Entfernt ✓'); loadLocksAdmin();
+}
+document.getElementById('hm-lock-scan').addEventListener('click', async e => {
+  const b = e.target; b.disabled = true; shellyMsg('Türschloss-Suche läuft …');
+  try {
+    const found = await shellyApi('/api/homematic/locks/scan', 'POST');
+    const fresh = found.filter(f => !f.known);
+    shellyMsg(found.length ? `${found.length} Türschlösser gefunden, ${fresh.length} noch nicht angelegt.` : 'Keine Türschlösser gefunden.');
+    document.getElementById('shelly-found').innerHTML = fresh.map(f => `<div data-key="${escH(f.id)}" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="flex:1;min-width:150px"><b>${escH(f.name)}</b><div class="muted">${escH(f.model)}${f.room ? ' · ' + escH(f.room) : ''} · ${escH(f.address)}</div></div>
+      <button onclick="lockAdd(['${escH(f.id)}'])">Hinzufügen</button></div>`).join('');
+  } catch (err) { shellyMsg(err.message, true); }
+  b.disabled = false;
+});
+async function lockAdd(ids) {
+  try { await shellyApi('/api/homematic/locks/add', 'POST', { ids }); } catch (e) { shellyMsg(e.message, true); return; }
+  ids.forEach(i => foundAdded(i));
+  loadLocksAdmin();
+}
+loadLocksAdmin(); setInterval(loadLocksAdmin, 20000);
 
 /* --- Zigbee (Phoscon / deCONZ) --- */
 async function loadZigbeeInfo() {

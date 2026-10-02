@@ -760,6 +760,155 @@ def set_setpoints(ids: list[str], value: float) -> list[tuple]:
     return out
 
 
+# ================================================================ Tuerschloesser (HmIP-DLD): verriegeln / entriegeln / oeffnen
+# Eigenes Register. Sicherheit: Ein Schloss darf von Regeln nur ENTRIEGELT/GEOEFFNET werden, wenn dort ausdruecklich "allow_open" gesetzt ist
+# (Standard: nein); Verriegeln ist immer erlaubt. Nur in Regeln der Art "Ablauf", nie im Trockenlauf.
+LOCKS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "homematic_locks.json")
+LOCK_LEVELS = {"lock": 0, "unlock": 1, "open": 2}        # LOCK_TARGET_LEVEL: 0 verriegeln, 1 entriegeln, 2 Tuer oeffnen (Falle ziehen)
+_lock_scan: dict[str, dict] = {}
+_lock_scan_ts = 0.0
+
+
+def load_locks() -> list[dict]:
+    try:
+        with open(LOCKS_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _save_locks(items: list[dict]):
+    with _lock, open(LOCKS_PATH, "w", encoding="utf-8") as f:
+        json.dump(items, f, indent=2, ensure_ascii=False)
+
+
+def lock_id(address: str) -> str:
+    return "hmK-" + address.replace(":", "-")
+
+
+def _probe_lock_channel(item: dict) -> dict | None:
+    try:
+        desc = _param_desc(item["interface"], item["address"])
+    except HomematicError:
+        return None
+    if _writable(desc.get("LOCK_TARGET_LEVEL")):
+        return {**item, "id": lock_id(item["address"])}
+    return None
+
+
+def discover_locks(known_ids: set[str]) -> list[dict]:
+    global _lock_scan_ts
+    devices = [d for d in (_call("Device.listAllDetail") or []) if d and d.get("interface") not in SKIP_INTERFACES and d.get("channels")]
+    rooms: dict[str, str] = {}
+    try:
+        for room in _call("Room.getAll") or []:
+            for cid in room.get("channelIds") or []:
+                rooms[str(cid)] = room.get("name") or ""
+    except (HomematicError, AttributeError, TypeError):
+        pass
+    items = []
+    for dev in devices:
+        dtype, dev_name = str(dev.get("type") or ""), str(dev.get("name") or "")
+        for ch in dev["channels"]:
+            if "LOCK" not in str(ch.get("channelType") or "").upper():
+                continue
+            addr, ch_name = str(ch["address"]), str(ch.get("name") or "")
+            items.append({"address": addr, "interface": dev["interface"], "model": dtype,
+                          "name": (dev_name if _is_default_name(ch_name, addr, dtype) else ch_name) or addr,
+                          "room": rooms.get(str(ch.get("id")), "") or rooms.get(str(dev.get("id")), "")})
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        found = [f for f in ex.map(_probe_lock_channel, items) if f]
+    with _lock:
+        _lock_scan.clear()
+        _lock_scan.update({f["id"]: f for f in found})
+        _lock_scan_ts = time.time()
+    for f in found:
+        f["known"] = f["id"] in known_ids
+    return found
+
+
+def locks_scan() -> list[dict]:
+    return discover_locks({x["id"] for x in load_locks()})
+
+
+def add_locks(ids: list[str]) -> list[dict]:
+    if time.time() - _lock_scan_ts > SCAN_TTL_S or any(i not in _lock_scan for i in ids):
+        discover_locks(set())
+    items = load_locks()
+    have = {x["id"] for x in items}
+    added = []
+    for i in ids:
+        f = _lock_scan.get(i)
+        if not f:
+            raise HomematicError("Türschloss nicht gefunden (in der CCU entfernt?)")
+        if i in have:
+            continue
+        item = {k: f[k] for k in ("id", "address", "interface", "model", "room", "name")}
+        item["allow_open"] = False                         # Entriegeln/Oeffnen durch Regeln ist erst nach ausdruecklicher Freigabe moeglich
+        items.append(item)
+        added.append(item)
+    if added:
+        _save_locks(items)
+    return added
+
+
+def update_lock(lid: str, name: str | None = None, allow_open: bool | None = None) -> bool:
+    items = load_locks()
+    for x in items:
+        if x["id"] == lid:
+            if name is not None and name.strip():
+                x["name"] = name.strip()[:60]
+            if allow_open is not None:
+                x["allow_open"] = bool(allow_open)
+            _save_locks(items)
+            return True
+    return False
+
+
+def remove_lock(lid: str) -> bool:
+    items = load_locks()
+    keep = [x for x in items if x["id"] != lid]
+    if len(keep) == len(items):
+        return False
+    _save_locks(keep)
+    return True
+
+
+def lock_state(x: dict):
+    """True = verriegelt, False = entriegelt, None = unbekannt/nicht lesbar."""
+    try:
+        t = str(_get_value(x["interface"], x["address"], "LOCK_STATE")).strip().upper()
+        if _unreach(x):
+            return None
+        return True if t in ("1", "LOCKED") else False if t in ("2", "UNLOCKED") else None
+    except (HomematicError, KeyError, TypeError, ValueError):
+        return None
+
+
+def list_locks_with_state() -> list[dict]:
+    items = load_locks()
+    return [{**x, "locked": lock_state(x)} for x in items]
+
+
+def lock_action(lid: str, action: str) -> str:
+    """'lock' | 'unlock' | 'open'. Entriegeln/Oeffnen nur mit Freigabe (allow_open). Rueckgabe: Name des Schlosses."""
+    if action not in LOCK_LEVELS:
+        raise HomematicError("Unbekannte Schloss-Aktion")
+    x = next((y for y in load_locks() if y["id"] == lid), None)
+    if not x:
+        raise HomematicError("Türschloss existiert nicht mehr")
+    if action != "lock" and not x.get("allow_open"):
+        raise HomematicError(f"{x['name']}: Entriegeln/Öffnen durch Regeln ist nicht freigegeben (Einstellungen → Smart Home → Türschlösser)")
+    params = {"interface": x["interface"], "address": x["address"], "valueKey": "LOCK_TARGET_LEVEL", "value": LOCK_LEVELS[action]}
+    _pushed.pop((x["interface"], x["address"], "LOCK_STATE"), None)
+    try:
+        _call("Interface.setValue", {**params, "type": "int"})
+    except HomematicError:
+        _call("Interface.setValue", {**params, "type": "integer"})            # manche CCU-Staende erwarten den langen Typnamen
+    return x["name"]
+
+
 # ================================================================ Push: XML-RPC-Rueckkanal der CCU (wie ioBroker hm-rpc)
 # Die App meldet sich per `init` bei den Funk-Schnittstellen der CCU an; die CCU schickt dann nur bei Aenderungen ein `event`.
 # Faellt der Rueckkanal aus (Port gesperrt, CCU neu gestartet ...), fragt die App wie bisher ab - die Regeln laufen immer weiter.

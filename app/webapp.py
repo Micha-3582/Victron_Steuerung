@@ -166,7 +166,8 @@ ENDPOINT_AREA = {
     "api_zigbee_sensor_add": "settings_geraete", "api_zigbee_sp_scan": "settings_geraete", "api_zigbee_sp_add": "settings_geraete",
     "api_homematic_sensor_scan": "settings_geraete", "api_homematic_sensor_add": "settings_geraete",
     "api_sensor_modify": "settings_geraete", "api_sensors_list": "dashboard",
-    "api_sensors_order": "settings_geraete", "api_virtual_order": "settings_geraete", "api_virtual_list": "dashboard", "api_virtual_press": "dashboard", "api_virtual_set": "dashboard",
+    "api_sensors_order": "settings_geraete", "api_virtual_order": "settings_geraete",
+    "api_lock_list": "dashboard", "api_lock_scan": "settings_geraete", "api_lock_add": "settings_geraete", "api_lock_modify": "settings_geraete", "api_virtual_list": "dashboard", "api_virtual_press": "dashboard", "api_virtual_set": "dashboard",
     "api_virtual_add": "settings_geraete", "api_virtual_modify": "settings_geraete",
     "api_setpoint_scan": "settings_geraete", "api_setpoint_add": "settings_geraete", "api_setpoint_list": "dashboard",
     "api_setpoint_modify": "settings_geraete",
@@ -1247,6 +1248,19 @@ class Controller:
                         jobs.append(("setpoint" if not err else "fail", name, f"{name}: Solltemperatur {v:g} °C" if not err else f"{name}: Solltemperatur setzen fehlgeschlagen ({err})", err))
                 except homematic.HomematicError as e:
                     jobs.append(("fail", "Thermostate", f"Solltemperatur setzen fehlgeschlagen ({e})", str(e)))
+        elif t == "lock":
+            what = {"lock": "verriegelt", "unlock": "entriegelt", "open": "geöffnet"}[st["state"]]
+            lname = next((k["name"] for k in homematic.load_locks() if k["id"] == st["id"]), st["id"])
+            if dry:
+                jobs.append(("lock", lname, f"Türschloss {lname} würde {what}", None))
+            else:
+                try:
+                    homematic.lock_action(st["id"], st["state"])
+                    jobs.append(("lock", lname, f"Türschloss {lname} {what}", None))
+                    if st["state"] != "lock":
+                        notify.push("rules", f"🔓 Türschloss {lname} {what} (Regel „{rule}“)", cfg)
+                except homematic.HomematicError as e:
+                    jobs.append(("fail", lname, f"Türschloss {lname}: {e}", str(e)))
         elif t == "notify":
             sent = False if dry else notify.message(st["text"], cfg)
             jobs.append(("notify", "Telegram", f"Nachricht {'gesendet' if sent else ('würde gesendet' if dry else 'NICHT gesendet (Telegram nicht eingerichtet)')}: {st['text']}", None if (sent or dry) else "Telegram nicht eingerichtet"))
@@ -2030,6 +2044,15 @@ def api_automation_save():
             norm_items = [rules.normalize_rule(x) for x in items]         # nur pruefen
             if any(not str(x.get("name") or "").strip() for x in items):
                 raise rules.RuleError("Jede Regel braucht einen Namen")
+            locks = {k["id"]: k for k in homematic.load_locks()}
+            for x in norm_items:                                         # Entriegeln/Oeffnen nur bei Schloessern mit ausdruecklicher Freigabe
+                for a in x.get("then", []) + x.get("else", []):
+                    if a.get("type") == "lock":
+                        lk = locks.get(a["id"])
+                        if not lk:
+                            raise rules.RuleError(f"Regel „{x['name']}“: Das Türschloss existiert nicht (mehr)")
+                        if a["state"] != "lock" and not lk.get("allow_open"):
+                            raise rules.RuleError(f"Regel „{x['name']}“: {lk['name']} ist nicht zum Entriegeln/Öffnen durch Regeln freigegeben (Einstellungen → Smart Home → Türschlösser)")
         dev_updates = []
         for x in body.get("devices") or []:
             if not isinstance(x, dict) or not x.get("id"):
@@ -2542,6 +2565,56 @@ def api_virtual_set(vid):
         return jsonify(error="Schalter nicht gefunden"), 404
     ctrl._rules_wake.set()
     return jsonify(ok=True)
+
+
+@app.route("/api/homematic/locks", methods=["GET"])
+def api_lock_list():
+    try:
+        return jsonify(homematic.list_locks_with_state())
+    except Exception as e:                               # noqa: BLE001
+        log.warning("Schlossliste: %s", e)
+        return jsonify([])
+
+
+@app.route("/api/homematic/locks/scan", methods=["POST"])
+def api_lock_scan():
+    try:
+        return jsonify(homematic.locks_scan())
+    except homematic.HomematicError as e:
+        return jsonify(error=str(e)), 400
+
+
+@app.route("/api/homematic/locks/add", methods=["POST"])
+def api_lock_add():
+    ids = (request.get_json(silent=True) or {}).get("ids")
+    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+        return jsonify(error="ids fehlt"), 400
+    try:
+        return jsonify(added=homematic.add_locks(ids))
+    except homematic.HomematicError as e:
+        return jsonify(error=str(e)), 400
+
+
+@app.route("/api/homematic/locks/<lid>", methods=["PATCH", "DELETE"])
+def api_lock_modify(lid):
+    if request.method == "DELETE":
+        ok = homematic.remove_lock(lid)
+        if ok:
+            rules.remove_device(lid)
+    else:
+        body = request.get_json(silent=True) or {}
+        ok = homematic.update_lock(lid, name=body.get("name") if isinstance(body.get("name"), str) else None,
+                                   allow_open=body.get("allow_open") if isinstance(body.get("allow_open"), bool) else None)
+        if ok and body.get("allow_open") is False:                 # Freigabe entzogen: Regeln mit Entriegeln/Oeffnen fuer dieses Schloss ausschalten
+            items = rules.list_rules()
+            changed = False
+            for r in items:
+                if r.get("when") and any(a.get("type") == "lock" and a.get("id") == lid and a.get("state") != "lock" for a in r["then"] + r["else"]) and r.get("enabled", True):
+                    r["enabled"] = False
+                    changed = True
+            if changed:
+                rules.replace_all(items)
+    return jsonify(ok=True) if ok else (jsonify(error="nicht gefunden"), 404)
 
 
 @app.route("/api/homematic/setpoints", methods=["GET"])

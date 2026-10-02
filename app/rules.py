@@ -217,7 +217,7 @@ def normalize_condition(c: dict) -> dict:
             "from": _hhmm(c.get("from", "00:00"), "Von"), "to": _hhmm(c.get("to", "24:00"), "Bis")}
 
 
-STEP_TYPES = ("switch", "toggle", "wait", "setpoint", "notify", "virtual")
+STEP_TYPES = ("switch", "toggle", "wait", "setpoint", "notify", "virtual", "lock")
 MAX_WAIT_S = 7 * 86400
 
 
@@ -237,6 +237,12 @@ def _normalize_action(a: dict, flow: bool = False) -> dict:
         if st not in ("on", "off"):
             raise RuleError("Aktion: einschalten oder ausschalten")
         return {"device_id": str(a["device_id"]), "state": st}
+    if t == "lock":                                  # Tuerschloss (Homematic IP): verriegeln / entriegeln / oeffnen - Freigabe wird beim Speichern geprueft
+        lid = str(a.get("id") or "").strip()
+        st = str(a.get("state", "lock")).strip().lower()
+        if not lid or st not in ("lock", "unlock", "open"):
+            raise RuleError("Türschloss: Schloss und Aktion wählen")
+        return {"type": t, "id": lid, "state": st}
     if t == "toggle":                                # Geraet umschalten: laeuft es, wird es ausgeschaltet - sonst eingeschaltet
         if not a.get("device_id"):
             raise RuleError("Aktion: Gerät wählen")
@@ -459,7 +465,7 @@ def remove_device(dev_id: str):
     d = load()
     keep, changed = [], False
     for r in d["rules"]:
-        if "when" in r and (dev_id in devices_of(r) or any(dev_id in (a.get("device_ids") or []) for a in r["then"] + r["else"])):
+        if "when" in r and (dev_id in devices_of(r) or any(dev_id in (a.get("device_ids") or []) or (a.get("type") == "lock" and a.get("id") == dev_id) for a in r["then"] + r["else"])):
             def strip(lst):
                 out = []
                 for a in lst:
@@ -467,6 +473,8 @@ def remove_device(dev_id: str):
                         ids = [i for i in a["device_ids"] if i != dev_id]
                         if ids:
                             out.append({**a, "device_ids": ids})
+                    elif a.get("type") == "lock" and a.get("id") == dev_id:
+                        continue
                     elif not (a.get("type", "switch") in ("switch", "toggle") and a["device_id"] == dev_id):
                         out.append(a)
                 return out
