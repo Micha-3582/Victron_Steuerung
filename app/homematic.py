@@ -500,6 +500,8 @@ def read_sensor(sen: dict):
             val = None
         elif sen.get("binary"):
             val = _truthy(v) if isinstance(v, (bool, str)) and not str(v).strip().isdigit() else bool(float(v))          # Drehgriff: 0 zu, 1 gekippt, 2 offen -> offen = wahr
+            if sen.get("invert"):
+                val = not val                              # Sensor andersherum verschaltet: Bedeutung von TRUE/FALSE vertauschen
         else:
             val = round(float(v), 1)
     except (HomematicError, KeyError, TypeError, ValueError):
@@ -531,7 +533,7 @@ def add_sensors(ids: list[str]) -> list[dict]:
     return added
 
 
-def update_sensor(sensor_id_: str, name: str | None = None, show: bool | None = None) -> bool:
+def update_sensor(sensor_id_: str, name: str | None = None, show: bool | None = None, invert: bool | None = None) -> bool:
     items = load_sensors()
     for s in items:
         if s["id"] == sensor_id_:
@@ -539,6 +541,9 @@ def update_sensor(sensor_id_: str, name: str | None = None, show: bool | None = 
                 s["name"] = name.strip()[:60] or s["name"]
             if show is not None:
                 s["show"] = bool(show)
+            if invert is not None:
+                s["invert"] = bool(invert)
+                _value_cache.pop(s["id"], None)           # neuer Wert gleich mit der neuen Bedeutung
             _save_sensors(items)
             return True
     return False

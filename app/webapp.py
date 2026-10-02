@@ -2385,7 +2385,8 @@ def api_sensor_modify(sensor_id):
         ok = homematic.remove_sensor(sensor_id)
     else:
         body = request.get_json(silent=True) or {}
-        ok = homematic.update_sensor(sensor_id, name=body.get("name"), show=body.get("show") if isinstance(body.get("show"), bool) else None)
+        ok = homematic.update_sensor(sensor_id, name=body.get("name"), show=body.get("show") if isinstance(body.get("show"), bool) else None,
+                                      invert=body.get("invert") if isinstance(body.get("invert"), bool) else None)
     return jsonify(ok=True) if ok else (jsonify(error="nicht gefunden"), 404)
 
 
