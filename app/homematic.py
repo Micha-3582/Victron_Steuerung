@@ -294,7 +294,8 @@ def status(d: dict) -> dict:
         dp = d.get("datapoint", "STATE")
         v = _call("Interface.getValue", {"interface": d["interface"], "address": d["address"], "valueKey": dp})
         if _unreach(d):
-            return {"online": False, "on": None, "power": None}
+            return {"online": False, "on": None, "power": None,
+                    "error": "Die CCU meldet das Gerät als nicht erreichbar (UNREACH) – Funkverbindung/Strom prüfen"}
         on = bool(v) if dp == "STATE" else float(v or 0) > 0
         power = None
         if d.get("power_addr"):
@@ -304,8 +305,8 @@ def status(d: dict) -> dict:
             except (HomematicError, TypeError, ValueError):
                 power = None
         return {"online": True, "on": on, "power": power}
-    except (HomematicError, KeyError, TypeError, ValueError):
-        return {"online": False, "on": None, "power": None}
+    except (HomematicError, KeyError, TypeError, ValueError) as e:
+        return {"online": False, "on": None, "power": None, "error": str(e) or e.__class__.__name__}
 
 
 def _set_value(d: dict, key: str, typ: str, value):

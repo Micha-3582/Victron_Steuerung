@@ -1269,7 +1269,7 @@ function savedToast(text = 'Gespeichert ✓') {
 }
 function shellyMsg(t, err, id = 'shelly-msg') { const m = document.getElementById(id); m.textContent = t || ''; m.style.color = err ? '#e5544a' : ''; }
 function shellyStatText(d) {
-  return !d.online ? 'nicht erreichbar' : (d.on ? 'an' : 'aus') + (d.power != null ? ` · ${Math.round(d.power)} W` : '');
+  return !d.online ? 'nicht erreichbar' + (d.error ? ' – ' + d.error : '') : (d.on ? 'an' : 'aus') + (d.power != null ? ` · ${Math.round(d.power)} W` : '');
 }
 /* Nur Status/Watt/Knopffarbe aktualisieren - Eingabefelder und offene Symbolauswahl bleiben unangetastet */
 async function refreshShellyStatus() {
@@ -1296,7 +1296,7 @@ async function loadShellyAdmin() {
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <button class="ghost" style="font-size:22px;padding:4px 10px" title="Symbol wählen" onclick="shellyPickIcon('${id}')">${escH(d.icon)}</button>
         <div style="flex:1;min-width:150px"><b>${escH(d.name)}</b>
-          <div class="muted">${escH(d.model)} · ${escH(d.ip)} · <span class="dev-stat">${shellyStatText(d)}</span></div></div>
+          <div class="muted">${escH(d.model)} · ${escH(d.ip)} · <span class="dev-stat">${escH(shellyStatText(d))}</span></div></div>
         <div style="display:flex;gap:8px;margin-left:auto">
         <button class="ghost" onclick="shellyRename('${id}', this)" data-name="${escH(d.name)}" title="Umbenennen">✎</button>
         <button class="ghost dev-power" data-on="${d.on ? '1' : '0'}" style="${d.on ? POWER_ON_STYLE : ''}" onclick="shellyTest('${id}', this)" ${d.online && d.switchable !== false ? '' : 'disabled'} title="${d.switchable === false ? 'Nur Überwachung – nicht schaltbar' : 'Testschalten'}">${PWR_ICON}</button>

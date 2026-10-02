@@ -1042,7 +1042,7 @@ class Controller:
             soc = None
         ctx = {"soc": soc, "price_ct": price_ct, "prices_today": prices, "pv_tomorrow": st.get("pv_tom")}
         used = {c.get("sensor_id") for r in rules.list_rules() if r.get("enabled", True)
-                for c in (r.get("on") or []) + (r.get("off") or []) if c.get("type") == "sensor"}
+                for c in rules.all_conditions(r) if c.get("type") == "sensor"}
         if used:                                         # nur die Sensoren abfragen, die eine aktive Regel auch braucht
             try:
                 sens = [s for s in homematic.load_sensors() if s["id"] in used]
@@ -1062,7 +1062,7 @@ class Controller:
                     system = self.last_system if time.time() - self.last_system_ts < 45 else None
                     if system:
                         dry = bool(cfg.get("surplus_dry_run", True))
-                        ruled = {r["device_id"] for r in rules.list_rules()}         # Geraete mit Regeln gehoeren den Regeln (Schutz vor Doppelschaltung)
+                        ruled = {i for r in rules.list_rules() for i in rules.devices_of(r)}         # Geraete mit Regeln gehoeren den Regeln (Schutz vor Doppelschaltung)
                         devs = sorted((d for d in shelly.list_with_status() if d["id"] not in ruled), key=lambda d: d.get("prio") or 10 ** 6)   # Prioritaet
                         if dry:      # Trockenlauf: mit gedachtem statt echtem Zustand rechnen
                             for d in devs:
@@ -1143,7 +1143,9 @@ class Controller:
                                 rule_engine.mark_armed(d["id"], now)
                             except shelly.ShellyError as e:
                                 log.warning("Sicherheits-Timer %s: %s", d["name"], e)
-                    for act in rule_engine.step(now, self._rules_ctx(cfg, system, now), cfg, devs, all_rules):
+                    ctx = self._rules_ctx(cfg, system, now)
+                    ctx["devices"] = {d["id"]: d for d in devs}                      # Zustand/Leistung anderer Geraete als Bedingung
+                    for act in rule_engine.step(now, ctx, cfg, devs, rules.compile_all(all_rules)):
                         self._apply_rule(act, dry, cfg)
                     if time.time() - last_flush > 60:
                         rule_engine.flush()
@@ -1816,7 +1818,7 @@ def _scan_networks() -> list[str]:
 def api_shelly_list():
     """?dashboard=1: nur die in den Einstellungen fuers Dashboard freigegebenen."""
     devs = shelly.list_with_status(only_shown=request.args.get("dashboard") == "1")
-    ruled = {r["device_id"] for r in rules.list_rules() if r.get("enabled", True)} if rules.enabled(store.load_config()) else set()
+    ruled = {i for r in rules.list_rules() if r.get("enabled", True) for i in rules.devices_of(r)} if rules.enabled(store.load_config()) else set()
     show_ip = auth.has_level(g.perms, "settings_geraete", "write")
     for d in devs:
         d["automated"] = bool(d.get("auto")) or d["id"] in ruled      # "Auto"-Hinweis im Dashboard: Ueberschuss-Automatik oder aktive Regel
@@ -1845,7 +1847,7 @@ def api_rules_get():
     return jsonify({"enabled": rules.enabled(cfg), "dry_run": rules.dry_run(cfg),
                     "settings": rules.settings(cfg), "defaults": rules.DEFAULTS, "bounds": rules.BOUNDS,
                     "tariff_mode": cfg.get("tariff_mode", "tibber"),
-                    "rules": rules.list_rules(), "status": dict(rule_engine.status), "owner": dict(rule_engine.owner),
+                    "rules": [n for r in rules.list_rules() for n in rules.to_new(r)], "status": rules.rollup_status(dict(rule_engine.status)), "owner": dict(rule_engine.owner),
                     "events": autolog.recent("rules", 8)})
 
 
@@ -1911,8 +1913,7 @@ def api_automation_save():
         if items is not None:
             if not isinstance(items, list) or not all(isinstance(x, dict) for x in items):
                 raise rules.RuleError("Regeln: Liste erwartet")
-            for x in items:
-                rules.normalize_rule(x)                                   # nur pruefen
+            norm_items = [rules.normalize_rule(x) for x in items]         # nur pruefen
         dev_updates = []
         for x in body.get("devices") or []:
             if not isinstance(x, dict) or not x.get("id"):
@@ -1933,7 +1934,7 @@ def api_automation_save():
             raise rules.RuleError("Reihenfolge ungültig")
         # Ein Geraet gehoert entweder zur Ueberschuss-Automatik ODER zu Regeln
         auto_ids = {d for d, auto, _ in dev_updates if auto} if body.get("devices") is not None else {d["id"] for d in shelly.load_devices() if d.get("auto")}
-        rule_devs = {x.get("device_id") for x in items} if items is not None else {r["device_id"] for r in rules.list_rules()}
+        rule_devs = {i for x in norm_items for i in rules.devices_of(x)} if items is not None else {i for r in rules.list_rules() for i in rules.devices_of(r)}
         both = auto_ids & rule_devs
         if both:
             names = {d["id"]: d["name"] for d in shelly.load_devices()}

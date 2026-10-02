@@ -44,7 +44,7 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 RULES_PATH = os.path.join(_DIR, "rules.json")
 STATE_PATH = os.path.join(_DIR, "rules_state.json")
 
-TYPES = ("time", "price", "cheapest", "budget", "soc", "sun_tomorrow", "at", "sensor")
+TYPES = ("time", "price", "cheapest", "budget", "soc", "sun_tomorrow", "at", "sensor", "device")
 WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 VERSION = 2
 
@@ -174,6 +174,13 @@ def normalize_condition(c: dict) -> dict:
     if t == "time":
         days = sorted({int(x) for x in (c.get("days") or []) if str(x).isdigit() and 0 <= int(x) <= 6})
         return {"type": t, "from": _hhmm(c.get("from", "00:00"), "Von"), "to": _hhmm(c.get("to", "24:00"), "Bis"), "days": days if len(days) < 7 else []}
+    if t == "device":                                # Zustand/Leistung eines anderen Geraets
+        did = str(c.get("device_id") or "").strip()
+        if not did:
+            raise RuleError("Gerät wählen")
+        if c.get("op") in ("below", "above"):
+            return {"type": t, "device_id": did, "op": c["op"], "value": _num(c.get("value"), 0, 100000, "Leistung (W)")}
+        return {"type": t, "device_id": did, "is": "on" if str(c.get("is", "on")).strip().lower() in ("on", "1", "true", "an") else "off"}
     if t == "sensor":
         sid = str(c.get("sensor_id") or "").strip()
         if not sid:
@@ -202,7 +209,140 @@ def normalize_condition(c: dict) -> dict:
             "from": _hhmm(c.get("from", "00:00"), "Von"), "to": _hhmm(c.get("to", "24:00"), "Bis")}
 
 
+def _normalize_action(a: dict) -> dict:
+    if not isinstance(a, dict) or not a.get("device_id"):
+        raise RuleError("Aktion: Gerät wählen")
+    st = str(a.get("state", "on")).strip().lower()
+    if st not in ("on", "off"):
+        raise RuleError("Aktion: einschalten oder ausschalten")
+    return {"device_id": str(a["device_id"]), "state": st}
+
+
+def _states(r: dict) -> dict[str, tuple]:
+    """Geraet -> (Zustand bei DANN, Zustand bei SONST); None = in dem Zweig nichts."""
+    out: dict[str, list] = {}
+    for i, key in enumerate(("then", "else")):
+        for a in r.get(key) or []:
+            out.setdefault(a["device_id"], [None, None])[i] = a["state"]
+    return {k: tuple(v) for k, v in out.items()}
+
+
+def _group(mode: str, conds: list, neg: bool = False) -> dict:
+    return {"type": "group", "mode": mode, "not": neg, "conds": conds}
+
+
+STATEFUL = ("at", "budget")          # merken sich Tageszustand je Regel - gehen nur als einfache Liste, nicht in verschachtelten Gruppen
+
+
+def compile_rule(r: dict) -> list[dict]:
+    """Baukasten-Regel (WENN / DANN / SONST) in die Regeln fuer die Engine uebersetzen (je Geraet eine). Alte Regeln (on/off) bleiben unveraendert.
+    DANN an + SONST aus = 'Einschalten, wenn' mit Selbst-Ausschalten; nur DANN an = bleibt an (nie automatisch aus); nur DANN aus = reiner
+    Ausschalt-Timer; SONST gilt, wenn die Bedingung NICHT zutrifft (fehlende Daten: dann passiert weder DANN noch SONST)."""
+    if "when" not in r:
+        return [r]
+    mode, conds = r["when"]["mode"], r["when"]["conds"]
+    pos_on = conds if mode == "all" else [_group("any", conds)]
+    pos_off = conds if (mode == "any" or len(conds) == 1) else [_group("all", conds)]
+    neg = [_group(mode, conds, True)]
+    never = [{"type": "never"}]
+    states = _states(r)
+    out = []
+    for dev_id, (t, e) in states.items():
+        if t == "on" and e == "off":
+            on, off = pos_on, []
+        elif t == "off" and e == "on":
+            on, off = neg, []
+        elif t == "on":
+            on, off = pos_on, never
+        elif e == "on":
+            on, off = neg, never
+        elif t == "off":
+            on, off = [], pos_off
+        else:
+            on, off = [], neg
+        for lst in (on, off):
+            for c in lst:
+                if c["type"] == "group" and any(x["type"] in STATEFUL for x in c["conds"]):
+                    raise RuleError("„Uhrzeit (einmal pro Tag)“ und „Laufzeit pro Tag“ gehen nur in einfachen Regeln: nur UND-Bedingungen, ohne SONST für andere Geräte und ohne Umkehrung")
+        cid = r["id"] if len(states) == 1 else f"{r['id']}~{dev_id}"
+        out.append({"id": cid, "name": r.get("name", ""), "device_id": dev_id, "enabled": r.get("enabled", True), "on": on, "off": off, "src": r["id"]})
+    return out
+
+
+def compile_all(items: list[dict]) -> list[dict]:
+    out = []
+    for r in items:
+        try:
+            out.extend(compile_rule(r))
+        except RuleError:
+            continue                                    # nicht uebersetzbare Regel nie ausfuehren (beim Speichern wird sie ohnehin abgelehnt)
+    return out
+
+
+def devices_of(r: dict) -> list[str]:
+    """Geraete, die eine Regel schaltet."""
+    if "when" not in r:
+        return [r["device_id"]] if r.get("device_id") else []
+    seen: list[str] = []
+    for a in (r.get("then") or []) + (r.get("else") or []):
+        if a["device_id"] not in seen:
+            seen.append(a["device_id"])
+    return seen
+
+
+def all_conditions(r: dict) -> list[dict]:
+    return list(r["when"]["conds"]) if "when" in r else (r.get("on") or []) + (r.get("off") or [])
+
+
+def to_new(r: dict) -> list[dict]:
+    """Alte Regel (Einschalten/Ausschalten) in der Baukasten-Form anzeigen (WENN / DANN / SONST). Mit beiden Teilen werden es zwei Regeln."""
+    if "when" in r:
+        return [r]
+    dev, on, off = r["device_id"], r.get("on") or [], r.get("off") or []
+    base = {"name": r.get("name", ""), "device_id": dev, "enabled": r.get("enabled", True)}
+    act = lambda s: [{"device_id": dev, "state": s}]       # noqa: E731
+    if on and not off:
+        return [{**base, "id": r["id"], "when": {"mode": "all", "conds": on}, "then": act("on"), "else": act("off")}]
+    if off and not on:
+        return [{**base, "id": r["id"], "when": {"mode": "any", "conds": off}, "then": act("off"), "else": []}]
+    return [{**base, "id": r["id"], "when": {"mode": "all", "conds": on}, "then": act("on"), "else": []},
+            {**base, "id": r["id"] + "b", "when": {"mode": "any", "conds": off}, "then": act("off"), "else": []}]
+
+
+def rollup_status(status: dict) -> dict:
+    """Engine-Status (je Geraet einer Regel) auf die Regel zusammenfassen: 'laeuft' gewinnt vor Pause vor aus."""
+    rank = {"on": 3, "paused": 2, "off": 1, "disabled": 0}
+    out: dict[str, dict] = {}
+    for cid, st in status.items():
+        rid = cid.split("~")[0]
+        if rid not in out or rank.get(st.get("state"), 0) > rank.get(out[rid].get("state"), 0):
+            out[rid] = st
+    return out
+
+
 def normalize_rule(body: dict, rule_id: str | None = None) -> dict:
+    if "when" in body:
+        w = body.get("when") or {}
+        mode = "any" if w.get("mode") == "any" else "all"
+        conds = [normalize_condition(c) for c in (w.get("conds") or [])]
+        if not conds:
+            raise RuleError("Mindestens eine Bedingung (WENN) angeben")
+        then = [_normalize_action(a) for a in (body.get("then") or [])]
+        other = [_normalize_action(a) for a in (body.get("else") or [])]
+        if not then and not other:
+            raise RuleError("Mindestens eine Aktion (DANN) angeben")
+        for key, lst in (("DANN", then), ("SONST", other)):
+            ids = [a["device_id"] for a in lst]
+            if len(ids) != len(set(ids)):
+                raise RuleError(f"{key}: dasselbe Gerät kommt mehrfach vor")
+        for dev_id, (t, e) in _states({"then": then, "else": other}).items():
+            if t and t == e:
+                raise RuleError("Dasselbe Gerät soll bei DANN und SONST gleich geschaltet werden – das ergibt keinen Sinn")
+        r = {"id": rule_id or uuid.uuid4().hex[:8], "name": str(body.get("name") or "").strip()[:60],
+             "device_id": (then or other)[0]["device_id"], "enabled": bool(body.get("enabled", True)),
+             "when": {"mode": mode, "conds": conds}, "then": then, "else": other}
+        compile_rule(r)                                  # prueft die Uebersetzbarkeit (RuleError)
+        return r
     on = [normalize_condition(c) for c in (body.get("on") if body.get("on") is not None else body.get("conditions") or [])]
     off = [normalize_condition(c) for c in (body.get("off") or [])]
     if not on and not off:
@@ -226,7 +366,7 @@ def update_rule(rule_id: str, body: dict) -> dict | None:
     d = load()
     for i, r in enumerate(d["rules"]):
         if r["id"] == rule_id:
-            merged = {**r, **{k: v for k, v in body.items() if k in ("name", "device_id", "enabled", "on", "off")}}
+            merged = {**r, **{k: v for k, v in body.items() if k in ("name", "device_id", "enabled", "on", "off", "when", "then", "else")}}
             d["rules"][i] = normalize_rule(merged, rule_id)
             _save(d)
             return d["rules"][i]
@@ -256,8 +396,19 @@ def delete_rule(rule_id: str) -> bool:
 
 def remove_device(dev_id: str):
     d = load()
-    keep = [r for r in d["rules"] if r["device_id"] != dev_id]
-    if len(keep) != len(d["rules"]):
+    keep, changed = [], False
+    for r in d["rules"]:
+        if "when" in r and dev_id in devices_of(r):
+            r = {**r, "then": [a for a in r["then"] if a["device_id"] != dev_id], "else": [a for a in r["else"] if a["device_id"] != dev_id]}
+            changed = True
+            if not r["then"] and not r["else"]:
+                continue
+            r["device_id"] = (r["then"] or r["else"])[0]["device_id"]
+        elif "when" not in r and r["device_id"] == dev_id:
+            changed = True
+            continue
+        keep.append(r)
+    if changed:
         d["rules"] = keep
         _save(d)
 
@@ -299,6 +450,30 @@ def eval_condition(c: dict, ctx: dict, ran_min: float = 0.0, fired_today: bool =
     """(erfuellt?, Klartext). None = fehlende Daten (zaehlt als nicht erfuellt)."""
     now = ctx["now"]
     t = c["type"]
+    if t == "never":                                 # intern: 'Ausschalt-Bedingung', die nie zutrifft (Geraet bleibt nach DANN an)
+        return False, "nie"
+    if t == "group":                                 # intern: UND/ODER, optional umgekehrt (SONST); fehlende Daten bleiben 'unbekannt'
+        res = [eval_condition(x, ctx, ran_min, fired_today, side) for x in c["conds"]]
+        oks = [r[0] for r in res]
+        if c["mode"] == "all":
+            v = False if any(o is False for o in oks) else (None if any(o is None for o in oks) else True)
+        else:
+            v = True if any(o is True for o in oks) else (None if any(o is None for o in oks) else False)
+        if c.get("not") and v is not None:
+            v = not v
+        txt = (" UND " if c["mode"] == "all" else " ODER ").join(r[1] for r in res)
+        return v, ("nicht (" + txt + ")") if c.get("not") else txt
+    if t == "device":
+        info = (ctx.get("devices") or {}).get(c.get("device_id"))
+        if not info:
+            return None, f"Gerät {c.get('device_id')} (nicht mehr vorhanden)"
+        name = info.get("name") or info["id"]
+        if "is" in c:
+            txt = f"{name} ist {'an' if c['is'] == 'on' else 'aus'}"
+            return (None if not info.get("online") or info.get("on") is None else bool(info["on"]) == (c["is"] == "on")), txt
+        p = info.get("power")
+        txt = f"{name} Leistung {'unter' if c['op'] == 'below' else 'über'} {c['value']:g} W"
+        return (None if p is None or not info.get("online") else (p < c["value"] if c["op"] == "below" else p >= c["value"])), txt
     if t == "at":
         days = c.get("days") or []
         since = now.hour * 60 + now.minute - _minutes(c["time"])
@@ -514,6 +689,7 @@ class RuleEngine:
         info: dict[str, dict] = {}                       # regel -> Auswertung
         wants: dict[str, tuple[str, str]] = {}           # geraet -> (regel-id, Begruendung): soll jetzt eingeschaltet werden
         pure_off_acts: list[tuple] = []
+        off_active: set[str] = set()                     # Geraete, fuer die gerade eine reine Ausschalt-Regel zutrifft
         notes: list[tuple] = []                          # Ereignisse ohne Schalten (fuers Logbuch)
         rule_ids = {r["id"] for r in rules}
         rule_by_id = {r["id"]: r for r in rules}
@@ -561,6 +737,8 @@ class RuleEngine:
             info[r["id"]] = {"base_on": base_on, "off_hit": off_hit, "budget_done": budget_done, "has_off": bool(off_res) or has_on_at}       # Ausloeser ("um HH:MM") schaltet nicht von selbst wieder aus
             if pure_off:                                        # schaltet nie ein; schaltet jedes laufende Geraet aus, wenn eine Ausschalt-Bedingung zutrifft
                 dvc = by_dev.get(r["device_id"])
+                if off_hit:
+                    off_active.add(r["device_id"])              # solange sie zutrifft, schaltet keine andere Regel das Geraet ein (Ausschalten gewinnt)
                 if dvc and dvc.get("switchable", True) and dvc.get("online") and dvc.get("on") and off_hit and hold.get(dvc["id"], now) <= now:
                     pure_off_acts.append(("off", dvc, "Ausschalt-Bedingung: " + ", ".join(off_hit), r["id"]))
                 elif dvc and dvc.get("on") and off_hit and hold.get(dvc["id"], now) > now:
@@ -608,9 +786,10 @@ class RuleEngine:
 
         actions: list[tuple] = notes + list(pure_off_acts)
         # ---- 1. Einschalten
+        off_now = off_active | {a[1]["id"] for a in pure_off_acts}      # Ausschalten gewinnt: ein Geraet, das eine Regel gerade ausschaltet, wird nicht von einer anderen eingeschaltet
         for dev_id, (rid, name) in wants.items():
             d = by_dev[dev_id]
-            if d.get("online") and not d.get("on"):
+            if dev_id not in off_now and d.get("online") and not d.get("on"):
                 actions.append(("on", d, "Einschalt-Bedingung: " + name, rid))
                 if any(c["type"] == "at" for c in rule_by_id[rid]["on"]):
                     self.fired[rid + ":on"] = today                  # 'Um HH:MM' hat ausgeloest (einmal pro Tag)
