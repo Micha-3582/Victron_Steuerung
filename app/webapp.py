@@ -27,6 +27,7 @@ import shelly
 import store
 import surplus
 import tuya
+import homematic
 import planner
 import autolog
 import notify
@@ -154,6 +155,8 @@ ENDPOINT_AREA = {
     "api_vrm_info": "settings_vrm", "api_vrm_credentials": "settings_vrm", "api_vrm_restore": "settings_vrm",
     "api_tuya_info": "settings_geraete", "api_tuya_credentials": "settings_geraete",
     "api_tuya_scan": "settings_geraete", "api_tuya_add": "settings_geraete",
+    "api_homematic_info": "settings_geraete", "api_homematic_credentials": "settings_geraete",
+    "api_homematic_scan": "settings_geraete", "api_homematic_add": "settings_geraete",
     "api_shelly_icons": "settings_geraete", "api_shelly_order": "settings_geraete",
     "api_shelly_scan": "settings_geraete", "api_tasmota_scan": "settings_geraete",
     "api_shelly_add": "settings_geraete", "api_shelly_modify": "settings_geraete",
@@ -2229,6 +2232,53 @@ def api_tuya_add():
     except shelly.ShellyError as e:
         return jsonify(error=str(e)), 400
     return jsonify({"added": entry["id"]}), 201
+
+
+@app.route("/api/homematic", methods=["GET"])
+def api_homematic_info():
+    return jsonify(_masked(homematic.credentials_public(), "settings_geraete", ["host", "user"]))     # ohne Passwort
+
+
+@app.route("/api/homematic/credentials", methods=["POST"])
+def api_homematic_credentials():
+    """CCU-Zugang speichern und gleich testen (Anmeldung + Geraete zaehlen)."""
+    body = request.get_json(silent=True) or {}
+    try:
+        homematic.save_credentials(body.get("host"), body.get("user"), body.get("password") or "")
+        info = homematic.test_connection()
+    except homematic.HomematicError as e:
+        return jsonify(error=str(e)), 400
+    except Exception as e:                               # noqa: BLE001
+        log.warning("Homematic-Test fehlgeschlagen: %s", e)
+        return jsonify(error=f"Test fehlgeschlagen: {e}"), 500
+    return jsonify(ok=True, **info)
+
+
+@app.route("/api/homematic/scan", methods=["POST"])
+def api_homematic_scan():
+    """Schaltbare Homematic-/HomematicIP-Kanaele (Schalter, Dimmer) der CCU suchen."""
+    try:
+        return jsonify(shelly.homematic_scan())
+    except shelly.ShellyError as e:
+        return jsonify(error=str(e)), 400
+    except Exception as e:                               # noqa: BLE001
+        log.warning("Homematic-Suche fehlgeschlagen: %s", e)
+        return jsonify(error=f"Suche fehlgeschlagen: {e}"), 500
+
+
+@app.route("/api/homematic/add", methods=["POST"])
+def api_homematic_add():
+    body = request.get_json(silent=True) or {}
+    addrs = body.get("addresses")
+    if addrs is None and body.get("address"):
+        addrs = [body.get("address")]
+    if not isinstance(addrs, list) or not addrs or not all(isinstance(a, str) for a in addrs):
+        return jsonify(error="Kein Kanal angegeben"), 400
+    try:
+        added = shelly.add_homematic(addrs)
+    except shelly.ShellyError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify({"added": len(added)}), 201
 
 
 @app.route("/api/shelly/icons", methods=["GET"])

@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
+import homematic
 import tasmota
 import tuya
 
@@ -229,6 +230,35 @@ def _add_tasmota(ip: str, password: str = "") -> list[dict]:
     return added
 
 
+# ---------------------------------------------------------------- Homematic / HomematicIP (ueber die OpenCCU)
+def homematic_scan() -> list[dict]:
+    """Schaltbare Kanaele (Schalter + Dimmer) der CCU. Bereits angelegte sind mit known=True markiert."""
+    known = {d["id"] for d in load_devices() if d.get("kind") == "homematic"}
+    try:
+        return homematic.discover(known)
+    except homematic.HomematicError as e:
+        raise ShellyError(str(e))
+
+
+def add_homematic(addresses: list[str]) -> list[dict]:
+    """Legt die gewaehlten CCU-Kanaele an (schon vorhandene bleiben unveraendert)."""
+    try:
+        entries = homematic.build_entries(addresses)
+    except homematic.HomematicError as e:
+        raise ShellyError(str(e))
+    items = load_devices()
+    have = {d["id"] for d in items}
+    added = []
+    for entry in entries:
+        if entry["id"] in have:
+            continue
+        entry.update({"show": False, "auto": False, "power_w": 0, "min_on_min": 5, "min_off_min": 5})
+        items.append(entry)
+        added.append(entry)
+    _save(items)
+    return added
+
+
 # ---------------------------------------------------------------- Tuya (Gosund & Co.)
 def tuya_scan(networks: list[str] | None = None) -> list[dict]:
     """Tuya-Geraete (Cloud-Schluessel + LAN-Suche). Aktualisiert dabei die IPs bekannter Geraete."""
@@ -354,6 +384,8 @@ def status(d: dict) -> dict:
         return tuya.status(d)
     if d.get("kind") == "tasmota":
         return tasmota.status(d)
+    if d.get("kind") == "homematic":
+        return homematic.status(d)
     try:
         if d["gen"] >= 2:
             st = _get(d["ip"], f"/rpc/Switch.GetStatus?id={d['channel']}", CALL_TIMEOUT)
@@ -371,8 +403,8 @@ def status(d: dict) -> dict:
 
 
 def set_state(dev_id: str, on: bool, timer_s: int | None = None) -> dict:
-    """Schaltet ein Geraet. `timer_s` (nur beim Einschalten, nur Shelly): eingebauter Rueckschalt-Timer des
-    Shelly in Sekunden - nach Ablauf schaltet das Geraet von selbst wieder aus (0 = laufenden Timer aufheben)."""
+    """Schaltet ein Geraet. `timer_s` (nur beim Einschalten; Shelly, Tasmota, Homematic): eingebauter Rueckschalt-Timer des
+    Geraets in Sekunden - nach Ablauf schaltet das Geraet von selbst wieder aus (0 = laufenden Timer aufheben)."""
     d = _find(dev_id)
     if not d:
         raise ShellyError("Gerät nicht gefunden")
@@ -382,6 +414,11 @@ def set_state(dev_id: str, on: bool, timer_s: int | None = None) -> dict:
         try:
             return tuya.set_state(d, on)
         except tuya.TuyaError as e:
+            raise ShellyError(str(e))
+    if d.get("kind") == "homematic":
+        try:
+            return homematic.set_state(d, on, timer_s)
+        except homematic.HomematicError as e:
             raise ShellyError(str(e))
     if d.get("kind") == "tasmota":
         try:

@@ -584,8 +584,8 @@
 </div>
 
 <div class="card" id="shelly-admin">
-  <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Geräte (Shelly, Tasmota &amp; Tuya)</h2>
-  <div class="muted" style="margin-bottom:12px">Shelly-, Tasmota- und Tuya-/Gosund-Geräte im Heimnetz suchen, benennen und mit einem Symbol versehen.
+  <h2><svg class="h2i" style="color:var(--green)" viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>Geräte (Shelly, Tasmota, Tuya &amp; Homematic)</h2>
+  <div class="muted" style="margin-bottom:12px">Shelly-, Tasmota-, Tuya-/Gosund- und Homematic-Geräte (über die OpenCCU) suchen, benennen und mit einem Symbol versehen.
     Was ein Gerät automatisch tun soll (zum Beispiel bei günstigem Strom oder PV-Überschuss einschalten),
     legst du auf der Seite <a href="/automation" style="color:var(--accent);font-weight:600">Automatik</a> fest.</div>
   <div id="shelly-devs" style="display:flex;flex-direction:column;gap:10px"></div>
@@ -621,6 +621,24 @@
       </div>
     </details>
     <div style="margin-top:10px"><button id="tuya-scan" class="ghost">Tuya-Geräte suchen</button></div>
+  </div>
+  <div style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px">
+    <b>Homematic / HomematicIP (OpenCCU)</b>
+    <div class="muted" style="margin:4px 0 10px">Schaltbare Geräte (Steckdosen, Lichter, Dimmer) werden <b>lokal über die CCU</b> gefunden und
+      geschaltet – ohne Cloud. Messende Steckdosen liefern zusätzlich ihre Leistung.</div>
+    <details id="hm-setup">
+      <summary>CCU-Zugang einrichten</summary>
+      <div class="muted" style="margin:8px 0">Trage die IP deiner CCU (z. B. 192.168.2.22) und einen Benutzer samt Passwort ein, mit dem du dich
+        auch an der CCU-Weboberfläche anmeldest. Der Benutzer braucht Schreibrechte (Standard: „Admin“). Das Passwort wird nur auf dem Server
+        gespeichert und nie wieder angezeigt.</div>
+      <div class="grid2">
+        <div><label>CCU-Adresse <span class="qhelp" role="button" tabindex="0" data-help="IP-Adresse der OpenCCU im Heimnetz, zum Beispiel 192.168.2.22. Bei einer CCU mit https-Weiterleitung geht auch https://192.168.2.22.">?</span></label><input id="hm-host" placeholder="z.B. 192.168.2.22" autocomplete="off"></div>
+        <div><label>Benutzer <span class="qhelp" role="button" tabindex="0" data-help="Benutzername deiner CCU-Weboberfläche (Einstellungen → Systemsteuerung → Benutzerverwaltung). Falls die CCU ohne Anmeldung läuft, Benutzer „Admin“ mit leerem Passwort versuchen.">?</span></label><input id="hm-user" placeholder="Admin" autocomplete="off"></div>
+        <div><label>Passwort <span class="qhelp" role="button" tabindex="0" data-help="Passwort dieses CCU-Benutzers. Leer lassen, wenn es schon gespeichert ist und unverändert bleiben soll.">?</span></label><input id="hm-pass" type="password" autocomplete="new-password"></div>
+        <div style="display:flex;align-items:flex-end"><button id="hm-save" class="ghost">Zugang speichern &amp; testen</button></div>
+      </div>
+    </details>
+    <div style="margin-top:10px"><button id="hm-scan" class="ghost">Homematic-Geräte suchen</button></div>
   </div>
   <div class="muted" id="shelly-msg" style="margin-top:8px"></div>
   <div id="shelly-found" style="display:flex;flex-direction:column;gap:2px;margin-top:8px"></div>
@@ -1420,6 +1438,50 @@ async function tuyaAdd(devId, ip) {
   foundAdded(devId); loadShellyAdmin();
 }
 loadTuyaInfo();
+
+/* --- Homematic / HomematicIP (OpenCCU) --- */
+async function loadHomematicInfo() {
+  let h; try { h = await (await fetch('/api/homematic')).json(); } catch (e) { return; }
+  const hostEl = document.getElementById('hm-host'), userEl = document.getElementById('hm-user');
+  hostEl.value = h.host || ''; userEl.value = h.user || '';
+  const hidden = (h.host_set && !h.host) ? '•••• hinterlegt (nur bei Schreibrecht sichtbar)' : '';
+  hostEl.placeholder = hidden || 'z.B. 192.168.2.22'; userEl.placeholder = hidden ? '••••' : 'Admin';
+  document.getElementById('hm-pass').placeholder = h.password_set ? '(gespeichert – leer lassen = unverändert)' : '';
+  document.getElementById('hm-setup').open = !h.configured;
+}
+document.getElementById('hm-save').addEventListener('click', async e => {
+  const b = e.target; b.disabled = true; shellyMsg('Speichere und teste die Verbindung zur CCU …');
+  try {
+    const r = await shellyApi('/api/homematic/credentials', 'POST', { host: document.getElementById('hm-host').value,
+      user: document.getElementById('hm-user').value, password: document.getElementById('hm-pass').value });
+    document.getElementById('hm-pass').value = '';
+    shellyMsg(`Verbindung zur CCU ok ✓ – ${r.devices} Gerät(e) gefunden. Jetzt „Homematic-Geräte suchen“.`);
+    savedToast(); loadHomematicInfo();
+  } catch (err) { shellyMsg(err.message, true); }
+  b.disabled = false;
+});
+document.getElementById('hm-scan').addEventListener('click', async e => {
+  const b = e.target; b.disabled = true; shellyMsg('Homematic-Suche läuft … (bei vielen Geräten einige Sekunden)');
+  try {
+    const found = await shellyApi('/api/homematic/scan', 'POST');
+    const fresh = found.filter(f => !f.known);
+    shellyMsg(found.length ? `${found.length} schaltbare Kanäle gefunden, ${fresh.length} noch nicht angelegt.` : 'Keine schaltbaren Homematic-Geräte gefunden.');
+    const row = f => `<div data-key="${escH(f.address)}" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="flex:1;min-width:150px"><b>${escH(f.name)}</b><div class="muted">${escH(f.model)}${f.room ? ' · ' + escH(f.room) : ''} · ${escH(f.address)}${f.datapoint === 'LEVEL' ? ' · Dimmer' : ''}${f.power_addr ? ' · misst Leistung' : ''}</div></div>
+      <button onclick="hmAdd(['${escH(f.address)}'])">Hinzufügen</button></div>`;
+    const all = fresh.length > 1 ? `<div data-all="1" style="margin-bottom:6px"><button class="ghost" onclick='hmAdd(${JSON.stringify(fresh.map(f => f.address)).replace(/'/g, "&#39;")})'>Alle ${fresh.length} hinzufügen</button></div>` : '';
+    document.getElementById('shelly-found').innerHTML = all + fresh.map(row).join('');
+  } catch (err) { shellyMsg(err.message, true); }
+  b.disabled = false;
+});
+async function hmAdd(addresses) {
+  try { await shellyApi('/api/homematic/add', 'POST', { addresses }); }
+  catch (e) { shellyMsg(e.message, true); return; }
+  addresses.forEach(a => foundAdded(a));
+  document.querySelectorAll('#shelly-found [data-all]').forEach(r => r.remove());
+  loadShellyAdmin();
+}
+loadHomematicInfo();
 
 /* --- VRM-Zugang (Solar-Prognose) --- */
 function vrmMsg(t, err) { const m = document.getElementById('vrm-msg'); m.textContent = t; m.style.color = err ? '#e5544a' : ''; }
