@@ -1929,6 +1929,8 @@ def api_automation_save():
             if not isinstance(items, list) or not all(isinstance(x, dict) for x in items):
                 raise rules.RuleError("Regeln: Liste erwartet")
             norm_items = [rules.normalize_rule(x) for x in items]         # nur pruefen
+            if any(not str(x.get("name") or "").strip() for x in items):
+                raise rules.RuleError("Jede Regel braucht einen Namen")
         dev_updates = []
         for x in body.get("devices") or []:
             if not isinstance(x, dict) or not x.get("id"):

@@ -91,7 +91,7 @@ let R = [], CFG = { enabled: false, dry: true, settings: {} };
 let dirty = false, newId = 0;
 const clone = o => JSON.parse(JSON.stringify(o));
 const dev = id => S.devs.find(d => d.id === id);
-function resetDraft() { R = clone(S.A.rules || []); CFG = { enabled: !!S.A.enabled, dry: !!S.A.dry_run, settings: { ...S.A.settings } }; setDirty(false); }
+function resetDraft() { R = clone(S.A.rules || []); R.forEach(r => { if (!(r.name || '').trim()) r.name = 'Regel: ' + ((S.devs.find(d => d.id === r.device_id) || {}).name || 'Gerät'); }); CFG = { enabled: !!S.A.enabled, dry: !!S.A.dry_run, settings: { ...S.A.settings } }; setDirty(false); }
 function setDirty(v) {
   dirty = v; $('savebar').style.display = v ? 'flex' : 'none'; document.body.style.paddingBottom = v ? '110px' : '';
   if (!v) $('savebar-msg').textContent = '● Ungespeicherte Änderungen – die Steuerung nutzt noch die bisherigen Regeln';
@@ -105,6 +105,8 @@ async function saveAll() {
     setTimeout(() => { $('savebar-msg').style.color = ''; $('savebar-msg').textContent = '● Ungespeicherte Änderungen – die Steuerung nutzt noch die bisherigen Regeln'; }, 4000);
     return;
   }
+  const unnamed = R.find(r => !(r.name || '').trim());
+  if (unnamed) { EDIT = unnamed.id; renderRules(); const n = document.querySelector('.r-name'); if (n) n.focus(); $('savebar-msg').textContent = '⚠ Jede Regel braucht einen Namen.'; $('savebar-msg').style.color = '#e5544a'; setTimeout(() => { $('savebar-msg').style.color = ''; }, 6000); return; }
   const btn = $('btn-save'); btn.disabled = true;
   const cfg = { rules_enabled: CFG.enabled, rules_dry_run: CFG.dry };
   for (const [k, v] of Object.entries(CFG.settings)) cfg['rules_' + k] = v;
@@ -256,26 +258,29 @@ function actAdd(branch, id) {
 }
 async function ruleDelete(id) {
   if (!await uiConfirm('Regel löschen?', 'Die Regel wird entfernt, sobald du „Speichern“ drückst. Das Gerät bleibt in der Liste.', 'Löschen')) return;
-  R = R.filter(r => r.id !== id); touch(); renderRules();
+  R = R.filter(r => r.id !== id); if (EDIT === id) EDIT = null; touch(); renderRules();
 }
-let WIZ = null;                                   // neue Regel in Arbeit: {dev} - erst Geraet, dann erste Bedingung
-function wizStart() { WIZ = { dev: '' }; renderWizard(); $('rule-wizard').scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+let WIZ = null;                                   // neue Regel in Arbeit: {name, dev} - erst Name, dann Geraet, dann erste Bedingung
+function wizStart() { WIZ = { name: '', dev: '' }; renderWizard(); $('rule-wizard').scrollIntoView({ block: 'center', behavior: 'smooth' }); const n = $('wiz-name'); if (n) n.focus(); }
 function wizCancel() { WIZ = null; renderWizard(); }
 function wizDev(sel) { WIZ.dev = sel.value; renderWizard(); }
 function wizType(sel) {
   if (!sel.value) return;
-  R.push({ id: 'new-' + (++newId), name: '', device_id: WIZ.dev, enabled: true, when: { mode: 'all', conds: [condDefault(sel.value)] },
-           then: [{ device_id: WIZ.dev, state: 'on' }], else: [{ device_id: WIZ.dev, state: 'off' }] });
-  WIZ = null; touch(); renderRules(); renderWizard();
-  const boxes = document.querySelectorAll('#rules-list [data-rule]'); if (boxes.length) boxes[boxes.length - 1].scrollIntoView({ block: 'center', behavior: 'smooth' });      // neue Regel nicht hinter der Speichern-Leiste
+  const name = ($('wiz-name').value || '').trim();
+  if (!name) { sel.value = ''; $('wiz-name').style.borderColor = '#e5544a'; $('wiz-name').focus(); savedToast('Bitte zuerst einen Namen eingeben'); return; }
+  const r = { id: 'new-' + (++newId), name, device_id: WIZ.dev, enabled: true, when: { mode: 'all', conds: [condDefault(sel.value)] },
+              then: [{ device_id: WIZ.dev, state: 'on' }], else: [{ device_id: WIZ.dev, state: 'off' }] };
+  R.push(r); WIZ = null; EDIT = r.id; touch(); renderRules(); renderWizard();
+  window.scrollTo({ top: $('rules-list').getBoundingClientRect().top + window.scrollY - 80, behavior: 'smooth' });
 }
 function renderWizard() {
   const w = $('rule-wizard'), fab = $('fab-add');
-  fab.style.display = WIZ ? 'none' : 'flex';
+  fab.style.display = (WIZ || EDIT) ? 'none' : 'flex';
   if (!WIZ) { w.innerHTML = ''; return; }
   w.innerHTML = `<div style="border:1px dashed var(--border);border-radius:10px;padding:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-    <select style="width:auto;min-width:200px;font-weight:600" onchange="wizDev(this)"><option value="" disabled hidden ${WIZ.dev ? '' : 'selected'}>1. Welches Gerät? …</option>${switchable().map(d => `<option value="${escH(d.id)}" ${d.id === WIZ.dev ? 'selected' : ''}>${escH(d.icon)} ${escH(d.name)}</option>`).join('')}</select>
-    ${WIZ.dev ? `<select style="width:auto" onchange="wizType(this)"><option value="" disabled hidden selected>2. WENN … (Bedingung wählen)</option>${optHtml(allowed(FIXED, ''), '')}</select>` : ''}
+    <input id="wiz-name" placeholder="1. Name der Regel (Pflicht), z.B. Türlicht Mathias" value="${escH(WIZ.name)}" oninput="WIZ.name = this.value; this.style.borderColor = ''" style="flex:1;min-width:220px;font-weight:600">
+    <select style="width:auto;min-width:200px;font-weight:600" onchange="wizDev(this)"><option value="" disabled hidden ${WIZ.dev ? '' : 'selected'}>2. Welches Gerät? …</option>${switchable().map(d => `<option value="${escH(d.id)}" ${d.id === WIZ.dev ? 'selected' : ''}>${escH(d.icon)} ${escH(d.name)}</option>`).join('')}</select>
+    ${WIZ.dev ? `<select style="width:auto" onchange="wizType(this)"><option value="" disabled hidden selected>3. WENN … (Bedingung wählen)</option>${optHtml(allowed(FIXED, ''), '')}</select>` : ''}
     <button class="ghost" style="padding:2px 9px;margin-left:auto" title="Abbrechen" onclick="wizCancel()">✕</button></div>`;
 }
 const norm = v => Array.isArray(v) ? v.map(norm) : (v && typeof v === 'object') ? Object.fromEntries(Object.keys(v).sort().map(k => [k, norm(v[k])])) : (typeof v === 'string' && v.trim() !== '' && !isNaN(v) ? Number(v) : v);
@@ -303,7 +308,7 @@ function ruleHtml(r) {
   const addCond = `<select style="width:auto;margin-top:8px" onchange="condAdd(this)"><option value="" disabled hidden selected>+ Bedingung hinzufügen …</option>${optHtml(allowed(FIXED, ''), '')}</select>`;
   return `<div data-rule="${id}" style="border:1px solid var(--border);border-radius:12px;padding:12px">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <input class="r-name" placeholder="Name der Regel (optional)" value="${escH(r.name)}" oninput="ruleEdited(this)" style="flex:1;min-width:160px;font-weight:600">
+      <input class="r-name" placeholder="Name der Regel (Pflicht)" value="${escH(r.name)}" oninput="ruleEdited(this)" style="flex:1;min-width:160px;font-weight:600${r.name && r.name.trim() ? '' : ';border-color:#e5544a'}">
       <label class="switch" style="margin:0" title="Regel an/aus"><input type="checkbox" class="r-en" ${r.enabled !== false ? 'checked' : ''} onchange="ruleEdited(this)"><span class="slider"></span></label>
       <button class="ghost" onclick="ruleDelete('${id}')" title="Regel löschen">✕</button>
     </div>
@@ -314,14 +319,57 @@ function ruleHtml(r) {
     <div class="r-status">${statusBlock(r)}</div>
   </div>`;
 }
+let EDIT = null;                                  // ID der Regel, die gerade im Baukasten offen ist (null = Liste)
+const devName = id => { const d = dev(id); return d ? d.name : '(Gerät fehlt)'; };
+function condSummary(c) {
+  const cmp = c.op === 'below' ? 'unter' : 'über';
+  if (c.type === 'time') return `${c.from}–${c.to} Uhr`;
+  if (c.type === 'at') return `um ${c.time} Uhr`;
+  if (c.type === 'price') return `Preis ${cmp} ${c.ct} ct`;
+  if (c.type === 'budget') return `${c.minutes} Min Laufzeit/Tag`;
+  if (c.type === 'soc') return `Akku ${cmp} ${c.pct} %`;
+  if (c.type === 'sun_tomorrow') return `Sonne morgen ${cmp} ${c.kwh} kWh`;
+  if (c.type === 'sensor') {
+    const sen = (S.sensors || []).find(x => x.id === c.sensor_id), n = sen ? sen.name : '(Sensor fehlt)';
+    return 'is' in c ? `${n} ist ${c.is ? 'TRUE' : 'FALSE'}` : `${n} ${cmp} ${c.value}${sen && sen.unit ? ' ' + sen.unit : ''}`;
+  }
+  if (c.type === 'device') return 'is' in c ? `${devName(c.device_id)} ist ${c.is === 'on' ? 'an' : 'aus'}` : `${devName(c.device_id)} Leistung ${cmp} ${c.value} W`;
+  return c.type;
+}
+const actSummary = a => `${a.state === 'on' ? 'ein' : 'aus'}: ${devName(a.device_id)}`;
+function ruleRow(r) {
+  const id = escH(r.id), conds = r.when.conds.map(condSummary).join(r.when.mode === 'any' ? ' ODER ' : ' UND ');
+  const sum = `WENN ${conds} → DANN ${(r.then || []).map(actSummary).join(', ')}` + ((r.else || []).length ? ` · SONST ${r.else.map(actSummary).join(', ')}` : '');
+  const st = statusHtml(r);
+  return `<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <label class="switch" style="margin:0" title="Regel an/aus"><input type="checkbox" ${r.enabled !== false ? 'checked' : ''} onchange="listToggle('${id}', this.checked)"><span class="slider"></span></label>
+    <div style="flex:1;min-width:200px;cursor:pointer" onclick="editOpen('${id}')"><b>${escH(r.name || '(ohne Namen)')}</b>${st ? ' <span style="margin-left:6px">' + st + '</span>' : ''}
+      <div class="muted" style="margin-top:2px">${escH(sum)}</div></div>
+    <button class="ghost" onclick="editOpen('${id}')" title="Regel bearbeiten">✎</button>
+    <button class="ghost" onclick="ruleDelete('${id}')" title="Regel löschen">✕</button></div>`;
+}
+function listToggle(id, on) { const r = R.find(x => x.id === id); if (r) { r.enabled = on; touch(); } }
+function editOpen(id) { EDIT = id; renderRules(); renderWizard(); window.scrollTo({ top: $('rules-card').offsetTop, behavior: 'smooth' }); }
+function editClose() {
+  const r = R.find(x => x.id === EDIT);
+  if (r && !(r.name || '').trim()) { const n = document.querySelector('.r-name'); if (n) { n.style.borderColor = '#e5544a'; n.focus(); } savedToast('Jede Regel braucht einen Namen'); return; }
+  EDIT = null; renderRules(); renderWizard();
+}
 function renderRules() {
   const box = $('rules-list');
   FIXED = S.A.tariff_mode === 'fixed';
-  box.innerHTML = R.length ? R.map(ruleHtml).join('') : '<div class="muted">Noch keine Regel. Tippe unten rechts auf +, um eine anzulegen.</div>';
+  if (EDIT && !R.find(x => x.id === EDIT)) EDIT = null;
+  if (EDIT) {
+    box.innerHTML = `<div><button type="button" class="ghost" onclick="editClose()">← Alle Regeln</button></div>` + ruleHtml(R.find(x => x.id === EDIT)) +
+      `<div style="margin-top:4px"><button type="button" onclick="editClose()">Fertig</button></div>`;
+  } else {
+    box.innerHTML = R.length ? R.map(ruleRow).join('') : '<div class="muted">Noch keine Regel. Tippe unten rechts auf +, um eine anzulegen.</div>';
+  }
+  renderWizard();
 }
 
 function renderMain() { $('rules_enabled').checked = CFG.enabled; $('rules_dry').checked = CFG.dry; }
-function renderAll() { renderMain(); renderSettings(); renderRules(); renderWizard(); }
+function renderAll() { renderMain(); renderSettings(); renderRules(); }
 async function loadServer() {
   const devs = await (await fetch('/api/shelly')).json();
   const A = await (await fetch('/api/rules')).json();
