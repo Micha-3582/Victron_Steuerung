@@ -1631,7 +1631,7 @@ async function loadVirtual() {
   try { list = await (await fetch('/api/virtual', { cache: 'no-store' })).json(); } catch (e) { return; }
   list = Array.isArray(list) ? list.filter(v => v.show !== false) : [];
   if (!virtualEnabled || !list.length) { card.hidden = true; return; }
-  if (document.activeElement && document.activeElement.closest && document.activeElement.closest('#virtual-grid')) return;     // nicht waehrend der Bedienung neu zeichnen
+  if (Date.now() - virtualTouched < 1200) return;                                    // gerade bedient: kurz nicht dazwischenzeichnen (der Aufruf nach dem Klick zeichnet ohnehin neu)
   card.hidden = false;
   $('virtual-grid').innerHTML = list.map(v => `<div class="systile"><div class="systile-t">${escH(v.name)}</div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-size:30px;line-height:1.1">${escH(v.icon)}</span>
@@ -1640,7 +1640,7 @@ async function loadVirtual() {
     <div class="systile-s">${v.kind === 'button' ? 'Knopf' : (v.on ? 'an' : 'aus')}${v.running ? ` · Ablauf läuft, noch <span class="vrem" data-rem="${v.running.remaining_s}">${fmtRemain(v.running.remaining_s)}</span>` : ''}</div></div>`).join('');
   virtualFetchedAt = Date.now();
 }
-let virtualFetchedAt = 0, virtualLast = 0;
+let virtualFetchedAt = 0, virtualLast = 0, virtualTouched = 0;
 function tickVirtual() {                          // Restzeit sekundengenau herunterzaehlen (der Server wird nur alle paar Sekunden gefragt)
   const els = document.querySelectorAll('#virtual-grid .vrem'); if (!els.length) return;
   const passed = Math.floor((Date.now() - virtualFetchedAt) / 1000);
@@ -1652,12 +1652,12 @@ setInterval(tickVirtual, 1000);
 const fmtRemain = s => s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min` : s >= 120 ? `${Math.floor(s / 60)} min` : `${s} s`;
 async function virtualCall(url, body, el) {
   if (DASHBOARD_LEVEL !== 'write') { showToast('Dieses Konto darf nur ansehen, nicht schalten.'); loadVirtual(); return; }
-  el.disabled = true;
+  el.disabled = true; virtualTouched = Date.now();
   try {
     const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
     if (!r.ok) showToast((await r.json().catch(() => ({}))).error || `Fehlgeschlagen (Server-Antwort ${r.status})`, true);
   } catch (e) { showToast('Server nicht erreichbar', true); }
-  loadVirtual();
+  virtualTouched = 0; loadVirtual();
 }
 const virtualPress = (id, el) => virtualCall('/api/virtual/' + encodeURIComponent(id) + '/press', {}, el).then(() => showToast('Gedrückt ✓'));
 const virtualSet = (id, on, el) => virtualCall('/api/virtual/' + encodeURIComponent(id) + '/set', { on }, el);

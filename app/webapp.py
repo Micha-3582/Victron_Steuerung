@@ -2077,6 +2077,7 @@ def api_automation_save():
     try:
         if items is not None:
             rules.replace_all(items)
+            ctrl._rules_wake.set()                                       # neue/geaenderte Regeln gleich auswerten (Ausgangszustand erfassen)
         for dev_id, auto, fields in dev_updates:
             shelly.update(dev_id, auto=auto, **fields)
         if order is not None:
