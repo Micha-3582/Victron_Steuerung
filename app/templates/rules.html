@@ -112,7 +112,7 @@ async function saveAll() {
   const btn = $('btn-save'); btn.disabled = true;
   const cfg = { rules_enabled: CFG.enabled, rules_dry_run: CFG.dry };
   for (const [k, v] of Object.entries(CFG.settings)) cfg['rules_' + k] = v;
-  const body = { config: cfg, rules: R.map(r => ({ id: String(r.id).startsWith('new-') ? undefined : r.id, name: r.name || '', enabled: r.enabled !== false, mode: r.mode || 'state', when: r.when, then: r.then, else: r.else })) };
+  const body = { config: cfg, rules: R.map(r => ({ id: String(r.id).startsWith('new-') ? undefined : r.id, name: r.name || '', enabled: r.enabled !== false, mode: r.mode || 'state', abort_on_fall: !!r.abort_on_fall, when: r.when, then: r.then, else: r.else })) };
   try { await api('/api/automation', 'POST', body); savedToast('Gespeichert ✓'); await loadServer(); resetDraft(); EDIT = null; renderAll(); }
   catch (e) { $('savebar-msg').textContent = '⚠ ' + e.message; $('savebar-msg').style.color = '#e5544a'; setTimeout(() => { $('savebar-msg').style.color = ''; }, 8000); }
   btn.disabled = false;
@@ -271,7 +271,7 @@ function collectRule(box) {
   const conds = [...box.querySelectorAll('.cond')].map(collectCond), then = acts('then'), other = acts('else');
   let kind = box.querySelector('.r-kind').value;
   if (kind !== 'flow' && (then.concat(other).some(a => a.type && a.type !== 'switch') || conds.some(c => c.type === 'virtual' && c.is === 'pressed'))) kind = 'flow';       // Warten/Nachricht/Knopf gehen nur im Ablauf
-  return { name: box.querySelector('.r-name').value, enabled: box.querySelector('.r-en').checked, mode: kind, when: { mode: mode ? mode.value : 'all', conds }, then, else: other };
+  return { name: box.querySelector('.r-name').value, enabled: box.querySelector('.r-en').checked, mode: kind, abort_on_fall: !!(box.querySelector('.r-abort') || {}).checked, when: { mode: mode ? mode.value : 'all', conds }, then, else: other };
 }
 const ruleBox = el => el.closest('[data-rule]');
 function syncRule(box) {                          // Entwurf der Regel aus den sichtbaren Feldern neu aufbauen
@@ -303,12 +303,14 @@ function actMove(btn, dir) {
   if (j < 0 || j >= r[b].length) return;
   [r[b][i], r[b][j]] = [r[b][j], r[b][i]]; touch(); renderRules();
 }
+// Standard fuer neue Ablaeufe: bei Wegfall der Bedingung sofort beenden - ausser bei Impuls-Ausloesern (Knopf, 'Um HH:MM'), die gleich wieder wegfallen
+const flowAbortDefault = r => !r.when.conds.some(c => (c.type === 'virtual' && c.is === 'pressed') || c.type === 'at');
 function kindChanged(sel) {
   const box = ruleBox(sel), r = R.find(x => x.id === box.dataset.rule), c = collectRule(box);
   if (sel.value === 'state' && (c.then.concat(c.else).some(a => a.type && a.type !== 'switch') || c.when.conds.some(x => x.type === 'virtual' && x.is === 'pressed'))) {
     sel.value = 'flow'; savedToast('Erst Warten, Nachricht, Sollwert, eigenen Schalter und „wird gedrückt“ entfernen'); return;
   }
-  Object.assign(r, c, { mode: sel.value }); touch(); renderRules();
+  const wasFlow = r.mode === 'flow'; Object.assign(r, c, { mode: sel.value }); if (sel.value === 'flow' && !wasFlow) r.abort_on_fall = flowAbortDefault(r); touch(); renderRules();
 }
 function actDel(btn) { const box = ruleBox(btn); btn.closest('.act').remove(); syncRule(box); touch(); renderRules(); }
 function condAdd(sel) {
@@ -324,7 +326,7 @@ function actAddSel(sel, branch) {
     virtual: () => ({ type: 'virtual', id: ((S.virtual || [])[0] || {}).id || '', state: 'on' }),
   };
   r[branch].push(mk[t]());
-  if (t !== 'switch' && r.mode !== 'flow') { r.mode = 'flow'; savedToast('Regel-Art auf „Ablauf“ gestellt'); }
+  if (t !== 'switch' && r.mode !== 'flow') { r.mode = 'flow'; r.abort_on_fall = flowAbortDefault(r); savedToast('Regel-Art auf „Ablauf“ gestellt'); }
   touch(); renderRules();
 }
 async function ruleDelete(id) {
@@ -351,7 +353,7 @@ function renderWizard() {
     <button class="ghost" style="padding:2px 9px" title="Abbrechen" onclick="wizCancel()">✕</button></div>`;
 }
 const norm = v => Array.isArray(v) ? v.map(norm) : (v && typeof v === 'object') ? Object.fromEntries(Object.keys(v).sort().map(k => [k, norm(v[k])])) : (typeof v === 'string' && v.trim() !== '' && !isNaN(v) ? Number(v) : v);
-const sig = r => JSON.stringify(norm({ enabled: r.enabled !== false, mode: r.mode || 'state', when: r.when, then: r.then, else: r.else }));
+const sig = r => JSON.stringify(norm({ enabled: r.enabled !== false, mode: r.mode || 'state', abort_on_fall: !!r.abort_on_fall, when: r.when, then: r.then, else: r.else }));
 function statusHtml(r) {                          // Status gibt es nur fuer die gespeicherte, unveraenderte Regel - waehrend des Bearbeitens steht dort nichts
   if (String(r.id).startsWith('new-')) return '';
   const saved = (S.A.rules || []).find(x => x.id === r.id);
@@ -384,9 +386,10 @@ function ruleHtml(r) {
     </div>
     <div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="muted">Art der Regel:</span>
       <select class="r-kind" style="width:auto" onchange="kindChanged(this)">${optHtml([['state', 'Zustand halten – das Gerät folgt der Bedingung'], ['flow', 'Ablauf – einmal bei Auslöser, mit Warten, Nachricht, Sollwert']], flow ? 'flow' : 'state')}</select></div>
+    ${flow ? `<div style="margin-top:8px"><label class="chk" title="Läuft der Ablauf noch (z. B. ein Timer) und die Bedingung fällt weg – etwa der Schalter wird wieder ausgeschaltet –, wird er sofort beendet. Mit SONST-Schritten passiert das immer."><input type="checkbox" class="r-abort" ${r.abort_on_fall ? 'checked' : ''} onchange="ruleEdited(this)"> Laufenden Ablauf sofort beenden, wenn die Bedingung wegfällt (z. B. Schalter wieder aus)</label></div>` : ''}
     ${blk('#4c97ff', ['WENN', modeSel], conds.map(c => condRow(c, onMode)).join('') + addCond)}
     ${blk('#35c07a', ['DANN', flow ? '<span class="muted">Ablauf, wenn die Bedingung eintritt – Schritte nacheinander</span>' : ''], then.map(a => actRow(a, 'then', flow)).join('') + addAct('then', '+ Aktion hinzufügen …'))}
-    ${other.length ? blk('#f0a030', ['SONST', '<span class="muted">' + (flow ? 'Ablauf, wenn die Bedingung wieder wegfällt' : 'wenn die Bedingung nicht zutrifft') + '</span>'], other.map(a => actRow(a, 'else', flow)).join('') + addAct('else', '+ Aktion hinzufügen …'))
+    ${other.length ? blk('#f0a030', ['SONST', '<span class="muted">' + (flow ? 'Ablauf, wenn die Bedingung wieder wegfällt – auch bei vorzeitigem Abbruch. Gut zum Aufräumen: Geräte aus, Thermostate zurück.' : 'wenn die Bedingung nicht zutrifft') + '</span>'], other.map(a => actRow(a, 'else', flow)).join('') + addAct('else', '+ Aktion hinzufügen …'))
       : addAct('else', '+ SONST hinzufügen …').replace('margin-top:8px', 'margin-top:10px')}
     <div class="r-status">${statusBlock(r)}</div>
   </div>`;

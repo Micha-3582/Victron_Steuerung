@@ -400,6 +400,7 @@ def normalize_rule(body: dict, rule_id: str | None = None) -> dict:
              "when": {"mode": mode, "conds": conds}, "then": then, "else": other}
         if flow:
             r["mode"] = "flow"
+            r["abort_on_fall"] = bool(body.get("abort_on_fall"))
         compile_rule(r)                                  # prueft die Uebersetzbarkeit (RuleError)
         return r
     on = [normalize_condition(c) for c in (body.get("on") if body.get("on") is not None else body.get("conditions") or [])]
@@ -425,7 +426,7 @@ def update_rule(rule_id: str, body: dict) -> dict | None:
     d = load()
     for i, r in enumerate(d["rules"]):
         if r["id"] == rule_id:
-            merged = {**r, **{k: v for k, v in body.items() if k in ("name", "device_id", "enabled", "on", "off", "when", "then", "else", "mode")}}
+            merged = {**r, **{k: v for k, v in body.items() if k in ("name", "device_id", "enabled", "on", "off", "when", "then", "else", "mode", "abort_on_fall")}}
             d["rules"][i] = normalize_rule(merged, rule_id)
             _save(d)
             return d["rules"][i]

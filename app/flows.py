@@ -94,10 +94,14 @@ class FlowEngine:
                 if prev is not None and res != prev:
                     branch = "then" if res else "else"
                     steps = r.get(branch) or []
-                    if steps:
+                    # Faellt die Bedingung weg (z. B. Schalter wieder aus), bricht ein noch laufender DANN-Ablauf sofort ab: immer, wenn SONST-Schritte
+                    # folgen, sonst nur mit der Option "abort_on_fall" (Impuls-Ausloeser wie Knopf oder 'Um HH:MM' sollen nichts abbrechen)
+                    if steps or (not res and r.get("abort_on_fall")):
                         for old in [x for x in self.runs if x["rule_id"] == rid]:
                             self.runs.remove(old)
-                            events.append(("cancel", r, "neu ausgelöst – der laufende Ablauf wird durch den neuen ersetzt"))
+                            events.append(("cancel", r, ("Bedingung nicht mehr erfüllt – der laufende Ablauf wird vorzeitig beendet" + (", die SONST-Schritte starten" if steps else ""))
+                                           if not res else "neu ausgelöst – der laufende Ablauf wird durch den neuen ersetzt"))
+                    if steps:
                         self.runs.append({"id": uuid.uuid4().hex[:8], "rule_id": rid, "rule": r.get("name", ""), "branch": branch,
                                           "steps": steps, "idx": 0, "due": None, "start": time.time()})
                         events.append(("start", r, ("Auslöser: " if res else "Bedingung nicht mehr erfüllt: ") + txt + f" – {'DANN' if res else 'SONST'}-Ablauf startet"))
@@ -157,6 +161,15 @@ class FlowEngine:
         if changed:
             self._save()
         return out
+
+    def remaining(self, rule_id: str, now_ts: float | None = None) -> float | None:
+        """Verbleibende Wartezeit des laufenden Ablaufs einer Regel in Sekunden (None = laeuft nicht)."""
+        now_ts = time.time() if now_ts is None else now_ts
+        for run in self.runs:
+            if run["rule_id"] == rule_id:
+                rest = max(0.0, (run.get("due") or now_ts) - now_ts)
+                return rest + sum(s["seconds"] for s in run["steps"][run["idx"]:] if s.get("type") == "wait")
+        return None
 
     def next_due(self) -> float | None:
         dues = [x["due"] for x in self.runs if x.get("due")]

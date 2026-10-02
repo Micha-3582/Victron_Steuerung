@@ -2465,7 +2465,17 @@ def api_device_families():
 
 @app.route("/api/virtual", methods=["GET"])
 def api_virtual_list():
-    return jsonify(virtual.load())
+    """Eigene Schalter/Knoepfe; 'running' = ein von diesem Schalter ausgeloester Ablauf laeuft noch (mit Restzeit)."""
+    items = virtual.load()
+    flow_rules = [r for r in rules.list_rules() if flows.is_flow(r)]
+    for v in items:
+        for r in flow_rules:
+            if any(c.get("type") == "virtual" and c.get("id") == v["id"] and c.get("is") != "pressed" for c in r["when"]["conds"]):
+                rest = flow_engine.remaining(r["id"])
+                if rest is not None:
+                    v["running"] = {"rule": r.get("name", ""), "remaining_s": int(rest)}
+                    break
+    return jsonify(items)
 
 
 @app.route("/api/virtual", methods=["POST"])
