@@ -1613,7 +1613,7 @@ async function loadSensors() {
   if (!sensorsEnabled || !list.length) { card.hidden = true; return; }
   card.hidden = false;
   $('sensors-grid').innerHTML = list.map(s => {
-    const v = s.value, ok = v !== null && v !== undefined, w = SENSOR_WORDS[s.kind] || ['Ja', 'Nein'];
+    const v = s.value, ok = v !== null && v !== undefined, w = SENSOR_WORDS[s.kind] ? (s.invert ? [SENSOR_WORDS[s.kind][1], SENSOR_WORDS[s.kind][0]] : SENSOR_WORDS[s.kind]) : ['Ja', 'Nein'];
     const big = !ok ? '<span style="font-size:22px;font-weight:700;color:var(--muted)">–</span>'
       : s.binary ? `<span style="display:inline-block;width:26px;height:26px;border-radius:50%;background:${v ? 'var(--green)' : '#e5544a'};box-shadow:0 0 10px ${v ? 'var(--green)' : '#e5544a'}66"></span>`
                  : `<span style="font-size:22px;font-weight:700;font-variant-numeric:tabular-nums">${escH(String(v).replace('.', ','))}${s.unit ? ' ' + escH(s.unit) : ''}</span>`;

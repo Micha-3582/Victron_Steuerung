@@ -1595,9 +1595,12 @@ async function hmAdd(addresses) {
 loadHomematicInfo();
 /* Sensoren */
 const SENSOR_WORDS = { contact: ['offen', 'geschlossen'], motion: ['Bewegung erkannt', 'keine Bewegung'], presence: ['jemand anwesend', 'niemand anwesend'] };
+const INV_LABEL = { contact: 'TRUE = geschlossen', motion: 'TRUE = keine Bewegung', presence: 'TRUE = niemand da' };
+const INV_ON = { contact: 'TRUE = geschlossen, FALSE = offen', motion: 'TRUE = keine Bewegung', presence: 'TRUE = niemand anwesend' };
+const INV_OFF = { contact: 'TRUE = offen, FALSE = geschlossen', motion: 'TRUE = Bewegung erkannt', presence: 'TRUE = jemand anwesend' };
 function sensorValueText(s) {
   if (s.value === null || s.value === undefined) return 'nicht lesbar';
-  if (s.binary) { const w = SENSOR_WORDS[s.kind] || ['wahr', 'falsch']; return s.value ? `TRUE – ${w[0]}` : `FALSE – ${w[1]}`; }
+  if (s.binary) { let w = SENSOR_WORDS[s.kind] || ['wahr', 'falsch']; if (s.invert && SENSOR_WORDS[s.kind]) w = [w[1], w[0]]; return s.value ? `TRUE – ${w[0]}` : `FALSE – ${w[1]}`; }
   return `${s.value}${s.unit ? ' ' + s.unit : ''}`;
 }
 async function loadSensorsAdmin() {
@@ -1607,7 +1610,7 @@ async function loadSensorsAdmin() {
   document.getElementById('hm-sensors').innerHTML = list.length ? list.map(s => `<div data-sensor="${escH(s.id)}" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--border);border-radius:10px;padding:8px 10px">
       <button class="ghost" style="font-size:22px;padding:4px 10px" title="Symbol wählen" onclick="sensorPickIcon('${escH(s.id)}')">${escH(s.icon || SENSOR_ICON[s.kind] || '📡')}</button>
       <div style="flex:1;min-width:150px"><b>${escH(s.name)}</b><div class="muted">${escH(s.model)}${s.room ? ' · ' + escH(s.room) : ''} · <b>${escH(sensorValueText(s))}</b></div></div>
-      ${s.binary ? `<label class="chk" title="Tauscht die Bedeutung von TRUE und FALSE – für Sensoren, die andersherum verschaltet sind"><input type="checkbox" ${s.invert ? 'checked' : ''} onchange="sensorInvert('${escH(s.id)}', this.checked)"> Umkehren</label>` : ''}
+      ${s.binary ? `<label class="chk" title="Legt fest, was TRUE bedeutet. Ein: ${INV_ON[s.kind] || 'TRUE und FALSE vertauscht'}. Aus: ${INV_OFF[s.kind] || 'wie vom Sensor gemeldet'}."><input type="checkbox" ${s.invert ? 'checked' : ''} onchange="sensorInvert('${escH(s.id)}', this.checked)"> ${INV_LABEL[s.kind] || 'Umkehren'}</label>` : ''}
       <label class="chk" title="Auf dem Dashboard in der Kachel „Sensoren“ zeigen"><input type="checkbox" ${s.show === false ? '' : 'checked'} onchange="sensorShow('${escH(s.id)}', this.checked)"> Dashboard</label>
       <button class="ghost" onclick="sensorRename('${escH(s.id)}', this)" data-name="${escH(s.name)}" title="Umbenennen">✎</button>
       <button class="ghost" onclick="sensorRemove('${escH(s.id)}')" title="Entfernen">✕</button>

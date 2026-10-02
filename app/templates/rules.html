@@ -184,7 +184,7 @@ function condRow(c, mode) {                       // mode: 'on' | 'off' = was DA
     const opts = list.map(x => [x.id, escH(x.name)]); if (!sen) opts.unshift([c.sensor_id, '(Sensor nicht mehr vorhanden)']);
     const pick = sel('c-sensor', c.sensor_id, opts).replace('onchange="ruleEdited(this)"', 'onchange="sensorChanged(this)"');
     if ('is' in c) {                               // Ja/Nein-Sensor: TRUE / FALSE
-      const w = BIN_WORDS[sen && sen.kind] || ['wahr', 'falsch'];
+      let w = BIN_WORDS[sen && sen.kind] || ['wahr', 'falsch']; if (sen && sen.invert && BIN_WORDS[sen.kind]) w = [w[1], w[0]];
       body = `${pick} ist ${sel('c-is', c.is ? '1' : '0', [['1', 'TRUE – ' + w[0]], ['0', 'FALSE – ' + w[1]]])}`;
     } else body = `${pick} ${cmp('c-op', c.op)} ${num('c-val', c.value, 80)} ${escH(sen ? sen.unit : '')}`;
   } else if (c.type === 'virtual') {

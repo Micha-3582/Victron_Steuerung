@@ -483,8 +483,10 @@ def build_sensors(ids: list[str]) -> list[dict]:
         f = _sensor_scan.get(i)
         if not f:
             raise HomematicError("Sensor nicht gefunden (in der CCU entfernt?)")
-        out.append({k: f[k] for k in ("id", "kind", "address", "interface", "datapoint", "unit", "binary",
-                                      "model", "room", "name")})
+        item = {k: f[k] for k in ("id", "kind", "address", "interface", "datapoint", "unit", "binary", "model", "room", "name")}
+        if f["kind"] == "contact":
+            item["invert"] = True                            # Standard fuer Fenster/Tueren: TRUE = geschlossen (gruen), FALSE = offen (rot); abwaehlbar
+        out.append(item)
     return out
 
 

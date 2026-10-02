@@ -582,6 +582,8 @@ def eval_condition(c: dict, ctx: dict, ran_min: float = 0.0, fired_today: bool =
         name = info.get("name") or info["id"]
         if "is" in c:
             words = SENSOR_WORDS.get(info.get("kind"), ("wahr", "falsch"))
+            if info.get("invert") and info.get("kind") in SENSOR_WORDS:
+                words = (words[1], words[0])                 # umgekehrter Sensor: TRUE bedeutet das Gegenteil (z. B. TRUE = geschlossen)
             txt = f"{name}: {words[0] if c['is'] else words[1]} ({'TRUE' if c['is'] else 'FALSE'})"
             return (None if val is None else bool(val) == c["is"]), txt
         unit = (" " + info["unit"]) if info.get("unit") else ""
