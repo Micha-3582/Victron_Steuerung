@@ -1662,6 +1662,7 @@ async function hmSensorAdd(ids) {
 loadSensorsAdmin(); setInterval(() => { if (![...document.querySelectorAll('[id^=sicons-]')].some(e => e.style.display === 'flex')) loadSensorsAdmin(); }, 15000);
 
 /* --- Eigene Schalter & Knoepfe --- */
+const VIRT_ICONS = ['🔘', '🎚️', '🔔', '▶️', '⏯️', '🔁', '⏱️', '🚨', '🔑', '🚪', '🏃', '♨️', '🔥', '💧'];      // Standard-Symbole + passende Vorschlaege
 const VIRT_KIND = { button: 'Knopf', switch: 'Schalter' };
 async function loadVirtualAdmin() {
   if (!shellyIcons.length) { try { shellyIcons = await (await fetch('/api/shelly/icons')).json(); } catch (e) { /* egal */ } }
@@ -1673,7 +1674,7 @@ async function loadVirtualAdmin() {
       <label class="chk"><input type="checkbox" ${v.show === false ? '' : 'checked'} onchange="virtPatch('${escH(v.id)}', { show: this.checked })"> Dashboard</label>
       <button class="ghost" onclick="virtRename('${escH(v.id)}', this)" data-name="${escH(v.name)}" title="Umbenennen">✎</button>
       <button class="ghost" onclick="virtRemove('${escH(v.id)}')" title="Entfernen">✕</button>
-      <div id="vicons-${escH(v.id)}" style="display:none;flex-wrap:wrap;gap:4px;width:100%">${shellyIcons.map(ic => `<button class="ghost" style="font-size:20px;padding:2px 8px" onclick="virtPatch('${escH(v.id)}', { icon: '${ic}' })">${ic}</button>`).join('')}</div></div>`).join('')
+      <div id="vicons-${escH(v.id)}" style="display:none;flex-wrap:wrap;gap:4px;width:100%">${[...new Set([...VIRT_ICONS, ...shellyIcons])].map(ic => `<button class="ghost" style="font-size:20px;padding:2px 8px" onclick="virtPatch('${escH(v.id)}', { icon: '${ic}' })">${ic}</button>`).join('')}</div></div>`).join('')
     : '<div class="muted">Noch keine eigenen Schalter oder Knöpfe.</div>';
 }
 function virtPickIcon(id) { const el = document.getElementById('vicons-' + id); el.style.display = el.style.display === 'none' ? 'flex' : 'none'; }
