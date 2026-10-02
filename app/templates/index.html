@@ -1611,7 +1611,7 @@ async function loadSensors() {
     const big = !ok ? '<span style="font-size:22px;font-weight:700;color:var(--muted)">–</span>'
       : s.binary ? `<span style="display:inline-block;width:26px;height:26px;border-radius:50%;background:${v ? 'var(--green)' : '#e5544a'};box-shadow:0 0 10px ${v ? 'var(--green)' : '#e5544a'}66"></span>`
                  : `<span style="font-size:22px;font-weight:700;font-variant-numeric:tabular-nums">${escH(String(v).replace('.', ','))}${s.unit ? ' ' + escH(s.unit) : ''}</span>`;
-    const sub = !ok ? 'kein Wert' : s.binary ? (v ? 'Ja – ' + w[0] : 'Nein – ' + w[1]) : escH(s.room || '');
+    const sub = !ok ? 'kein Wert' : s.binary ? (v ? w[0] : w[1]) : escH(s.room || '');
     const ic = escH(s.icon || SENSOR_ICON[s.kind] || '📡');
     return `<div class="systile" ${ok ? '' : 'style="opacity:.55"'}><div class="systile-t">${escH(s.name)}</div>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-size:30px;line-height:1.1">${ic}</span>${big}</div><div class="systile-s">${sub}</div></div>`;
