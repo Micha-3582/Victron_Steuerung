@@ -155,7 +155,7 @@ ENDPOINT_AREA = {
     "api_vrm_info": "settings_vrm", "api_vrm_credentials": "settings_vrm", "api_vrm_restore": "settings_vrm",
     "api_tuya_info": "settings_geraete", "api_tuya_credentials": "settings_geraete",
     "api_tuya_scan": "settings_geraete", "api_tuya_add": "settings_geraete",
-    "api_homematic_info": "settings_geraete", "api_homematic_credentials": "settings_geraete",
+    "api_homematic_info": "settings_geraete", "api_homematic_credentials": "settings_geraete", "api_homematic_push": "settings_geraete",
     "api_homematic_scan": "settings_geraete", "api_homematic_add": "settings_geraete",
     "api_homematic_sensor_scan": "settings_geraete", "api_homematic_sensor_add": "settings_geraete",
     "api_sensor_modify": "settings_geraete", "api_sensors_list": "dashboard",
@@ -473,6 +473,7 @@ class Controller:
         self.last_system_ts = 0.0
         self._surplus_dry_on: dict[str, bool] = {}   # Trockenlauf Ueberschuss-Automatik: gedachter Schaltzustand
         self._rules_dry_on: dict[str, bool] = {}     # Trockenlauf Regeln: gedachter Schaltzustand
+        self._rules_wake = threading.Event()         # Meldung der CCU (Push) weckt die Regelschleife sofort
 
     def tick(self):
         cfg = store.load_config()
@@ -1122,6 +1123,7 @@ class Controller:
         last_flush = 0.0
         while not self._stop.is_set():
             try:
+                self._rules_wake.clear()                 # Meldungen waehrend dieser Runde loesen gleich die naechste aus
                 cfg = store.load_config()
                 all_rules = rules.list_rules()
                 if rules.enabled(cfg) and (all_rules or rule_engine.owner):        # auch mit nur ausgeschalteten/geloeschten Regeln: was sie eingeschaltet haben, wird abgeschaltet
@@ -1131,6 +1133,9 @@ class Controller:
                         need.update(rules.devices_of(r))
                         need.update(c["device_id"] for c in rules.all_conditions(r) if c.get("type") == "device")
                     devs = shelly.list_with_status(ids=need)
+                    used_s = {c.get("sensor_id") for r in all_rules if r.get("enabled", True) for c in rules.all_conditions(r) if c.get("type") == "sensor"}
+                    homematic.set_watch([d["address"] for d in devs if d.get("kind") == "homematic" and d.get("address")]
+                                        + [s_["address"] for s_ in homematic.load_sensors() if s_["id"] in used_s])      # nur deren Meldungen wecken die Regeln
                     if dry:      # Trockenlauf: mit gedachtem statt echtem Zustand rechnen
                         for d in devs:
                             if d["id"] in self._rules_dry_on:
@@ -1161,7 +1166,9 @@ class Controller:
             except Exception as e:                       # noqa: BLE001
                 log.warning("Regel-Engine: %s", e)
             fast = any(c.get("type") in ("sensor", "device") for r in rules.list_rules() if r.get("enabled", True) for c in rules.all_conditions(r))
-            self._stop.wait(2 if fast else 10)           # Regeln mit Sensor/Geraet als Bedingung reagieren innerhalb weniger Sekunden
+            iv = 10 if homematic.push_active() else (2 if fast else 10)      # mit Push (Meldung der CCU) genuegt die Reserve-Runde; sonst alle 2 s abfragen
+            self._rules_wake.wait(iv)                    # Meldung der CCU weckt sofort
+            self._stop.wait(0.05)
 
     def _apply_rule(self, act, dry: bool, cfg: dict):
         action, dev, why, rule_id = act
@@ -1204,6 +1211,8 @@ class Controller:
         threading.Thread(target=self.run_energy, daemon=True).start()
         threading.Thread(target=self.run_surplus, daemon=True).start()
         threading.Thread(target=self.run_rules, daemon=True).start()
+        homematic.add_listener(self._rules_wake.set)               # Meldung der CCU -> Regeln sofort pruefen
+        homematic.push_start()
 
 
 ctrl = Controller()
@@ -2270,6 +2279,18 @@ def api_homematic_credentials():
         log.warning("Homematic-Test fehlgeschlagen: %s", e)
         return jsonify(error=f"Test fehlgeschlagen: {e}"), 500
     return jsonify(ok=True, **info)
+
+
+@app.route("/api/homematic/push", methods=["GET", "POST"])
+def api_homematic_push():
+    """Push von der CCU (schnelle Reaktion ohne staendiges Abfragen): Status lesen bzw. ein-/ausschalten."""
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        try:
+            homematic.save_push(bool(body.get("enabled")), body.get("port"))
+        except homematic.HomematicError as e:
+            return jsonify(error=str(e)), 400
+    return jsonify(homematic.push_status())
 
 
 @app.route("/api/homematic/scan", methods=["POST"])

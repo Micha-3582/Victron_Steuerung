@@ -638,6 +638,12 @@
         <div style="display:flex;align-items:flex-end"><button id="hm-save" class="ghost">Zugang speichern &amp; testen</button></div>
       </div>
     </details>
+    <div style="margin-top:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <label class="switch" style="margin:0"><input type="checkbox" id="hm-push"><span class="slider"></span></label>
+      <div style="flex:1;min-width:220px"><b>Push von der CCU</b> <span class="qhelp" role="button" tabindex="0" data-help="Die CCU meldet Änderungen (Tür geht auf, Schalter wird betätigt) von selbst an die App – dadurch reagieren Regeln mit Sensoren in unter einer Sekunde, und es wird nichts ständig abgefragt. Die CCU muss den Server unter dem Port erreichen können (wie bei ioBroker). Fällt der Push aus, fragt die App wie bisher ab.">?</span>
+        <div class="muted" id="hm-push-state">–</div></div>
+      <div style="display:flex;align-items:center;gap:6px"><label style="margin:0">Port</label><input id="hm-push-port" type="number" min="1024" max="65535" style="width:90px"></div>
+    </div>
     <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">
       <button id="hm-scan" class="ghost">Homematic-Geräte suchen</button>
       <button id="hm-sensor-scan" class="ghost">Homematic-Sensoren suchen</button></div>
@@ -1454,6 +1460,29 @@ async function loadHomematicInfo() {
   document.getElementById('hm-pass').placeholder = h.password_set ? '(gespeichert – leer lassen = unverändert)' : '';
   document.getElementById('hm-setup').open = !h.configured;
 }
+async function loadHomematicPush() {
+  let p; try { p = await (await fetch('/api/homematic/push', { cache: 'no-store' })).json(); } catch (e) { return; }
+  if (p.error) return;
+  const sw = document.getElementById('hm-push'), port = document.getElementById('hm-push-port'), st = document.getElementById('hm-push-state');
+  if (document.activeElement !== port) port.value = p.port;
+  sw.checked = !!p.enabled;
+  const ifs = Object.entries(p.interfaces || {}), bad = ifs.filter(([, v]) => !v.ok);
+  st.style.color = '';
+  if (!p.enabled) st.textContent = 'Aus – die App fragt die CCU regelmäßig ab (Regeln mit Sensoren alle 2 Sekunden).';
+  else if (p.active) st.textContent = `🟢 Aktiv – die CCU meldet Änderungen selbst (${p.events} Meldungen empfangen).`;
+  else { st.textContent = bad.length ? '⚠ ' + bad.map(([k, v]) => k + ': ' + v.error).join(' · ') : 'Verbinde …'; st.style.color = bad.length ? '#f0a030' : ''; }
+}
+async function hmPushSave() {
+  try {
+    await shellyApi('/api/homematic/push', 'POST', { enabled: document.getElementById('hm-push').checked, port: document.getElementById('hm-push-port').value });
+    savedToast(); setTimeout(loadHomematicPush, 3000);
+  } catch (err) { shellyMsg(err.message, true); }
+  loadHomematicPush();
+}
+document.getElementById('hm-push').addEventListener('change', hmPushSave);
+document.getElementById('hm-push-port').addEventListener('change', hmPushSave);
+setInterval(loadHomematicPush, 15000);
+loadHomematicPush();
 document.getElementById('hm-save').addEventListener('click', async e => {
   const b = e.target; b.disabled = true; shellyMsg('Speichere und teste die Verbindung zur CCU …');
   try {
