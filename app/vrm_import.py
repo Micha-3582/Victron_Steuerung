@@ -13,7 +13,7 @@ import store
 import vrm
 
 
-def _bucket(flows: dict, soc: float | None, fixed_price_ct: float = 0.0) -> dict:
+def _bucket(flows: dict, soc: float | None, fixed_price_ct: float = 0.0) -> dict:             # fixed_price_ct: Preis des jeweiligen Tages
     f = {k: round(float(flows.get(k, 0.0)), 4) for k in store._FLOW_KEYS}
     b = dict(f)
     b["solar"] = round(f["s_load"] + f["s_batt"] + f["s_grid"], 4)
@@ -47,8 +47,8 @@ def run(apply: bool = False, now: datetime | None = None, days: int | None = Non
     new = {k: v for k, v in flows.items() if k not in have and k < end_key}
     soc = vrm.fetch_soc_slots(c, start, end) if new else {}
     cfg = store.load_config()
-    fixed = float(cfg.get("fixed_price_ct") or 0.0) if cfg.get("tariff_mode") == "fixed" else 0.0
-    slots = {k: _bucket(v, soc.get(k), fixed) for k, v in new.items()}
+    fixed_mode = cfg.get("tariff_mode") == "fixed" and float(cfg.get("fixed_price_ct") or 0.0) > 0
+    slots = {k: _bucket(v, soc.get(k), store.fixed_price_for_day(k[:10]) if fixed_mode else 0.0) for k, v in new.items()}       # Preis je Tag (Tarifwechsel)
     days: dict[str, dict] = {}
     for k, b in slots.items():
         d = days.setdefault(k[:10], {"day": k[:10], "slots": 0, "solar": 0.0, "verbrauch": 0.0,

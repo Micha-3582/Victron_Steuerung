@@ -1324,7 +1324,13 @@ class Controller:
         threading.Thread(target=self.run_energy, daemon=True).start()
         threading.Thread(target=self.run_surplus, daemon=True).start()
         threading.Thread(target=self.run_rules, daemon=True).start()
-        threading.Thread(target=store.repair_fixed_costs_once, daemon=True).start()      # Festpreis: Kosten nachgeholter Tage nachrechnen (einmalig)
+        def _fixed_price_housekeeping():                                                    # Festpreis: erst Perioden auf den Preis ergaenzen, dann Kosten nachgeholter Tage nachrechnen
+            try:
+                store.migrate_contract_periods()
+            except Exception as e:                                                          # noqa: BLE001
+                log.warning("Tarif-Perioden: %s", e)
+            store.repair_fixed_costs_once()
+        threading.Thread(target=_fixed_price_housekeeping, daemon=True).start()
         homematic.add_listener(self._rules_wake.set)               # Meldung der CCU -> Regeln sofort pruefen
         homematic.push_start()
 
@@ -1779,6 +1785,10 @@ def api_config():
                 cfg[f] = ""
         return jsonify(cfg)
     body = request.get_json(silent=True) or {}
+    try:
+        valid_from = store.validate_valid_from(body.get("contract_valid_from"))        # optional: Tarifwechsel gilt ab (heute oder frueher)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
     cfg = store.load_config()
     allowed = ["app_display_name", "cerbo_host", "cerbo_port", "tibber_token", "dry_run", "poll_seconds",
                "energy_sample_seconds", "manual_override", "web_port",
@@ -1812,7 +1822,9 @@ def api_config():
         cfg[key] = body[key]
     store.save_config(cfg)
     try:                                    # neue Vertragskosten-Periode ab heute, falls sich etwas geaendert hat
-        store.record_contract_period_if_changed(cfg)
+        changed = store.record_contract_period_if_changed(cfg, day=valid_from)
+        if changed and valid_from and valid_from < datetime.now().date().isoformat():
+            threading.Thread(target=store.restate_fixed_costs, args=(valid_from,), daemon=True).start()       # rueckwirkender Wechsel: Kosten ab dem Datum neu rechnen
     except Exception as e:                  # noqa: BLE001
         log.warning("Vertragskosten-Periode nicht speicherbar: %s", e)
     if denied:

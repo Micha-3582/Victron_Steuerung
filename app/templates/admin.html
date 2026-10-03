@@ -213,6 +213,12 @@
   <div class="muted" style="margin-bottom:10px">Optional: die festen Posten von deiner Stromrechnung, damit Telegram-Tagesbilanz und Monatsübersicht zusätzlich
     eine geschätzte <b>Gesamtsumme inkl. Gebühren</b> zeigen, vergleichbar mit der echten Rechnung. Wirkt sich auf nichts anderes aus
     (Netzkosten-Spalten, Ersparnis und die Ladesteuerung bleiben wie bisher) – leer/0 lassen, wenn nicht gebraucht.</div>
+  <div style="margin-bottom:12px;border:1px solid var(--border);border-radius:10px;padding:10px 12px">
+    <label>Tarifwechsel: Änderungen an Preis, Gebühren und MwSt gelten ab
+      <span class="qhelp" role="button" tabindex="0" data-help="Ändert sich dein Vertrag (neuer Preis, neue Gebühren), trag hier den ersten Tag des neuen Tarifs ein und speichere. Alles davor bleibt mit den alten Werten stehen, ab diesem Tag wird mit den neuen gerechnet. Leer lassen = ab heute. Das Datum darf zurückliegen (dann werden die Kosten ab diesem Tag neu berechnet), aber nicht in der Zukunft.">?</span></label>
+    <input id="contract_valid_from" type="date" style="max-width:200px">
+    <div class="muted">Nur ausfüllen, wenn sich etwas geändert hat. Leer = die Änderung gilt ab heute.</div>
+  </div>
   <details class="help" style="margin-bottom:12px">
     <summary>Was trage ich hier ein? Zwei Vertragsarten, zwei Vorgehen</summary>
     <div class="help-body">
@@ -1008,16 +1014,26 @@ document.getElementById('btn-save')?.addEventListener('click', async () => {
     tariff_mode: document.getElementById('tariff_fixed').checked ? 'fixed' : 'tibber',
     tibber_token: document.getElementById('tibber_token').value.trim(),
     fixed_price_ct: numDE(document.getElementById('fixed_price_ct').value),
+    contract_valid_from: document.getElementById('contract_valid_from').value || null,
     pv_inverters: collectPvInverters(),
     charge_power_w: Math.round(numDE(document.getElementById('charge_current_a').value) * parseInt(document.getElementById('battery_voltage_v').value)),
     battery_install_date: document.getElementById('battery_install_date').value || null,
   };
   PARAM_KEYS.forEach(k => { const v = numDE(document.getElementById(k).value); if (!isNaN(v)) body[k] = v; });
-  await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'},
+  const resp = await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify(body)});
+  const el = document.getElementById('saved');
+  if (!resp.ok) {                                                       // z. B. ungueltiges "gilt ab"-Datum: nichts wurde gespeichert
+    const j = await resp.json().catch(() => ({}));
+    el.textContent = '⚠ ' + (j.error || ('Speichern fehlgeschlagen (' + resp.status + ')'));
+    el.style.color = '#e5544a';
+    setTimeout(() => { el.textContent = ''; el.style.color = ''; }, 9000);
+    return;
+  }
   const h1 = document.querySelector('header h1');
   if (h1 && body.app_display_name) h1.textContent = body.app_display_name;
-  const el = document.getElementById('saved'); el.textContent = 'Gespeichert ✓';
+  document.getElementById('contract_valid_from').value = '';             // gilt nur fuer dieses Speichern
+  el.textContent = 'Gespeichert ✓';
   setTimeout(() => el.textContent = '', 2500);
 });
 

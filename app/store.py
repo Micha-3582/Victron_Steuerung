@@ -12,7 +12,7 @@ import shutil
 import threading
 import uuid
 from dataclasses import asdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from logic import PersistentState
 
@@ -650,52 +650,67 @@ def import_history_slots(slots: dict) -> int:
 FIXED_COST_MARKER = os.path.join(_DIR, "fixed_cost_repair.json")
 
 
-def repair_fixed_costs() -> dict:
-    """Festpreis-Tarif: Viertelstunden mit Netzbezug, aber ohne Kosten (aus dem VRM nachgeholte Tage - dort war der Preis von
-    damals unbekannt, bei Festpreis ist er es aber) bekommen Netzbezug x festen Preis. Betrifft die heisse Datei, das Monats-Archiv
-    UND die schon aufsummierten Monatswerte (monthly_summary.json). Fasst nur Viertelstunden OHNE Kosten an - bereits berechnete
-    Kosten bleiben unveraendert, ein zweiter Lauf aendert nichts. Bei dynamischem Tarif passiert nichts."""
+def _reprice_fixed(day_from: str | None, only_zero: bool) -> dict:
+    """Kosten (Netzbezug x Festpreis des jeweiligen Tages) in heisser Datei, Monats-Archiv UND aufsummierten Monatswerten setzen.
+    only_zero: nur Viertelstunden ohne Kosten (Nachrechnen alter VRM-Tage); sonst alle ab `day_from` neu (Tarifwechsel mit
+    rueckwirkendem "gilt ab"). Bei dynamischem Tarif passiert nichts."""
     cfg = load_config()
-    price = float(cfg.get("fixed_price_ct") or 0.0)
-    if cfg.get("tariff_mode") != "fixed" or price <= 0:
+    if cfg.get("tariff_mode") != "fixed" or float(cfg.get("fixed_price_ct") or 0.0) <= 0:
         return {"skipped": True, "buckets": 0, "eur": 0.0}
+    prices: dict[str, float] = {}
 
-    def fix(buckets: dict) -> tuple[int, float]:
-        n, delta = 0, 0.0
-        for b in buckets.values():
+    def price_for(day: str) -> float:
+        if day not in prices:
+            prices[day] = fixed_price_for_day(day)
+        return prices[day]
+
+    def fix(buckets: dict) -> tuple[int, float, dict]:
+        n, delta, per_day = 0, 0.0, {}
+        for k, b in buckets.items():
+            day = k[:10]
+            if day_from and day < day_from:
+                continue
             imp = b.get("g_load", 0.0) + b.get("g_batt", 0.0)
-            if imp > 0 and not b.get("grid_cost_ct"):
-                c = round(imp * price, 4)
-                b["grid_cost_ct"] = c
-                n += 1
-                delta += c
-        return n, delta
+            if imp <= 0:
+                continue
+            old = b.get("grid_cost_ct") or 0.0
+            if only_zero and old:
+                continue
+            new = round(imp * price_for(day), 4)
+            if abs(new - old) < 1e-9:
+                continue
+            b["grid_cost_ct"] = new
+            n += 1
+            delta += new - old
+            per_day[day] = per_day.get(day, 0.0) + (new - old)
+        return n, delta, per_day
 
     total_n, total_ct = 0, 0.0
     archived_days = set(_load_monthly().get("days_archived", []))
     month_delta: dict[str, float] = {}
     with _HISTORY_LOCK:
         data = _load_history()                                                        # heisse Datei: wird beim Archivieren ohnehin mit aufsummiert
-        n, d = fix(data.get("hours", {}))
+        n, d, _ = fix(data.get("hours", {}))
         if n:
             _dump_json(HISTORY_PATH, data, indent=2, backup=True)
             total_n += n
             total_ct += d
         if os.path.isdir(HISTORY_ARCHIVE_DIR):
             for fn in sorted(os.listdir(HISTORY_ARCHIVE_DIR)):
-                if not fn.endswith(".json"):
+                if not fn.endswith(".json") or (day_from and fn[:7] < day_from[:7]):
                     continue
                 path = os.path.join(HISTORY_ARCHIVE_DIR, fn)
                 doc = _load_json_recovering(path, lambda: {"days": {}})
                 changed = False
                 for day, buckets in (doc.get("days") or {}).items():
-                    n, d = fix(buckets)
+                    n, d, per_day = fix(buckets)
                     if n:
                         changed = True
                         total_n += n
                         total_ct += d
-                        if day in archived_days:                                       # dieser Tag steckt schon in den Monatssummen
-                            month_delta[day[:7]] = month_delta.get(day[:7], 0.0) + d
+                        for dd, v in per_day.items():
+                            if dd in archived_days:                                    # dieser Tag steckt schon in den Monatssummen
+                                month_delta[dd[:7]] = month_delta.get(dd[:7], 0.0) + v
                 if changed:
                     _dump_json(path, doc, indent=None, backup=True)
         if month_delta:
@@ -705,8 +720,20 @@ def repair_fixed_costs() -> dict:
                     mdata["months"][month]["cost_ct"] = round(mdata["months"][month].get("cost_ct", 0.0) + d, 4)
             _save_monthly(mdata)
     if total_n:
-        log.info("Festpreis-Kosten nachgerechnet: %d Viertelstunden, %.2f EUR", total_n, total_ct / 100.0)
+        log.info("Festpreis-Kosten nachgerechnet: %d Viertelstunden, %+.2f EUR", total_n, total_ct / 100.0)
     return {"skipped": False, "buckets": total_n, "eur": round(total_ct / 100.0, 2)}
+
+
+def repair_fixed_costs() -> dict:
+    """Festpreis-Tarif: Viertelstunden mit Netzbezug, aber ohne Kosten (aus dem VRM nachgeholte Tage - dort war der Preis von damals
+    unbekannt, bei Festpreis ist er es aber) bekommen Netzbezug x den an dem Tag gueltigen Preis. Fasst nur Viertelstunden OHNE Kosten an -
+    ein zweiter Lauf aendert nichts. Bei dynamischem Tarif passiert nichts."""
+    return _reprice_fixed(None, True)
+
+
+def restate_fixed_costs(day_from: str) -> dict:
+    """Tarifwechsel mit rueckwirkendem "gilt ab": alle Kosten ab diesem Tag mit dem dann gueltigen Festpreis neu rechnen (Tage davor bleiben)."""
+    return _reprice_fixed(day_from, False)
 
 
 def repair_fixed_costs_once() -> dict | None:
@@ -886,7 +913,7 @@ def cost_incl_fees_eur(cfg: dict, energy_cost_eur: float, days: float) -> float:
 # ihrem Gueltigkeitsdatum aus, nicht rueckwirkend auf die ganze Historie (siehe contract_fixed_cost_eur oben).
 CONTRACT_PERIODS_PATH = os.path.join(_DIR, "contract_periods.json")
 _CONTRACT_FIELDS = ("contract_fee_month_eur", "grid_fee_day_eur", "meter_fee_day_eur",
-                     "section14a_credit_day_eur", "vat_percent")
+                     "section14a_credit_day_eur", "vat_percent", "fixed_price_ct")
 
 
 def _period_values(cfg: dict) -> dict:
@@ -910,19 +937,42 @@ def _save_contract_periods(periods: list):
     _dump_json(CONTRACT_PERIODS_PATH, {"periods": periods}, indent=2, backup=True)
 
 
+def validate_valid_from(day: str | None, today: date | None = None) -> str | None:
+    """Pruefung des optionalen "gilt ab"-Datums (Vertragswechsel). Erlaubt: heute oder frueher, aber nicht vor der letzten schon
+    gespeicherten Aenderung. Zukunft geht nicht (die Steuerung rechnet mit dem aktuell eingetragenen Preis). Rueckgabe: ISO-Datum | None."""
+    if not day:
+        return None
+    today = today or datetime.now().date()
+    try:
+        d = date.fromisoformat(str(day))
+    except ValueError:
+        raise ValueError("Datum „gilt ab“ ist ungültig")
+    if d > today:
+        raise ValueError("Das Datum „gilt ab“ darf nicht in der Zukunft liegen – trag den neuen Tarif ein, sobald er gilt (rückwirkend ist möglich)")
+    periods = _load_contract_periods()
+    if periods and periods[-1].get("from", "") not in ("2000-01-01", "") and d.isoformat() < periods[-1]["from"]:
+        raise ValueError(f"Das Datum „gilt ab“ liegt vor der letzten Tarif-Änderung ({periods[-1]['from']})")
+    return d.isoformat()
+
+
 def record_contract_period_if_changed(cfg: dict, day: str | None = None) -> bool:
     """Bei jedem Speichern der Einstellungen (webapp.py /api/config) aufrufen. Legt eine neue, ab `day`
-    (Standard: heute) gueltige Periode an, WENN sich einer der Vertragskosten-Werte oder die MwSt geaendert hat -
+    (Standard: heute) gueltige Periode an, WENN sich einer der Vertragskosten-Werte, die MwSt oder der Festpreis geaendert hat -
     vergangene Tage/Monate rechnen weiter mit der bisherigen Periode (siehe contract_period_for_day()).
     Beim allerersten Aufruf (noch keine Periode gespeichert) wird rueckwirkend ab 2000-01-01 die aktuelle
     Config uebernommen - das entspricht dem bisherigen Verhalten (aktuelle Werte gelten fuer die gesamte
-    bekannte Vergangenheit), bis der Nutzer zum ersten Mal wirklich etwas aendert. Rueckgabe: True bei Aenderung."""
+    bekannte Vergangenheit), bis der Nutzer zum ersten Mal wirklich etwas aendert. Aeltere Perioden ohne Festpreis
+    (vor Einfuehrung dieses Felds gespeichert) bekommen beim ersten Aufruf den aktuellen Preis - er galt bis dahin. Rueckgabe: True bei Aenderung."""
     day = day or datetime.now().date().isoformat()
     vals = _period_values(cfg)
     periods = _load_contract_periods()
     if not periods:
         _save_contract_periods([{"from": "2000-01-01", **vals}])
         return False
+    if any("fixed_price_ct" not in p for p in periods):
+        for p in periods:
+            p.setdefault("fixed_price_ct", vals["fixed_price_ct"])
+        _save_contract_periods(periods)
     last = periods[-1]
     if all(abs(float(last.get(k, 0.0)) - vals[k]) < 1e-9 for k in _CONTRACT_FIELDS):
         return False
@@ -932,6 +982,29 @@ def record_contract_period_if_changed(cfg: dict, day: str | None = None) -> bool
         periods.append({"from": day, **vals})
     _save_contract_periods(periods)
     return True
+
+
+def migrate_contract_periods() -> bool:
+    """Beim Start: Perioden aus der Zeit vor dem Festpreis-Feld bekommen den AKTUELLEN Preis - er galt bis jetzt. Muss laufen, BEVOR
+    jemand einen neuen Preis speichert (sonst bekaemen auch die alten Perioden den neuen Preis)."""
+    periods = _load_contract_periods()
+    if not periods or all("fixed_price_ct" in p for p in periods):
+        return False
+    price = float(load_config().get("fixed_price_ct") or 0.0)
+    for p in periods:
+        p.setdefault("fixed_price_ct", price)
+    _save_contract_periods(periods)
+    return True
+
+
+def fixed_price_for_day(day: str) -> float:
+    """Der am angegebenen Tag gueltige Festpreis (ct/kWh) - aus den Vertrags-Perioden, sonst der aktuell eingetragene."""
+    cur = float(load_config().get("fixed_price_ct") or 0.0)
+    try:
+        v = contract_period_for_day(day).get("fixed_price_ct")
+        return float(v) if v else cur
+    except (TypeError, ValueError):
+        return cur
 
 
 def contract_period_for_day(day: str) -> dict:
@@ -1020,10 +1093,15 @@ def monthly_overview(now: datetime | None = None, limit_months: int = 120) -> di
             vrm_months = None
         # Bei festem Tarif ist der Preis kein Geheimnis aus der Vergangenheit - anders als bei Tibber lassen
         # sich die Kosten dieser nachgeholten Monate ganz normal ausrechnen (Netzbezug x fester Preis).
-        fixed_price_ct = float(cfg.get("fixed_price_ct") or 0.0) if cfg.get("tariff_mode") == "fixed" else 0.0
+        fixed_mode = cfg.get("tariff_mode") == "fixed" and float(cfg.get("fixed_price_ct") or 0.0) > 0
         for key, m in (vrm_months or {}).items():
             if key < year_start_key or key >= earliest_local:
                 continue
+            fixed_price_ct = 0.0
+            if fixed_mode:                                  # Preis je Tag des Monats (Tarifwechsel mitten im Monat) gemittelt
+                ky, km = int(key[:4]), int(key[5:7])
+                ndays = calendar.monthrange(ky, km)[1]
+                fixed_price_ct = sum(fixed_price_for_day(f"{key}-{dd:02d}") for dd in range(1, ndays + 1)) / ndays
             cost_ct = m["import"] * fixed_price_ct if fixed_price_ct else 0.0
             months[key] = {"solar": m["solar"], "verbrauch": m["verbrauch"], "import": m["import"],
                            "export": m["export"], "cost_ct": cost_ct, "batt_charge": 0.0, "batt_discharge": 0.0,
