@@ -1756,7 +1756,7 @@ async function loadWolAdmin() {
       <div style="flex:1;min-width:150px"><b>${escH(w.name)}</b><div class="muted">${escH(w.mac)}${w.ip ? ' · ' + escH(w.ip) : ''}${w.up === true ? ' · 🟢 erreichbar' : w.up === false ? ' · ⚪ nicht erreichbar' : ''}${w.pin_set ? ' · 🔑 PIN geschützt' : ''}</div></div>
       <label class="chk"><input type="checkbox" ${w.show === false ? '' : 'checked'} onchange="wolPatch('${escH(w.id)}', { show: this.checked })"> Dashboard</label>
       ${window.IS_ADMIN ? `<button class="ghost" onclick="wolPin('${escH(w.id)}', ${w.pin_set ? 'true' : 'false'})" title="${w.pin_set ? 'PIN ändern oder entfernen' : 'Sicherheits-PIN (4 Ziffern) für das Dashboard festlegen'}">🔑 ${w.pin_set ? 'PIN ändern' : 'PIN'}</button>` : ''}
-      <button class="ghost" onclick="wolTest('${escH(w.id)}', ${w.pin_set ? 'true' : 'false'})" title="Jetzt ein Wake-on-LAN-Paket senden">⏻ Aufwecken</button>
+      <button class="ghost" onclick="wolTest('${escH(w.id)}', ${w.pin_set ? 'true' : 'false'})" title="Jetzt ein Wake-on-LAN-Paket senden">⏰ Aufwecken</button>
       <button class="ghost" onclick="wolRename('${escH(w.id)}', this)" data-name="${escH(w.name)}" title="Umbenennen">✎</button>
       <button class="ghost" onclick="wolRemove('${escH(w.id)}')" title="Entfernen">✕</button></div>`).join('')
     : '<div class="muted">Noch kein Rechner angelegt.</div>';

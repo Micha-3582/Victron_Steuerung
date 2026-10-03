@@ -1648,7 +1648,7 @@ async function loadVirtual() {
     <div class="systile-s">${v.kind === 'button' ? 'Knopf' : (v.on ? 'an' : 'aus')}${v.running ? ` · Ablauf läuft, noch <span class="vrem" data-rem="${v.running.remaining_s}">${fmtRemain(v.running.remaining_s)}</span>` : ''}</div></div>`).join('')
     + wols.map(w => `<div class="systile" data-tile-id="${escH(w.id)}"><div class="systile-t">${escH(w.name)}${w.pin_set ? ' 🔑' : ''}</div>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-size:30px;line-height:1.1">${escH(w.icon)}</span>
-        <button type="button" onclick="wolWake('${escH(w.id)}', this)">⏻ Aufwecken</button></div>
+        <button type="button" onclick="wolWake('${escH(w.id)}', this)">Aufwecken</button></div>
       <div class="systile-s">${w.up === true ? '🟢 erreichbar' : w.up === false ? '⚪ nicht erreichbar' : 'Wake-on-LAN'}</div></div>`).join('');
   virtualFetchedAt = Date.now();
 }
