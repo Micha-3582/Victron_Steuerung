@@ -823,7 +823,8 @@ function collectPvInverters() {
   })).filter(p => p.name && !isNaN(p.unit));
 }
 
-window.USER_PERMS = {{ user_perms | tojson }};   // Rechte je Bereich dieses Kontos - siehe Einstellungen -> System -> Weitere Benutzer
+window.USER_PERMS = {{ user_perms | tojson }};
+window.IS_ADMIN = (window.USER_PERMS || {}).user_management === 'write';       // nur Administratoren legen PINs fest oder entfernen sie   // Rechte je Bereich dieses Kontos - siehe Einstellungen -> System -> Weitere Benutzer
 const PARAM_KEYS = ['battery_usable_kwh','daily_usage_kwh','pv_reserve_kwh',
   'max_charge_soc','absolute_cheap_price','pv_tom_morning_factor',
   'morning_peak_start','morning_peak_end',
@@ -1307,14 +1308,20 @@ function uiDialog({ title, message, label, value = '', type = 'text', okText = '
     ov.innerHTML = `<div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;width:100%;max-width:400px;box-shadow:0 12px 40px rgba(0,0,0,.5)">
       <h3 style="margin:0 0 10px;font-size:17px"></h3>
       <div class="muted dlg-msg" style="margin-bottom:12px"></div>
-      ${label ? '<label></label><input class="dlg-in">' : ''}
+      ${label ? '<label></label><div style="position:relative"><input class="dlg-in"><button type="button" class="ghost dlg-eye" title="Eingabe anzeigen/verbergen" style="display:none;position:absolute;right:4px;top:50%;transform:translateY(-50%);padding:2px 9px">👁</button></div>' : ''}
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
         <button class="ghost dlg-no">Abbrechen</button><button class="dlg-ok"></button></div></div>`;
     ov.querySelector('h3').textContent = title || '';
     const msg = ov.querySelector('.dlg-msg'); if (message) msg.textContent = message; else msg.remove();
     ov.querySelector('.dlg-ok').textContent = okText;
     const inp = ov.querySelector('.dlg-in');
-    if (inp) { ov.querySelector('label').textContent = label; inp.type = type; inp.value = value; }
+    if (inp) {
+      ov.querySelector('label').textContent = label; inp.type = type; inp.value = value;
+      if (type === 'password') {                                       // Auge: Eingabe sichtbar machen
+        const eye = ov.querySelector('.dlg-eye'); eye.style.display = ''; inp.style.paddingRight = '46px';
+        eye.onclick = () => { const show = inp.type === 'password'; inp.type = show ? 'text' : 'password'; eye.textContent = show ? '🙈' : '👁'; inp.focus(); };
+      }
+    }
     const close = v => { document.removeEventListener('keydown', onKey); ov.remove(); resolve(v); };
     const ok = () => close(inp ? inp.value : true);
     const onKey = e => { if (e.key === 'Escape') close(null); else if (e.key === 'Enter') ok(); };
@@ -1383,7 +1390,7 @@ async function loadShellyAdmin() {
         <div style="flex:1;min-width:150px"><b>${escH(d.name)}</b>
           <div class="muted">${escH(d.model)} · ${escH(d.ip)} · <span class="dev-stat">${escH(shellyStatText(d))}</span></div></div>
         <div style="display:flex;gap:8px;margin-left:auto">
-        ${d.switchable === false ? '' : `<button class="ghost" onclick="shellyPin('${id}', ${d.pin_set ? 'true' : 'false'})" title="${d.pin_set ? 'PIN ändern oder entfernen' : 'Sicherheits-PIN (4 Ziffern) für das Dashboard festlegen'}">🔑${d.pin_set ? ' PIN' : ''}</button>`}
+        ${d.switchable === false || !window.IS_ADMIN ? '' : `<button class="ghost" onclick="shellyPin('${id}', ${d.pin_set ? 'true' : 'false'})" title="${d.pin_set ? 'PIN ändern oder entfernen' : 'Sicherheits-PIN (4 Ziffern) für das Dashboard festlegen'}">🔑${d.pin_set ? ' PIN' : ''}</button>`}
         <button class="ghost" onclick="shellyRename('${id}', this)" data-name="${escH(d.name)}" title="Umbenennen">✎</button>
         <button class="ghost dev-power" data-on="${d.on ? '1' : '0'}" style="${d.on ? POWER_ON_STYLE : ''}" onclick="shellyTest('${id}', this)" ${d.online && d.switchable !== false ? '' : 'disabled'} title="${d.switchable === false ? 'Nur Überwachung – nicht schaltbar' : 'Testschalten'}">${PWR_ICON}</button>
         <button class="ghost" onclick="shellyRemove('${id}')" title="Entfernen">✕</button>
@@ -1719,7 +1726,7 @@ async function loadVirtualAdmin() {
   document.getElementById('virtual-list').innerHTML = list.length ? list.map(v => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--border);border-radius:10px;padding:8px 10px">
       <button class="ghost" style="font-size:22px;padding:4px 10px" title="Symbol wählen" onclick="virtPickIcon('${escH(v.id)}')">${escH(v.icon)}</button>
       <div style="flex:1;min-width:150px"><b>${escH(v.name)}</b><div class="muted">${VIRT_KIND[v.kind]}${v.kind === 'switch' ? ' · ' + (v.on ? 'an' : 'aus') : ''}${v.pin_set ? ' · 🔑 PIN geschützt' : ''}</div></div>
-      <button class="ghost" onclick="virtPin('${escH(v.id)}', ${v.pin_set ? 'true' : 'false'})" title="${v.pin_set ? 'PIN ändern oder entfernen' : 'Sicherheits-PIN (4 Ziffern) für das Dashboard festlegen'}">🔑 ${v.pin_set ? 'PIN ändern' : 'PIN'}</button>
+      ${window.IS_ADMIN ? `<button class="ghost" onclick="virtPin('${escH(v.id)}', ${v.pin_set ? 'true' : 'false'})" title="${v.pin_set ? 'PIN ändern oder entfernen' : 'Sicherheits-PIN (4 Ziffern) für das Dashboard festlegen'}">🔑 ${v.pin_set ? 'PIN ändern' : 'PIN'}</button>` : ''}
       <label class="chk"><input type="checkbox" ${v.show === false ? '' : 'checked'} onchange="virtPatch('${escH(v.id)}', { show: this.checked })"> Dashboard</label>
       <button class="ghost" onclick="virtRename('${escH(v.id)}', this)" data-name="${escH(v.name)}" title="Umbenennen">✎</button>
       <button class="ghost" onclick="virtRemove('${escH(v.id)}')" title="Entfernen">✕</button>

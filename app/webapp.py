@@ -2545,6 +2545,8 @@ def api_virtual_modify(vid):
     else:
         body = request.get_json(silent=True) or {}
         if "pin" in body:                                                  # PIN setzen / mit leerem Wert entfernen
+            if not auth.is_full_admin(g.perms):
+                return jsonify(error="Nur ein Administrator kann PINs setzen, ändern oder entfernen."), 403
             try:
                 if not virtual.set_pin(vid, str(body.get("pin") or "")):
                     return jsonify(error="nicht gefunden"), 404
@@ -2865,6 +2867,8 @@ def api_shelly_modify(dev_id):
         body = request.get_json(silent=True) or {}
         try:
             if "pin" in body:                                              # PIN setzen / mit leerem Wert entfernen
+                if not auth.is_full_admin(g.perms):
+                    return jsonify(error="Nur ein Administrator kann PINs setzen, ändern oder entfernen."), 403
                 if not shelly.set_pin(dev_id, str(body.get("pin") or "")):
                     return jsonify(error="nicht gefunden"), 404
                 _pin_fails.pop(dev_id, None)
