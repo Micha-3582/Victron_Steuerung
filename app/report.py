@@ -313,6 +313,11 @@ def to_markdown(r: dict) -> str:
                  f"{_f(d['avg_import_ct'])} ct | {_f(d['charged_kwh'])} | {_f(d['price_min'], '{:.0f}')}/{_f(d['price_avg'], '{:.0f}')}/{_f(d['price_max'], '{:.0f}')} | "
                  f"{_f(d['vrm_forecast'])} ({_f(d['vrm_dev_pct'], '{:+.0f}')} %) | {d['ticks_ok'] if d['ticks_ok'] is not None else '–'}/{d['ticks_err'] if d['ticks_err'] is not None else '–'} | "
                  f"{d['charge_ticks'] if d['charge_ticks'] is not None else '–'} | {d['ess_writes'] if d['ess_writes'] is not None else '–'} | {_f(d['plan_diff_ct'], '{:+.0f}')} |")
+    td = [d for d in r["days"] if d.get("tick_max_s") is not None or d.get("max_gap_s")]
+    if td:
+        L += ["", "## Steuerungs-Durchläufe: Dauer und größte Lücke (je Tag)"]
+        for d in td:
+            L.append(f"- {d['date'][5:]}: Ø {_f(d.get('tick_avg_s'))} s · längster {_f(d.get('tick_max_s'))} s · größte Lücke {d.get('max_gap_s') if d.get('max_gap_s') is not None else '–'} s")
     vh = [d for d in r["days"] if len(d.get("vrm_history") or []) > 1]
     if vh:
         L += ["", "## VRM-Tagesprognose: Nachjustierungen (Uhrzeit Wert kWh)"]
