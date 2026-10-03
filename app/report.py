@@ -228,6 +228,7 @@ def _day_rows(now: datetime, days: int, stats: dict, hist_days: dict) -> list[di
             "vrm_forecast": (sl.get(day) or {}).get("vrm_forecast"), "vrm_dev_pct": (sl.get(day) or {}).get("vrm_deviation_pct"),
             "vrm_history": (sl.get(day) or {}).get("vrm_history") or [],
             "ticks_ok": o.get("ticks_ok"), "ticks_err": o.get("ticks_err"), "charge_ticks": o.get("charge_ticks"), "ess_writes": o.get("ess_writes"),
+            "max_gap_s": o.get("max_gap_s"), "tick_max_s": o.get("tick_s_max"), "tick_avg_s": round(o["tick_s_sum"] / o["tick_n"], 1) if o.get("tick_n") else None,
             "src_vrm": o.get("src_vrm"), "src_avg": o.get("src_avg"),
             "plan_diff_ct": round(ps[day]["current_net"] - ps[day]["sim_net"], 1) if day in ps else None,
         })

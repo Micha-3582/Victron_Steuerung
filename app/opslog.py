@@ -132,7 +132,7 @@ def count(key: str, n: int = 1, now: datetime | None = None) -> None:
         log_.warning("Zaehler nicht erhoeht: %s", e)
 
 
-def note_tick(ok: bool, now: datetime | None = None) -> None:
+def note_tick(ok: bool, now: datetime | None = None, dur_s: float | None = None) -> None:
     """Ein Regel-Durchlauf ist fertig (ok oder mit Fehler). Merkt sich auch die groesste Luecke zwischen zwei Durchlaeufen."""
     global _dirty, _last_tick_ts
     try:
@@ -146,6 +146,10 @@ def note_tick(ok: bool, now: datetime | None = None) -> None:
                 if 0 < gap < 86400 * 3 and gap > d.get("max_gap_s", 0):
                     d["max_gap_s"] = round(gap)
             _last_tick_ts = ts
+            if dur_s is not None:                              # Dauer des Durchlaufs (Modbus lesen, entscheiden, schreiben): Mittel + laengster
+                d["tick_n"] = d.get("tick_n", 0) + 1
+                d["tick_s_sum"] = round(d.get("tick_s_sum", 0.0) + dur_s, 2)
+                d["tick_s_max"] = round(max(d.get("tick_s_max", 0.0), dur_s), 2)
             _dirty = True
             _flush_locked()
     except Exception as e:                                   # noqa: BLE001

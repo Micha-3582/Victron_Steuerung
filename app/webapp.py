@@ -934,9 +934,10 @@ class Controller:
 
     def safe_tick(self):
         """Tick mit Fehlerabfang - für Hintergrundschleife und On-Demand-Aufrufe."""
+        t_start = time.time()
         try:
             self.tick()
-            opslog.note_tick(True)
+            opslog.note_tick(True, dur_s=time.time() - t_start)
             if self._tick_failed:
                 self._tick_failed = False
                 opslog.log("tick_ok", "Steuerung läuft wieder normal")
@@ -946,7 +947,7 @@ class Controller:
             with self.lock:
                 self.status = {"ok": False, "reason": f"Fehler: {e}"}
             log.error("Tick fehlgeschlagen: %s", e)
-            opslog.note_tick(False)
+            opslog.note_tick(False, dur_s=time.time() - t_start)
             self._tick_failed = True
             if str(e) != self._last_err_log[0] or time.time() - self._last_err_log[1] > 1800:      # nicht bei jedem Durchlauf wiederholen
                 opslog.log("tick_error", str(e))
