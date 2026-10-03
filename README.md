@@ -1,5 +1,7 @@
 # Victron Standalone Steuerung
 
+> 📖 **Bedienung und alle Einstellungen: siehe das [Handbuch](MANUAL.md).**
+
 Intelligente, webbasierte Ladesteuerung für Victron-ESS-Anlagen (MultiPlus-II / Cerbo GX)
 auf Basis dynamischer **Tibber**-Strompreise und **PV-Prognose** – komplett eigenständig,
 **ohne ioBroker, Node-RED oder Cloud**. Läuft auf einem Raspberry Pi (oder jedem
