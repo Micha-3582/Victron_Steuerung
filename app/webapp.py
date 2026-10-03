@@ -1324,6 +1324,7 @@ class Controller:
         threading.Thread(target=self.run_energy, daemon=True).start()
         threading.Thread(target=self.run_surplus, daemon=True).start()
         threading.Thread(target=self.run_rules, daemon=True).start()
+        threading.Thread(target=store.repair_fixed_costs_once, daemon=True).start()      # Festpreis: Kosten nachgeholter Tage nachrechnen (einmalig)
         homematic.add_listener(self._rules_wake.set)               # Meldung der CCU -> Regeln sofort pruefen
         homematic.push_start()
 

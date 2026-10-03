@@ -13,12 +13,13 @@ import store
 import vrm
 
 
-def _bucket(flows: dict, soc: float | None) -> dict:
+def _bucket(flows: dict, soc: float | None, fixed_price_ct: float = 0.0) -> dict:
     f = {k: round(float(flows.get(k, 0.0)), 4) for k in store._FLOW_KEYS}
     b = dict(f)
     b["solar"] = round(f["s_load"] + f["s_batt"] + f["s_grid"], 4)
     b["verbrauch"] = round(f["s_load"] + f["b_load"] + f["g_load"], 4)
-    b["grid_cost_ct"] = 0.0                      # Preis von damals ist nicht bekannt
+    # Bei dynamischem Tarif (Tibber) ist der Preis von damals nicht bekannt -> 0. Bei Festpreis ist er bekannt: Netzbezug x Preis.
+    b["grid_cost_ct"] = round((f["g_load"] + f["g_batt"]) * fixed_price_ct, 4) if fixed_price_ct > 0 else 0.0
     b["restored"] = True                         # stammt aus dem VRM (siehe store._row_from_bucket)
     if soc is not None:
         b.update(soc_min=soc, soc_max=soc, soc_sum=soc, soc_n=1)
@@ -45,7 +46,9 @@ def run(apply: bool = False, now: datetime | None = None, days: int | None = Non
     end_key = f"{end:%Y-%m-%dT%H:%M}"
     new = {k: v for k, v in flows.items() if k not in have and k < end_key}
     soc = vrm.fetch_soc_slots(c, start, end) if new else {}
-    slots = {k: _bucket(v, soc.get(k)) for k, v in new.items()}
+    cfg = store.load_config()
+    fixed = float(cfg.get("fixed_price_ct") or 0.0) if cfg.get("tariff_mode") == "fixed" else 0.0
+    slots = {k: _bucket(v, soc.get(k), fixed) for k, v in new.items()}
     days: dict[str, dict] = {}
     for k, b in slots.items():
         d = days.setdefault(k[:10], {"day": k[:10], "slots": 0, "solar": 0.0, "verbrauch": 0.0,

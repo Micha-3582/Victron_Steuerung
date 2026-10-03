@@ -647,6 +647,83 @@ def import_history_slots(slots: dict) -> int:
         return len(new)
 
 
+FIXED_COST_MARKER = os.path.join(_DIR, "fixed_cost_repair.json")
+
+
+def repair_fixed_costs() -> dict:
+    """Festpreis-Tarif: Viertelstunden mit Netzbezug, aber ohne Kosten (aus dem VRM nachgeholte Tage - dort war der Preis von
+    damals unbekannt, bei Festpreis ist er es aber) bekommen Netzbezug x festen Preis. Betrifft die heisse Datei, das Monats-Archiv
+    UND die schon aufsummierten Monatswerte (monthly_summary.json). Fasst nur Viertelstunden OHNE Kosten an - bereits berechnete
+    Kosten bleiben unveraendert, ein zweiter Lauf aendert nichts. Bei dynamischem Tarif passiert nichts."""
+    cfg = load_config()
+    price = float(cfg.get("fixed_price_ct") or 0.0)
+    if cfg.get("tariff_mode") != "fixed" or price <= 0:
+        return {"skipped": True, "buckets": 0, "eur": 0.0}
+
+    def fix(buckets: dict) -> tuple[int, float]:
+        n, delta = 0, 0.0
+        for b in buckets.values():
+            imp = b.get("g_load", 0.0) + b.get("g_batt", 0.0)
+            if imp > 0 and not b.get("grid_cost_ct"):
+                c = round(imp * price, 4)
+                b["grid_cost_ct"] = c
+                n += 1
+                delta += c
+        return n, delta
+
+    total_n, total_ct = 0, 0.0
+    archived_days = set(_load_monthly().get("days_archived", []))
+    month_delta: dict[str, float] = {}
+    with _HISTORY_LOCK:
+        data = _load_history()                                                        # heisse Datei: wird beim Archivieren ohnehin mit aufsummiert
+        n, d = fix(data.get("hours", {}))
+        if n:
+            _dump_json(HISTORY_PATH, data, indent=2, backup=True)
+            total_n += n
+            total_ct += d
+        if os.path.isdir(HISTORY_ARCHIVE_DIR):
+            for fn in sorted(os.listdir(HISTORY_ARCHIVE_DIR)):
+                if not fn.endswith(".json"):
+                    continue
+                path = os.path.join(HISTORY_ARCHIVE_DIR, fn)
+                doc = _load_json_recovering(path, lambda: {"days": {}})
+                changed = False
+                for day, buckets in (doc.get("days") or {}).items():
+                    n, d = fix(buckets)
+                    if n:
+                        changed = True
+                        total_n += n
+                        total_ct += d
+                        if day in archived_days:                                       # dieser Tag steckt schon in den Monatssummen
+                            month_delta[day[:7]] = month_delta.get(day[:7], 0.0) + d
+                if changed:
+                    _dump_json(path, doc, indent=None, backup=True)
+        if month_delta:
+            mdata = _load_monthly()
+            for month, d in month_delta.items():
+                if month in mdata.get("months", {}):
+                    mdata["months"][month]["cost_ct"] = round(mdata["months"][month].get("cost_ct", 0.0) + d, 4)
+            _save_monthly(mdata)
+    if total_n:
+        log.info("Festpreis-Kosten nachgerechnet: %d Viertelstunden, %.2f EUR", total_n, total_ct / 100.0)
+    return {"skipped": False, "buckets": total_n, "eur": round(total_ct / 100.0, 2)}
+
+
+def repair_fixed_costs_once() -> dict | None:
+    """Beim Start einmal je Festpreis (Marker-Datei): holt Kosten alter, nachgeholter Tage nach. Fehler sind unkritisch."""
+    try:
+        price = float(load_config().get("fixed_price_ct") or 0.0)
+        marker = _load_json_recovering(FIXED_COST_MARKER, lambda: {})
+        if load_config().get("tariff_mode") != "fixed" or price <= 0 or (isinstance(marker, dict) and marker.get("price_ct") == price):
+            return None
+        res = repair_fixed_costs()
+        _dump_json(FIXED_COST_MARKER, {"price_ct": price}, indent=2)
+        return res
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("Festpreis-Kosten nachrechnen: %s", e)
+        return None
+
+
 def _row_from_bucket(label: str, b: dict | None) -> dict:
     if b and (b.get("soc_n") or b.get("restored")):
         n = b.get("soc_n") or 0            # aus dem VRM nachgeholte Slots koennen ohne SOC sein

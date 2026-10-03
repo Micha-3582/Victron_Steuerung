@@ -49,3 +49,4 @@ app/flows_state.json
 app/homematic_setpoints.json
 app/zigbee.json
 app/homematic_locks.json
+app/fixed_cost_repair.json
