@@ -37,6 +37,7 @@ import price_cache
 import rules
 import flows
 import virtual
+import wol
 import report
 import updater
 import vrm
@@ -167,6 +168,7 @@ ENDPOINT_AREA = {
     "api_homematic_sensor_scan": "settings_geraete", "api_homematic_sensor_add": "settings_geraete",
     "api_sensor_modify": "settings_geraete", "api_sensors_list": "dashboard",
     "api_sensors_order": "settings_geraete", "api_virtual_order": "settings_geraete",
+    "api_wol_list": "dashboard", "api_wol_wake": "dashboard", "api_wol_add": "settings_geraete", "api_wol_modify": "settings_geraete",
     "api_lock_list": "dashboard", "api_lock_scan": "settings_geraete", "api_lock_add": "settings_geraete", "api_lock_modify": "settings_geraete", "api_virtual_list": "dashboard", "api_virtual_press": "dashboard", "api_virtual_set": "dashboard",
     "api_virtual_add": "settings_geraete", "api_virtual_modify": "settings_geraete",
     "api_setpoint_scan": "settings_geraete", "api_setpoint_add": "settings_geraete", "api_setpoint_list": "dashboard",
@@ -1249,6 +1251,18 @@ class Controller:
                         jobs.append(("setpoint" if not err else "fail", name, f"{name}: Solltemperatur {v:g} °C" if not err else f"{name}: Solltemperatur setzen fehlgeschlagen ({err})", err))
                 except homematic.HomematicError as e:
                     jobs.append(("fail", "Thermostate", f"Solltemperatur setzen fehlgeschlagen ({e})", str(e)))
+        elif t == "wol":
+            tgt = next((x for x in wol.load() if x["id"] == st["id"]), None)
+            if not tgt:
+                jobs.append(("fail", st["id"], "Rechner zum Aufwecken existiert nicht mehr", "weg"))
+            elif dry:
+                jobs.append(("wol", tgt["name"], f"{tgt['name']} würde per Wake-on-LAN aufgeweckt", None))
+            else:
+                try:
+                    wol.wake(st["id"])
+                    jobs.append(("wol", tgt["name"], f"{tgt['name']}: Wake-on-LAN-Paket gesendet", None))
+                except wol.WolError as e:
+                    jobs.append(("fail", tgt["name"], f"{tgt['name']}: {e}", str(e)))
         elif t == "lock":
             what = {"lock": "verriegelt", "unlock": "entriegelt", "open": "geöffnet"}[st["state"]]
             lname = next((k["name"] for k in homematic.load_locks() if k["id"] == st["id"]), st["id"])
@@ -2484,7 +2498,7 @@ def api_homematic_sensor_add():
     return jsonify({"added": len(added)}), 201
 
 
-FAMILIES = ("shelly", "tasmota", "tuya", "homematic", "zigbee")
+FAMILIES = ("shelly", "tasmota", "tuya", "homematic", "zigbee", "wol")
 
 
 def _families() -> dict:
@@ -2496,7 +2510,8 @@ def _families() -> dict:
     return {"shelly": "shelly" in kinds, "tasmota": "tasmota" in kinds,
             "tuya": "tuya" in kinds or bool(tuya.credentials_public().get("configured")),
             "homematic": "homematic" in kinds or bool(homematic.credentials_public().get("configured")),
-            "zigbee": "zigbee" in kinds or bool(zigbee.credentials_public().get("configured"))}
+            "zigbee": "zigbee" in kinds or bool(zigbee.credentials_public().get("configured")),
+            "wol": bool(wol.load())}
 
 
 @app.route("/api/device-families", methods=["GET", "POST"])
@@ -2534,11 +2549,63 @@ def api_virtual_add():
         return jsonify(error=str(e)), 400
 
 
+@app.route("/api/wol", methods=["GET"])
+def api_wol_list():
+    """Wake-on-LAN-Ziele (ohne PIN-Hash), mit 'up' = per Ping erreichbar (None = unbekannt/keine IP)."""
+    return jsonify([wol.public(x) for x in wol.load()])
+
+
+@app.route("/api/wol", methods=["POST"])
+def api_wol_add():
+    b = request.get_json(silent=True) or {}
+    try:
+        return jsonify(wol.public(wol.add(b.get("name"), b.get("mac"), b.get("ip") or "", b.get("broadcast") or "", b.get("port"), b.get("icon")), False)), 201
+    except wol.WolError as e:
+        return jsonify(error=str(e)), 400
+
+
+@app.route("/api/wol/<wid>", methods=["PATCH", "DELETE"])
+def api_wol_modify(wid):
+    if request.method == "DELETE":
+        ok = wol.remove(wid)
+        if ok:
+            rules.remove_device(wid)
+        return jsonify(ok=True) if ok else (jsonify(error="nicht gefunden"), 404)
+    b = request.get_json(silent=True) or {}
+    try:
+        if "pin" in b:                                                     # nur Administratoren legen PINs fest / entfernen sie
+            if not auth.is_full_admin(g.perms):
+                return jsonify(error="Nur ein Administrator kann PINs setzen, ändern oder entfernen."), 403
+            if not wol.set_pin(wid, str(b.get("pin") or "")):
+                return jsonify(error="nicht gefunden"), 404
+            _pin_fails.pop("wol:" + wid, None)
+        ok = wol.update(wid, name=b.get("name"), mac=b.get("mac"), ip=b.get("ip"), broadcast=b.get("broadcast"), port=b.get("port"),
+                        icon=b.get("icon"), show=b.get("show") if isinstance(b.get("show"), bool) else None)
+    except wol.WolError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True) if ok else (jsonify(error="nicht gefunden"), 404)
+
+
+@app.route("/api/wol/<wid>/wake", methods=["POST"])
+def api_wol_wake(wid):
+    blocked = _pin_gate("wol:" + wid, lambda _k: wol.has_pin(wid), lambda _k, pin: wol.check_pin(wid, pin))
+    if blocked:
+        return blocked
+    try:
+        sent = wol.wake(wid)
+    except wol.WolError as e:
+        return jsonify(error=str(e)), 400
+    name = next((x["name"] for x in wol.load() if x["id"] == wid), wid)
+    opslog.log("rules", f"Wake-on-LAN an {name} gesendet", dry=False)
+    return jsonify(ok=True, sent=sent)
+
+
 @app.route("/api/virtual/order", methods=["POST"])
 def api_virtual_order():
     ids = (request.get_json(silent=True) or {}).get("ids")
     if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
         return jsonify(error="ids fehlt"), 400
+    wol.reorder(ids)
     virtual.reorder(ids)
     return jsonify(ok=True)
 

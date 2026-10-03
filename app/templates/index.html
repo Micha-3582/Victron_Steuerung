@@ -148,7 +148,7 @@
   <div class="sysgrid" id="shelly-grid"></div>
 </div>
 <div class="card full" id="virtual-card" hidden style="margin-bottom:14px">
-  <h2>Eigene Schalter</h2>
+  <h2>Schalter &amp; Aktionen</h2>
   <div class="sysgrid" id="virtual-grid"></div>
 </div>
 <div class="card full" id="sensors-card" hidden style="margin-bottom:14px">
@@ -294,7 +294,7 @@ if (DASHBOARD_LEVEL === 'read') {
   });
 }
 
-let sensorsDragActive = false, virtualDragActive = false, virtualCache = [];
+let sensorsDragActive = false, virtualDragActive = false, virtualCache = [], wolCache = [];
 let virtualEnabled = true, sensorsEnabled = true, shellyEnabled = true, weatherEnabled = true, plansimEnabled = true, savingsEnabled = true;
 function applyTileVisibility(ui) {
   applyTileOrder(ui.tile_order);
@@ -1635,7 +1635,9 @@ async function loadVirtual() {
   try { list = await (await fetch('/api/virtual', { cache: 'no-store' })).json(); } catch (e) { return; }
   list = Array.isArray(list) ? list.filter(v => v.show !== false) : [];
   virtualCache = list;
-  if (!virtualEnabled || !list.length) { card.hidden = true; return; }
+  let wols = []; try { const wj = await (await fetch('/api/wol', { cache: 'no-store' })).json(); wols = Array.isArray(wj) ? wj.filter(w => w.show !== false) : []; } catch (e) { /* ohne */ }
+  wolCache = wols;
+  if (!virtualEnabled || !(list.length || wols.length)) { card.hidden = true; return; }
   if (Date.now() - virtualTouched < 1200) return;                                    // gerade bedient: kurz nicht dazwischenzeichnen (der Aufruf nach dem Klick zeichnet ohnehin neu)
   card.hidden = false;
   if (virtualDragActive) return;
@@ -1643,7 +1645,11 @@ async function loadVirtual() {
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-size:30px;line-height:1.1">${escH(v.icon)}</span>
       ${v.kind === 'button' ? `<button type="button" onclick="virtualPress('${escH(v.id)}', this)">Drücken</button>`
         : `<label class="switch"><input type="checkbox" ${v.on ? 'checked' : ''} onchange="virtualSet('${escH(v.id)}', this.checked, this)"><span class="slider"></span></label>`}</div>
-    <div class="systile-s">${v.kind === 'button' ? 'Knopf' : (v.on ? 'an' : 'aus')}${v.running ? ` · Ablauf läuft, noch <span class="vrem" data-rem="${v.running.remaining_s}">${fmtRemain(v.running.remaining_s)}</span>` : ''}</div></div>`).join('');
+    <div class="systile-s">${v.kind === 'button' ? 'Knopf' : (v.on ? 'an' : 'aus')}${v.running ? ` · Ablauf läuft, noch <span class="vrem" data-rem="${v.running.remaining_s}">${fmtRemain(v.running.remaining_s)}</span>` : ''}</div></div>`).join('')
+    + wols.map(w => `<div class="systile" data-tile-id="${escH(w.id)}"><div class="systile-t">${escH(w.name)}${w.pin_set ? ' 🔑' : ''}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-size:30px;line-height:1.1">${escH(w.icon)}</span>
+        <button type="button" onclick="wolWake('${escH(w.id)}', this)">⏻ Aufwecken</button></div>
+      <div class="systile-s">${w.up === true ? '🟢 erreichbar' : w.up === false ? '⚪ nicht erreichbar' : 'Wake-on-LAN'}</div></div>`).join('');
   virtualFetchedAt = Date.now();
 }
 let virtualFetchedAt = 0, virtualLast = 0, virtualTouched = 0;
@@ -1706,7 +1712,8 @@ async function virtualCall(url, body, el, name, needsPin) {
   virtualTouched = 0; loadVirtual();
   return false;
 }
-const virtualItem = id => (virtualCache || []).find(v => v.id === id) || {};
+const virtualItem = id => (virtualCache || []).find(v => v.id === id) || (wolCache || []).find(v => v.id === id) || {};
+const wolWake = (id, el) => virtualCall('/api/wol/' + encodeURIComponent(id) + '/wake', {}, el, virtualItem(id).name, !!virtualItem(id).pin_set).then(ok => { if (ok) showToast('Aufwecken gesendet ✓'); });
 const virtualPress = (id, el) => virtualCall('/api/virtual/' + encodeURIComponent(id) + '/press', {}, el, virtualItem(id).name, !!virtualItem(id).pin_set).then(ok => { if (ok) showToast('Gedrückt ✓'); });
 const virtualSet = (id, on, el) => virtualCall('/api/virtual/' + encodeURIComponent(id) + '/set', { on }, el, virtualItem(id).name, !!virtualItem(id).pin_set);
 /* Meldungen im eigenen Stil statt Browser-Dialog (Fehler bleiben laenger stehen) */
